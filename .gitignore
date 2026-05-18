@@ -1,0 +1,22 @@
+# Runtime outputs
+result.txt
+last_result.json
+page_debug.html
+
+# Browser session & debug artifacts
+chrome_profile/
+screenshots/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
