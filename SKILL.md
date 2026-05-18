@@ -72,7 +72,7 @@ If the script reports a Cloudflare challenge:
 - For fully automated scheduled runs, the user should first pass the challenge once manually, then use `--headless`.
 
 ### 5. Report Results
-Read `result.txt` from the output directory (default: current working directory) and present matched results. Include post date, title, matched actors, link, and magnet links when available.
+Read `result.txt` from the output directory (default: current working directory) and present matched results. Include post date, title, matched actors, link, and **magnet links** when available. Present magnet links directly in the chat response so the user can copy them immediately.
 
 ## Output Files
 - `result.txt` — Human-readable report (overwritten each run)

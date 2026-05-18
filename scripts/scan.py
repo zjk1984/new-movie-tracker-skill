@@ -294,8 +294,15 @@ def scrape(args):
                             print("[hint] please complete verification in the opened chrome window (if any). waiting up to 90s...")
                             for _ in range(90):
                                 page.wait_for_timeout(1000)
-                                still_cf = any(k in page.content() or k in page.title() for k in cf_keywords)
-                                if not still_cf and len(page.content()) > 5000:
+                                try:
+                                    content = page.content()
+                                    title = page.title()
+                                except Exception:
+                                    # Page is navigating, likely challenge passed
+                                    content = ""
+                                    title = ""
+                                still_cf = any(k in content or k in title for k in cf_keywords)
+                                if not still_cf:
                                     print("[info] challenge passed")
                                     break
                             else:
