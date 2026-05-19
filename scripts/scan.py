@@ -10,6 +10,7 @@ import sys
 import re
 import json
 import argparse
+import unicodedata
 from urllib.parse import urljoin
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -17,6 +18,204 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 SKILL_DIR = Path(__file__).parent.parent
+
+CJK_SIMPLIFIED_CHARS = str.maketrans({
+    "亜": "亚",
+    "亞": "亚",
+    "愛": "爱",
+    "榮": "荣",
+    "栄": "荣",
+    "紗": "纱",
+    "櫻": "樱",
+    "桜": "樱",
+    "瀬": "濑",
+    "澤": "泽",
+    "沢": "泽",
+    "鈴": "铃",
+    "鳳": "凤",
+    "嶋": "岛",
+    "島": "岛",
+    "濱": "滨",
+    "邊": "边",
+    "邉": "边",
+    "実": "实",
+    "實": "实",
+    "廣": "广",
+    "広": "广",
+    "麗": "丽",
+    "優": "优",
+    "夢": "梦",
+    "咲": "咲",
+    "篠": "筱",
+    "來": "来",
+    "龍": "龙",
+    "聖": "圣",
+    "華": "华",
+    "葉": "叶",
+})
+
+
+def normalize_name(name: str) -> str:
+    return unicodedata.normalize("NFKC", str(name)).strip()
+
+
+def expand_iteration_mark(text: str) -> str:
+    chars = []
+    for ch in text:
+        if ch == "々" and chars:
+            chars.append(chars[-1])
+        else:
+            chars.append(ch)
+    return "".join(chars)
+
+
+def generated_name_variants(name: str) -> set[str]:
+    base = normalize_name(name)
+    if not base:
+        return set()
+
+    variants = {base, expand_iteration_mark(base)}
+    for item in list(variants):
+        variants.add(item.translate(CJK_SIMPLIFIED_CHARS))
+    return {v for v in variants if v}
+
+
+def as_name_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple, set)):
+        return [str(v) for v in value if str(v).strip()]
+    return [str(value)]
+
+
+def add_alias_group(alias_map: dict[str, set[str]], names) -> None:
+    group = []
+    seen = set()
+    for raw_name in as_name_list(names):
+        for name in generated_name_variants(raw_name):
+            if name not in seen:
+                seen.add(name)
+                group.append(name)
+
+    if len(group) < 2:
+        return
+
+    for name in group:
+        alias_map.setdefault(name, set()).update(other for other in group if other != name)
+
+
+def merge_alias_data(alias_map: dict[str, set[str]], data) -> None:
+    if not data:
+        return
+
+    if isinstance(data, dict):
+        if "aliases" in data and "name" not in data and "actor" not in data:
+            merge_alias_data(alias_map, data.get("aliases"))
+            merge_alias_data(alias_map, data.get("actor_aliases"))
+            return
+
+        if "name" in data or "actor" in data:
+            name = data.get("name") or data.get("actor")
+            aliases = data.get("aliases") or data.get("names") or data.get("variants") or []
+            add_alias_group(alias_map, [name] + as_name_list(aliases) if name else aliases)
+            return
+
+        for name, aliases in data.items():
+            add_alias_group(alias_map, [name] + as_name_list(aliases))
+        return
+
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("actor")
+                aliases = item.get("aliases") or item.get("names") or item.get("variants") or []
+                add_alias_group(alias_map, [name] + as_name_list(aliases) if name else aliases)
+            elif isinstance(item, list):
+                add_alias_group(alias_map, item)
+
+
+def read_json(path: str):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def parse_actor_data(data) -> tuple[set[str], dict[str, set[str]]]:
+    actors = set()
+    alias_map: dict[str, set[str]] = {}
+
+    def add_actor_entry(item) -> None:
+        if isinstance(item, str):
+            name = normalize_name(item)
+            if name:
+                actors.add(name)
+            return
+
+        if not isinstance(item, dict):
+            return
+
+        name = item.get("name") or item.get("actor")
+        aliases = item.get("aliases") or item.get("names") or item.get("variants") or []
+        names = [name] + as_name_list(aliases) if name else as_name_list(aliases)
+        if name:
+            actors.add(normalize_name(name))
+        elif names:
+            actors.add(normalize_name(names[0]))
+        add_alias_group(alias_map, names)
+
+    if isinstance(data, dict):
+        raw_actors = data.get("actors", [])
+        if isinstance(raw_actors, dict):
+            actors.update(normalize_name(name) for name in raw_actors if normalize_name(name))
+            merge_alias_data(alias_map, raw_actors)
+        else:
+            items = as_name_list(raw_actors) if isinstance(raw_actors, str) else (raw_actors or [])
+            for item in items:
+                add_actor_entry(item)
+
+        merge_alias_data(alias_map, data.get("aliases"))
+        merge_alias_data(alias_map, data.get("actor_aliases"))
+        return actors, alias_map
+
+    if isinstance(data, list):
+        for item in data:
+            add_actor_entry(item)
+
+    return actors, alias_map
+
+
+def load_alias_map(args, inline_aliases: dict[str, set[str]] | None = None) -> dict[str, set[str]]:
+    alias_map: dict[str, set[str]] = {}
+    if args.aliases_file and os.path.exists(args.aliases_file):
+        try:
+            merge_alias_data(alias_map, read_json(args.aliases_file))
+            print(f"[info] loaded aliases from {args.aliases_file}")
+        except Exception as e:
+            print(f"[warn] failed to load aliases file: {e}")
+
+    if inline_aliases:
+        for name, aliases in inline_aliases.items():
+            add_alias_group(alias_map, [name] + list(aliases))
+
+    return alias_map
+
+
+def expand_actor_names(actors: set[str], alias_map: dict[str, set[str]]) -> set[str]:
+    expanded = set()
+    pending = list(actors)
+
+    while pending:
+        raw_name = pending.pop()
+        related = generated_name_variants(raw_name)
+        related.update(alias_map.get(normalize_name(raw_name), set()))
+
+        for name in related:
+            if name and name not in expanded:
+                expanded.add(name)
+                pending.append(name)
+
+    return expanded
 
 
 def get_actors_from_dir(actors_dir: str) -> set:
@@ -30,33 +229,29 @@ def get_actors_from_dir(actors_dir: str) -> set:
     return actors
 
 
-def load_actors(args) -> set:
+def load_actors(args) -> tuple[set[str], dict[str, set[str]]]:
     """Load actors with priority: --actors > --actors-file > --actors-dir > error"""
     actors = set()
+    inline_aliases: dict[str, set[str]] = {}
     source = ""
 
     # 1. Direct argument list
     if args.actors:
-        actors = set(args.actors)
+        actors, inline_aliases = parse_actor_data({"actors": args.actors})
         source = "command-line argument"
         if args.save_actors and actors:
             save_actors_file(actors, args.actors_file)
             print(f"[info] saved {len(actors)} actors to {args.actors_file}")
-        return actors
+        return actors, inline_aliases
 
     # 2. JSON file
     if args.actors_file and os.path.exists(args.actors_file):
         try:
-            with open(args.actors_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    actors = set(data.get("actors", []))
-                elif isinstance(data, list):
-                    actors = set(data)
+            actors, inline_aliases = parse_actor_data(read_json(args.actors_file))
             source = f"json file ({args.actors_file})"
             if actors:
                 print(f"[info] loaded {len(actors)} actors from {source}")
-                return actors
+                return actors, inline_aliases
         except Exception as e:
             print(f"[warn] failed to load actors file: {e}")
 
@@ -69,7 +264,7 @@ def load_actors(args) -> set:
             if args.save_actors:
                 save_actors_file(actors, args.actors_file)
                 print(f"[info] saved {len(actors)} actors to {args.actors_file}")
-            return actors
+            return actors, inline_aliases
 
     print("[err] no actor list found. provide one via --actors, --actors-file, or --actors-dir")
     print("[hint] example: --actors 佐々木さき 楪カレン 五日市芽依")
@@ -83,6 +278,14 @@ def save_actors_file(actors: set, path: str):
             "actors": sorted(list(actors)),
             "updated": datetime.now().isoformat(),
         }, f, ensure_ascii=False, indent=2)
+
+
+def build_match_index(actors: set[str], alias_map: dict[str, set[str]]) -> dict[str, set[str]]:
+    match_index: dict[str, set[str]] = {}
+    for actor in actors:
+        for name in expand_actor_names({actor}, alias_map):
+            match_index.setdefault(name, set()).add(actor)
+    return match_index
 
 
 def parse_date(text: str, today: datetime) -> datetime | None:
@@ -230,8 +433,11 @@ def extract_magnets(page, href: str, forum_url: str) -> list[str]:
 
 
 def scrape(args):
-    actors = load_actors(args)
-    print(f"[info] tracking {len(actors)} actors")
+    actors, inline_aliases = load_actors(args)
+    alias_map = load_alias_map(args, inline_aliases)
+    match_index = build_match_index(actors, alias_map)
+    match_names = set(match_index.keys())
+    print(f"[info] tracking {len(actors)} actors ({len(match_names)} names including aliases)")
 
     chrome = find_chrome()
     if not chrome:
@@ -344,7 +550,8 @@ def scrape(args):
                 for post in forum_posts:
                     dt = parse_date(post["date_text"], today)
                     if dt and dt >= cutoff:
-                        found = [a for a in actors if a in post["title"]]
+                        matched_names = sorted(name for name in match_names if name in post["title"])
+                        found = sorted({actor for name in matched_names for actor in match_index.get(name, {name})})
                         if found:
                             item = {
                                 "date": dt.strftime("%Y-%m-%d"),
@@ -352,6 +559,7 @@ def scrape(args):
                                 "title": post["title"],
                                 "href": post["href"],
                                 "actors": found,
+                                "matched_names": matched_names,
                                 "forum": forum_url,
                             }
                             if args.fetch_magnets and post.get("href"):
@@ -364,6 +572,7 @@ def scrape(args):
                 lines.append("=" * 60)
                 lines.append(f"scan_time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 lines.append(f"actors: {len(actors)}")
+                lines.append(f"match_names: {len(match_names)}")
                 lines.append(f"posts_scanned: {total_posts}")
                 lines.append(f"pages_scanned: {total_pages_scanned}")
                 lines.append(f"range: {cutoff.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}")
@@ -381,6 +590,7 @@ def scrape(args):
             lines.append("=" * 60)
             lines.append(f"scan_time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             lines.append(f"actors: {len(actors)}")
+            lines.append(f"match_names: {len(match_names)}")
             lines.append(f"posts_scanned: {total_posts}")
             lines.append(f"pages_scanned: {total_pages_scanned}")
             lines.append(f"forums: {len(args.urls)}")
@@ -392,6 +602,8 @@ def scrape(args):
                 lines.append(f"date: {m['date']} ({m['date_raw']})")
                 lines.append(f"title: {m['title']}")
                 lines.append(f"actors: {', '.join(m['actors'])}")
+                if m.get("matched_names") and sorted(m["actors"]) != sorted(m["matched_names"]):
+                    lines.append(f"matched_names: {', '.join(m['matched_names'])}")
                 lines.append(f"href: {m['href']}")
                 if "magnets" in m:
                     if m["magnets"]:
@@ -444,6 +656,7 @@ def main():
     parser = argparse.ArgumentParser(description="Scan sehuatang forum for actor updates")
     parser.add_argument("--actors", nargs="+", default=None, help="Direct actor names (space-separated)")
     parser.add_argument("--actors-file", default=default_actors_file, help="Path to actors JSON file")
+    parser.add_argument("--aliases-file", default=str(SKILL_DIR / "aliases.json"), help="Path to alias mapping JSON file")
     parser.add_argument("--actors-dir", default=r"E:\sakana", help="Local actor directory (fallback)")
     parser.add_argument("--save-actors", action="store_true", help="Save loaded actors to --actors-file")
     parser.add_argument("--urls", nargs="+", default=[

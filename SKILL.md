@@ -23,6 +23,40 @@ The skill maintains its own actor list in `actors.json` inside the skill directo
 2. **Folder directory** — Folder names are treated as actor names (e.g., `E:\sakana`).
 3. **Direct argument** — Pass names directly via `--actors`.
 
+### Japanese / Chinese Name Aliases
+
+Forum titles may use Chinese names while users provide Japanese names, or the reverse. When adding or updating actors:
+
+- Always try to maintain the Japanese and Chinese names together.
+- Store the user's primary tracking list in `actors.json`.
+- Store cross-language aliases in `aliases.json` or as per-actor `aliases` entries in `actors.json`.
+- If only one language is known, keep that name and add the other language later when it is discovered from search results or user input.
+
+Supported alias formats:
+
+```json
+{
+  "actors": [
+    {
+      "name": "三上悠亜",
+      "aliases": ["三上悠亚"]
+    }
+  ]
+}
+```
+
+or:
+
+```json
+{
+  "aliases": {
+    "三上悠亜": ["三上悠亚"]
+  }
+}
+```
+
+The scanner also generates a few safe variants automatically, such as `々` expansion (`佐々木` -> `佐佐木`) and common Japanese/traditional character simplifications (`亜` -> `亚`, `桜` -> `樱`).
+
 ### Initializing or Updating the List
 
 If the user provides actor names verbally or via chat, update `actors.json` directly:
@@ -53,6 +87,8 @@ python -m playwright install
 
 ### 2. Ensure Actor List Exists
 Check `actors.json` in the skill directory. If it is missing or empty, ask the user for their actor list or guide them to initialize it from a directory or direct arguments.
+
+If the user provides Japanese-only or Chinese-only names, add the known cross-language aliases to `aliases.json` when available. Do not delete the original name just because an alias was added.
 
 ### 3. Run Scan
 Execute the utility script from the skill directory. Default invocation scans both forum-103 and forum-36:

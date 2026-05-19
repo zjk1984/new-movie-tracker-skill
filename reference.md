@@ -20,6 +20,8 @@ The script prioritizes actor sources in this order:
 2. `--actors-file` (JSON file)
 3. `--actors-dir` (folder names as actors)
 
+After loading actors, the script also loads `--aliases-file` and expands each actor into its known Japanese / Chinese aliases before matching titles.
+
 ### Initialize from Directory
 ```bash
 python scripts/scan.py --actors-dir "E:\sakana" --save-actors
@@ -40,12 +42,40 @@ Read `actors.json` in the skill directory. It contains a JSON object like:
 }
 ```
 
+### Japanese / Chinese Aliases
+
+If the forum may use Chinese names, keep cross-language names in `aliases.json`:
+
+```json
+{
+  "aliases": {
+    "三上悠亜": ["三上悠亚"]
+  }
+}
+```
+
+You can also store aliases inline in `actors.json`:
+
+```json
+{
+  "actors": [
+    {
+      "name": "三上悠亜",
+      "aliases": ["三上悠亚"]
+    }
+  ]
+}
+```
+
+Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles containing `三上悠亚` match; if the tracked actor is `三上悠亚`, titles containing `三上悠亜` also match. The scanner additionally generates simple safe variants such as `々` expansion and common Japanese/traditional-to-simplified character changes.
+
 ## Script Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--actors` | `None` | Direct actor names (space-separated). Overrides file and directory. |
 | `--actors-file` | `<skill-dir>/actors.json` | Path to JSON actor list. |
+| `--aliases-file` | `<skill-dir>/aliases.json` | Path to Japanese / Chinese alias mapping. |
 | `--actors-dir` | `E:\sakana` | Folder to read actor names from (fallback). |
 | `--save-actors` | `False` | Save loaded actors back to `--actors-file`. |
 | `--urls` | forum-103 + forum-36 | Target forum URLs to scan. |
@@ -95,4 +125,4 @@ After the first manual pass, you can enable `--headless` for background runs.
 - The script saves `page_debug.html` and a screenshot. Share `page_debug.html` with the skill author to update parsing rules.
 
 **Wrong actor matches**
-- The script does simple substring matching (`actor_name in post_title`). If folder names are too generic (e.g., `000`), rename them or remove them from `actors.json`.
+- The script does simple substring matching (`name in post_title`) across actors and aliases. If names are too generic (e.g., `000`), rename them or remove them from `actors.json` / `aliases.json`.
