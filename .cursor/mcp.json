@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "pikpak": {
+      "url": "https://api-open.mypikpak.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:PIKPAK_TOKEN}"
+      }
+    }
+  }
+}

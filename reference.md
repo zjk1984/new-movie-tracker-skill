@@ -6,7 +6,7 @@
 2. Install Playwright and its browser binaries:
 
 ```bash
-pip install playwright
+pip install -r requirements.txt
 python -m playwright install
 ```
 
@@ -84,6 +84,44 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `--headless` | `False` | Run without visible browser window. |
 | `--output-dir` | `.` | Where to write results. |
 | `--fetch-magnets` | `False` | Open matched threads and extract magnet links. |
+| `--keyword` | `None` | Match posts whose title contains any keyword (e.g. `流出`). |
+| `--since` / `--until` | `None` | Date range filter (`YYYY-MM-DD` or `YYYY-MM`). |
+| `--start-page` | `1` | First forum page to scan. |
+| `--javdb` | `False` | Enrich matched posts with JavDB metadata. |
+| `--javdb-magnets` | `False` | Fetch magnets from JavDB API (implies `--javdb`). |
+| `--javdb-best` | `False` | Keep only the best JavDB magnet. |
+| `--javdb-cnsub` | `False` | Filter JavDB magnets to Chinese-subtitled entries. |
+| `--javdb-hd` | `False` | Filter JavDB magnets to HD entries. |
+| `--javdb-host` | mirror | JavDB API host (default `https://jdforrepam.com`). |
+
+## JavDB API
+
+The skill includes a Python port of [zjk1984/javdb-cli](https://github.com/zjk1984/javdb-cli) mobile App API client in `scripts/javdb_client.py`. It signs requests with the `jdsignature` header and calls `/api/v2/search`, `/api/v4/movies/{id}`, and `/api/v1/movies/{id}/magnets`.
+
+Requires `curl_cffi` (plain `requests` often gets HTTP 400 from JavDB).
+
+### Standalone lookup
+
+```bash
+python scripts/javdb_lookup.py SSIS-589 --magnets --best --json
+python scripts/javdb_lookup.py MIDA-749 --magnets --cnsub
+```
+
+### Scan + JavDB
+
+```bash
+python scripts/scan.py --keyword 流出 --javdb --javdb-magnets --javdb-best --fetch-magnets
+```
+
+Forum magnets and JavDB magnets are merged (deduplicated). When forum threads only have `.torrent` attachments, JavDB often still provides usable magnet links.
+
+### Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `JAVDB_HOST` | API base URL (default mirror `https://jdforrepam.com`) |
+| `JAVDB_TOKEN` | Optional bearer token for authenticated endpoints |
+| `JAVDB_DEVICE_UUID` | Stable device id for API params |
 
 ## First Run (Pass Cloudflare)
 
@@ -110,6 +148,53 @@ After the first manual pass, you can enable `--headless` for background runs.
 6. Finish and open **Properties**.
 7. Check **Run whether user is logged on or not**.
 8. Uncheck **Start the task only if the computer is on AC power** (if on a laptop).
+
+## PikPak MCP
+
+Connect PikPak cloud download to Cursor via the official MCP server.
+
+### Project config
+
+This repo includes `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "pikpak": {
+      "url": "https://api-open.mypikpak.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:PIKPAK_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+### Token setup
+
+1. In PikPak, go to **Account & Security → Connected Apps → Personal Access Tokens** and create a token with `cloud_download` permission.
+2. Set the token as an environment variable (do not commit it):
+
+```bash
+export PIKPAK_TOKEN="your-token-here"
+```
+
+For Cursor IDE, you can also set `PIKPAK_TOKEN` in **Settings → Secrets** so `${env:PIKPAK_TOKEN}` resolves automatically.
+
+### Cloud Agent
+
+Cloud Agents do not read local `~/.cursor/mcp.json`. Add the same server in [cursor.com/agents](https://cursor.com/agents) → **MCP**:
+
+- **URL**: `https://api-open.mypikpak.com/mcp`
+- **Header**: `Authorization: Bearer <your-token>`
+
+Enable the PikPak MCP toggle when starting an agent run.
+
+### Download workflow
+
+After scanning, use the PikPak MCP `add_link` tool for each magnet. Default target folder is **My Pack** — pass its folder ID as `parent` (use `ls` at root to find it).
+
+Fallback without MCP: `python scripts/pikpak_download.py` (uses the same token via `PIKPAK_TOKEN`).
 
 ## Troubleshooting
 
