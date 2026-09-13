@@ -131,6 +131,48 @@ def _md_title_line(title: str, thread_url: str) -> str:
     return f"**标题**: `{title}`\n"
 
 
+def _md_table_cell_link(text: str, url: str) -> str:
+    text = (text or "").replace("\n", " ").strip() or "?"
+    if url:
+        return (
+            f'<a href="{html.escape(url, quote=True)}">'
+            f"{html.escape(text)}</a>"
+        )
+    return html.escape(text)
+
+
+def _success_full_title(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]],
+) -> str:
+    href = item.get("href") or ""
+    base = matched_by_href.get(href) or {}
+    for source in (base, item):
+        title = (source.get("title") or "").replace("\n", " ").strip()
+        if title:
+            return title
+    return (item.get("name") or "?").strip()
+
+
+def _success_name_cell(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]],
+    *,
+    is_jav: bool,
+) -> str:
+    from submit_gate import build_submit_probe
+    from title_translate import translate_title_for_item
+
+    probe = build_submit_probe(item, matched_by_href)
+    full_title = _success_full_title(item, matched_by_href)
+    thread_url = _thread_post_url(probe if probe.get("href") else item)
+    if is_jav:
+        display = translate_title_for_item(probe) or full_title
+    else:
+        display = full_title
+    return _md_table_cell_link(display, thread_url)
+
+
 def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
     reason = item.get("skip_reason") or ""
     if reason.startswith("javdb_score_low_"):
@@ -633,7 +675,7 @@ def _md_success_sections(
 
     jav_rows = [
         [
-            item.get("name") or "?",
+            _success_name_cell(item, matched_by_href, is_jav=True),
             _format_success_type(item),
             _success_item_score(
                 item,
@@ -647,7 +689,7 @@ def _md_success_sections(
     ]
     domestic_rows = [
         [
-            item.get("name") or "?",
+            _success_name_cell(item, matched_by_href, is_jav=False),
             _format_success_type(item),
             _success_item_subtype(item, matched_by_href),
             _item_uri(item),
