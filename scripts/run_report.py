@@ -591,18 +591,55 @@ def _success_item_score(
     return "-"
 
 
-def _success_rows(
+def _success_item_subtype(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]],
+) -> str:
+    from content_filter import resolve_domestic_subtype
+
+    base = matched_by_href.get(item.get("href") or "")
+    if base:
+        subtype = base.get("domestic_subtype")
+        if subtype:
+            return subtype
+        resolved = resolve_domestic_subtype(base)
+        if resolved:
+            return resolved
+    probe = {
+        "title": item.get("title") or item.get("name") or "",
+        "name": item.get("name") or "",
+        "ed2k": item.get("ed2k"),
+    }
+    return resolve_domestic_subtype(probe) or "其他"
+
+
+def _split_success_items(
+    succeeded: list[dict[str, Any]],
+    matched_by_href: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    jav_items: list[dict[str, Any]] = []
+    domestic_items: list[dict[str, Any]] = []
+    for item in succeeded:
+        if _is_jav_success_item(item, matched_by_href):
+            jav_items.append(item)
+        else:
+            domestic_items.append(item)
+    return jav_items, domestic_items
+
+
+def _md_success_sections(
     succeeded: list[dict[str, Any]],
     matched: list[dict[str, Any]] | None = None,
-) -> list[list[str]]:
+) -> str:
     matched = matched or []
     matched_by_href = {m.get("href"): m for m in matched if m.get("href")}
-    score_lookup = _build_jav_score_lookup(matched)
-    _fill_missing_jav_scores(succeeded, score_lookup, matched_by_href)
+    jav_items, domestic_items = _split_success_items(succeeded, matched_by_href)
 
-    rows: list[list[str]] = []
-    for item in succeeded:
-        rows.append([
+    score_lookup = _build_jav_score_lookup(matched)
+    _fill_missing_jav_scores(jav_items, score_lookup, matched_by_href)
+
+    jav_rows = [
+        [
             item.get("name") or "?",
             _format_success_type(item),
             _success_item_score(
@@ -612,8 +649,27 @@ def _success_rows(
             ),
             _item_uri(item),
             item.get("phase") or item.get("status") or "ok",
-        ])
-    return rows
+        ]
+        for item in jav_items
+    ]
+    domestic_rows = [
+        [
+            item.get("name") or "?",
+            _format_success_type(item),
+            _success_item_subtype(item, matched_by_href),
+            _item_uri(item),
+            item.get("phase") or item.get("status") or "ok",
+        ]
+        for item in domestic_items
+    ]
+
+    lines = [
+        f"### 日本片（{len(jav_items)} 条）\n",
+        _md_table(["名称", "类型", "评分", "下载链接", "状态"], jav_rows),
+        f"### 国产（{len(domestic_items)} 条）\n",
+        _md_table(["名称", "类型", "分类", "下载链接", "状态"], domestic_rows),
+    ]
+    return "\n".join(lines)
 
 
 def write_run_report(
@@ -639,7 +695,7 @@ def write_run_report(
 
     failed_items = list(download_report.get("failed") or [])
 
-    ok_rows = _success_rows(
+    success_section = _md_success_sections(
         list(download_report.get("succeeded") or []),
         scan_stats.get("matched") or [],
     )
@@ -690,7 +746,7 @@ def write_run_report(
 
 ## 下载成功
 
-{_md_table(["名称", "类型", "评分", "下载链接", "状态"], ok_rows)}
+{success_section}
 
 {jav_section}
 
