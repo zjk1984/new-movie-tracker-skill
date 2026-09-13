@@ -78,7 +78,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `--aliases-file` | `<skill-dir>/aliases.json` | Path to Japanese / Chinese alias mapping. |
 | `--actors-dir` | `E:\sakana` | Folder to read actor names from (fallback). |
 | `--save-actors` | `False` | Save loaded actors back to `--actors-file`. |
-| `--urls` | forum-103 + forum-36 | Target forum URLs to scan. |
+| `--urls` | forum-2 + forum-103 + forum-37 | Target forum URLs to scan. |
 | `--days` | `3` | Number of recent days to include. |
 | `--max-pages` | `5` | Max pages to scan per forum. |
 | `--headless` | `False` | Run without visible browser window. |
@@ -206,7 +206,7 @@ If a Cloudflare challenge appears, complete it manually in the opened window. Th
 
 ## Daily Schedule (07:00, incremental download)
 
-`scripts/daily_run.py` scans forum-37 + forum-103, applies cnsub-first + content filter, then submits **only new magnets** to PikPak (dedup via `download_state.json` in the output directory).
+`scripts/daily_run.py` scans **forum-2** (今日下载链接) + forum-103 + forum-37, applies cnsub-first + content filter, then submits **only new downloads** to PikPak (dedup via `download_state.json` in the output directory).
 
 ### Prepare once
 

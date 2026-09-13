@@ -5,7 +5,7 @@
 ## 功能
 
 - **对话式演员管理**：直接口述演员名字，Agent 自动维护追踪清单
-- **多板块监控**：同时扫描 `forum-103`（有码）和 `forum-36`（无码/破解）
+- **多板块监控**：默认扫描 `forum-2`（今日下载链接）、`forum-103`（有码）、`forum-37`（资源）
 - **智能翻页**：自动翻页并提前停止，避免无效请求
 - **磁力提取**：进入帖子详情页自动抓取 `magnet:?xt=urn:btih:` 链接
 - **JavDB 补全**：整合 [javdb-cli](https://github.com/zjk1984/javdb-cli) 的 App API，按番号查发行日、标题和磁力（论坛只有 BT 附件时尤其有用）
@@ -103,7 +103,7 @@ python scripts/scan.py --days 3
 python scripts/scan.py --days 3 --fetch-magnets
 
 # 中字优先 + 自动推送 PikPak（推荐）
-export PIKPAK_TOKEN="your-token"
+python scripts/pikpak_login.py login
 python scripts/scan.py --days 3 --cnsub-priority --pikpak
 
 # 论坛 + JavDB 双源磁力（推荐 BT 种子帖）

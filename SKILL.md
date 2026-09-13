@@ -91,7 +91,7 @@ Check `actors.json` in the skill directory. If it is missing or empty, ask the u
 If the user provides Japanese-only or Chinese-only names, add the known cross-language aliases to `aliases.json` when available. Do not delete the original name just because an alias was added.
 
 ### 3. Run Scan
-Execute the utility script from the skill directory. Default invocation scans both forum-103 and forum-36:
+Execute the utility script from the skill directory. Default invocation scans **forum-2** (今日下载链接), **forum-103** (有码), and **forum-37**:
 ```bash
 python scripts/scan.py --days 3 --fetch-magnets
 ```
@@ -229,7 +229,7 @@ Run every morning at **07:00** to scan recent forum posts and submit **only new 
 python scripts/daily_run.py --headless
 ```
 
-Defaults: scan **forum-37 + forum-103**, `--all-posts`, `--cnsub-priority`, last **2 days**, content filter (有码 + 无码), PikPak **My Pack**, **new-only** dedup.
+Defaults: scan **forum-2 + forum-103 + forum-37**, `--all-posts`, `--cnsub-priority`, last **2 days**, content filter (有码 + 无码), PikPak **My Pack**, **new-only** dedup.
 
 Explain results to the user:
 - **本次新增** — magnets submitted this run (not in previous `download_state.json`)

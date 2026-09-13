@@ -13,8 +13,9 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = SKILL_DIR / "scripts"
 
 DEFAULT_FORUMS = [
-    "https://www.sehuatang.org/forum-37-1.html",
+    "https://www.sehuatang.org/forum-2-1.html",
     "https://www.sehuatang.org/forum-103-1.html",
+    "https://www.sehuatang.org/forum-37-1.html",
 ]
 
 

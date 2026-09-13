@@ -1071,8 +1071,9 @@ def main():
     parser.add_argument("--actors-dir", default=r"E:\sakana", help="Local actor directory (fallback)")
     parser.add_argument("--save-actors", action="store_true", help="Save loaded actors to --actors-file")
     parser.add_argument("--urls", nargs="+", default=[
+        "https://www.sehuatang.org/forum-2-1.html",
         "https://www.sehuatang.org/forum-103-1.html",
-        "https://www.sehuatang.org/forum-36-1.html",
+        "https://www.sehuatang.org/forum-37-1.html",
     ], help="Target forum URLs to scan")
     parser.add_argument("--days", type=int, default=3, help="How many recent days to check (ignored if --since is set)")
     parser.add_argument("--since", default=None, help="Start date YYYY-MM-DD or YYYY-MM (inclusive)")
