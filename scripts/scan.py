@@ -983,7 +983,12 @@ def scrape(args):
                     from pikpak_download import submit_from_result
 
                     folder = getattr(args, "pikpak_folder", None) or "My Pack"
-                    ok, total = submit_from_result(result_json, folder=folder, today_only=True)
+                    ok, total = submit_from_result(
+                        result_json,
+                        folder=folder,
+                        today_only=not getattr(args, "pikpak_new_only", False),
+                        new_only=getattr(args, "pikpak_new_only", False),
+                    )
                     print(f"[done] pikpak: {ok}/{total} submitted to {folder}")
                 except Exception as exc:
                     print(f"[err] pikpak download failed: {exc}")
@@ -1063,6 +1068,11 @@ def main():
         "--pikpak-folder",
         default=os.environ.get("PIKPAK_FOLDER", "My Pack"),
         help="PikPak target folder name (default: My Pack)",
+    )
+    parser.add_argument(
+        "--pikpak-new-only",
+        action="store_true",
+        help="With --pikpak, skip magnets already in download_state.json",
     )
     args = parser.parse_args()
     if args.javdb_magnets:

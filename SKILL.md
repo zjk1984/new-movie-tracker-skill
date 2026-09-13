@@ -201,12 +201,34 @@ If PikPak MCP is configured (see `.cursor/mcp.json` and [reference.md](reference
 If MCP is unavailable, fall back to:
 ```bash
 export PIKPAK_TOKEN="your-token"
-python scripts/pikpak_download.py
+python scripts/pikpak_download.py --new-only
 ```
+
+### 9. Daily Schedule (7:00 AM, incremental download)
+
+Run every morning at **07:00** to scan recent forum posts and submit **only new magnets** since the last run (tracked in `download_state.json`).
+
+**One-time setup**
+1. Put `PIKPAK_TOKEN` in `.env.local` (or system env).
+2. Pass Cloudflare once: `python scripts/daily_run.py --no-headless` (uses `data/chrome_profile/`).
+3. Register the scheduled task (see [reference.md](reference.md)).
+
+**Daily command**
+```bash
+python scripts/daily_run.py --headless
+```
+
+Defaults: scan **forum-37 + forum-103**, `--all-posts`, `--cnsub-priority`, last **2 days**, content filter (有码 + 无码), PikPak **My Pack**, **new-only** dedup.
+
+Explain results to the user:
+- **本次新增** — magnets submitted this run (not in previous `download_state.json`)
+- **已跳过** — same thread or same btih already downloaded before
+- **无新增** — scan ran but nothing new to submit
 
 ## Output Files
 - `result.txt` — Human-readable report (overwritten each run)
 - `last_result.json` — Structured data for downstream use
+- `download_state.json` — Submitted magnet/thread history (for incremental runs)
 - `screenshots/` — Debug screenshots if errors occur
 - `chrome_profile/` — Persistent browser session (do not delete)
 

@@ -204,21 +204,79 @@ python scripts/scan.py --days 3 --fetch-magnets
 
 If a Cloudflare challenge appears, complete it manually in the opened window. The script waits up to 90s. After success, cookies are saved in `chrome_profile/` inside the output directory.
 
-## Scheduled Automation (Windows Task Scheduler)
+## Daily Schedule (07:00, incremental download)
 
-After the first manual pass, you can enable `--headless` for background runs.
+`scripts/daily_run.py` scans forum-37 + forum-103, applies cnsub-first + content filter, then submits **only new magnets** to PikPak (dedup via `download_state.json` in the output directory).
 
-1. Search and open **Task Scheduler**.
-2. Click **Create Basic Task**.
-3. Name: `NewMovieTracker`
-4. Trigger: **Daily** — set your preferred time.
-5. Action: **Start a program**
-   - Program/script: `python` (or full path to your python.exe)
-   - Add arguments: `C:\Users\sakana\.qoderwork\skills\new-movie-tracker\scripts\scan.py --headless --days 3 --fetch-magnets --output-dir "C:\githubapp\project\new-movie-found"`
-   - Start in: `C:\githubapp\project\new-movie-found`
-6. Finish and open **Properties**.
-7. Check **Run whether user is logged on or not**.
-8. Uncheck **Start the task only if the computer is on AC power** (if on a laptop).
+### Prepare once
+
+1. Save PikPak token to `.env.local` in the skill directory:
+
+```bash
+PIKPAK_TOKEN=your-token-here
+PIKPAK_FOLDER=My Pack
+```
+
+2. First Cloudflare pass (headed browser):
+
+```bash
+python scripts/daily_run.py --no-headless
+```
+
+3. Verify output under `data/` (`last_result.json`, `download_state.json` after first download).
+
+### Manual daily command
+
+```bash
+python scripts/daily_run.py --headless
+python scripts/daily_run.py --download-only   # re-submit from existing scan
+python scripts/pikpak_download.py --new-only --all
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output-dir` | `<skill>/data` | Results + state + chrome profile |
+| `--days` | `2` | Recent days to scan (dedup handles overlap) |
+| `--scan-only` | off | Scan without PikPak |
+| `--download-only` | off | PikPak new-only from last scan |
+| `--pikpak-folder` | `My Pack` | Target folder |
+
+Incremental logic (`download_state.json`):
+- Skip if **btih** hash already submitted
+- Skip if **thread href** already submitted (same post)
+
+### Windows Task Scheduler (07:00)
+
+1. Open **Task Scheduler** → **Create Basic Task**
+2. Name: `NewMovieTracker-Daily`
+3. Trigger: **Daily** → **07:00:00** (local time)
+4. Action: **Start a program**
+   - Program: `C:\path\to\new-movie-tracker-skill\scripts\daily_run.bat`
+   - Start in: `C:\path\to\new-movie-tracker-skill`
+5. Properties → **Run whether user is logged on or not**; disable “AC power only” on laptops
+6. Logs append to `data/daily_run.log`
+
+Or use `python` directly:
+
+```
+Program: C:\Python311\python.exe
+Arguments: scripts\daily_run.py --headless
+Start in: C:\path\to\new-movie-tracker-skill
+```
+
+### Linux cron (07:00)
+
+```cron
+0 7 * * * /path/to/new-movie-tracker-skill/scripts/daily_run.sh
+```
+
+## Scheduled Automation (legacy scan-only)
+
+For actor-list scans without PikPak dedup, you can still schedule `scan.py` directly:
+
+```bash
+python scripts/scan.py --headless --days 3 --fetch-magnets --output-dir ./data
+```
 
 ## PikPak MCP
 
