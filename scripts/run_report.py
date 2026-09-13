@@ -233,12 +233,12 @@ def _success_full_title(
     return (item.get("name") or "?").strip()
 
 
-def _success_name_cell(
+def _success_display_title(
     item: dict[str, Any],
     matched_by_href: dict[str, dict[str, Any]],
     *,
     is_jav: bool,
-) -> str:
+) -> tuple[str, str]:
     from submit_gate import build_submit_probe
     from title_translate import translate_title_for_item
 
@@ -249,7 +249,77 @@ def _success_name_cell(
         display = translate_title_for_item(probe) or full_title
     else:
         display = full_title
+    return display, thread_url
+
+
+def _success_name_cell(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]],
+    *,
+    is_jav: bool,
+) -> str:
+    display, thread_url = _success_display_title(item, matched_by_href, is_jav=is_jav)
     return _md_table_cell_link(display, thread_url)
+
+
+def _success_item_label(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]],
+) -> str:
+    from javdb_client import extract_av_number
+    from submit_gate import build_submit_probe
+
+    probe = build_submit_probe(item, matched_by_href)
+    for key in (
+        probe.get("av_number"),
+        item.get("name"),
+        extract_av_number(item.get("title") or ""),
+    ):
+        if key and str(key).strip() not in {"?", "：", ":"}:
+            return str(key).strip()
+    return _truncate(_success_full_title(item, matched_by_href), 40)
+
+
+def _format_phase_status(phase: str) -> str:
+    labels = {
+        "PHASE_TYPE_RUNNING": "下载中",
+        "PHASE_TYPE_PENDING": "排队中",
+        "PHASE_TYPE_COMPLETE": "已完成",
+        "ok": "已提交",
+        "submitted": "已提交",
+    }
+    text = (phase or "ok").strip()
+    return labels.get(text, text)
+
+
+def _md_success_item_block(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]],
+    *,
+    is_jav: bool,
+    score_lookup: dict[str, float],
+) -> str:
+    label = _success_item_label(item, matched_by_href)
+    link_type = _format_success_type(item)
+    phase = _format_phase_status(item.get("phase") or item.get("status") or "ok")
+    title, thread_url = _success_display_title(item, matched_by_href, is_jav=is_jav)
+
+    if is_jav:
+        score = _success_item_score(
+            item,
+            score_lookup=score_lookup,
+            matched_by_href=matched_by_href,
+        )
+        header = f"#### {label} · {link_type} · {score} · {phase}\n"
+    else:
+        subtype = _success_item_subtype(item, matched_by_href)
+        header = f"#### [{subtype}] {label} · {link_type} · {phase}\n"
+
+    lines = [header, _md_title_line(title, thread_url)]
+    uri = _item_uri(item)
+    if uri:
+        lines.append(f"<pre><code>{html.escape(uri)}</code></pre>\n")
+    return "".join(lines)
 
 
 def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
@@ -752,37 +822,37 @@ def _md_success_sections(
     score_lookup = _build_jav_score_lookup(matched)
     _fill_missing_jav_scores(jav_items, score_lookup, matched_by_href)
 
-    jav_rows = [
-        [
-            _success_name_cell(item, matched_by_href, is_jav=True),
-            _format_success_type(item),
-            _success_item_score(
-                item,
-                score_lookup=score_lookup,
-                matched_by_href=matched_by_href,
-            ),
-            _item_uri(item),
-            item.get("phase") or item.get("status") or "ok",
-        ]
-        for item in jav_items
-    ]
-    domestic_rows = [
-        [
-            _success_name_cell(item, matched_by_href, is_jav=False),
-            _format_success_type(item),
-            _success_item_subtype(item, matched_by_href),
-            _item_uri(item),
-            item.get("phase") or item.get("status") or "ok",
-        ]
-        for item in domestic_items
-    ]
-
     lines = [
-        f"### 日本片（{len(jav_items)} 条）\n",
-        _md_table(["名称", "类型", "评分", "下载链接", "状态"], jav_rows),
-        f"### 国产（{len(domestic_items)} 条）\n",
-        _md_table(["名称", "类型", "分类", "下载链接", "状态"], domestic_rows),
+        "> 每条成功下载单独列出；标题可点击跳转原帖，下方代码块可复制磁力/ed2k 链接。\n",
     ]
+    if jav_items:
+        lines.append(f"### 日本片（{len(jav_items)} 条）\n")
+        for item in jav_items:
+            lines.append(
+                _md_success_item_block(
+                    item,
+                    matched_by_href,
+                    is_jav=True,
+                    score_lookup=score_lookup,
+                ),
+            )
+    else:
+        lines.append("### 日本片（0 条）\n\n_（无）_\n")
+
+    if domestic_items:
+        lines.append(f"### 国产（{len(domestic_items)} 条）\n")
+        for item in domestic_items:
+            lines.append(
+                _md_success_item_block(
+                    item,
+                    matched_by_href,
+                    is_jav=False,
+                    score_lookup=score_lookup,
+                ),
+            )
+    else:
+        lines.append("### 国产（0 条）\n\n_（无）_\n")
+
     return "\n".join(lines)
 
 

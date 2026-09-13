@@ -108,9 +108,12 @@ class SuccessNameCellTests(unittest.TestCase):
         ]
         with patch("title_translate.translate_title_for_item", return_value="测试标题"):
             section = _md_success_sections(succeeded, matched)
+        self.assertIn("#### HMN-900 · magnet · 4.14 · 下载中", section)
+        self.assertIn("**标题**:", section)
         self.assertIn("测试标题", section)
         self.assertIn("thread-1.html", section)
-        self.assertNotRegex(section, r"\| HMN-900 \| magnet")
+        self.assertIn("<pre><code>magnet:?xt=urn:btih:abc</code></pre>", section)
+        self.assertNotIn("| 名称 | 类型 | 评分 |", section)
 
 
 class ReportArchiveTests(unittest.TestCase):
