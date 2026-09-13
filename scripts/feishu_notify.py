@@ -342,19 +342,22 @@ def build_download_report_from_scans(
 
         refetch = json.loads(ed2k_refetch_path.read_text(encoding="utf-8"))
         seen_uri = {x.get("uri") for x in failed}
+        from pikpak_links import normalize_ed2k_uri
+
         for t in refetch.get("threads") or []:
             for ed2k in t.get("ed2k") or []:
-                if ed2k in seen_uri:
+                uri = normalize_ed2k_uri(ed2k) or ed2k
+                if uri in seen_uri:
                     continue
-                parsed = parse_download_link(ed2k)
+                parsed = parse_download_link(uri)
                 if not parsed:
                     continue
                 failed.append({
                     "name": parsed.get("name") or "ed2k",
                     "title": t.get("title", ""),
                     "href": t.get("href", ""),
-                    "uri": ed2k,
-                    "url": ed2k,
+                    "uri": uri,
+                    "url": uri,
                     "link_type": "ed2k",
                     "source": "forum_ed2k",
                     "status": "failed",

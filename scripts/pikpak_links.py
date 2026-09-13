@@ -102,11 +102,18 @@ def parse_pikpak_sha(value: str) -> dict[str, Any] | None:
 
 
 def build_ed2k_uri(name: str, size: str, file_hash: str) -> str:
-    return f"ed2k://|{name}|{size}|{file_hash.upper()}|/"
+    return f"ed2k://|file|{name}|{size}|{file_hash.upper()}|/"
+
+
+def _strip_markdown_link(text: str) -> str:
+    """Remove [label](url) wrappers sometimes picked up from forum HTML."""
+    t = text or ""
+    t = re.sub(r"\[([^\]]+)\]\((?:mailto:)?[^)]+\)", r"\1", t)
+    return t
 
 
 def parse_ed2k(value: str) -> dict[str, Any] | None:
-    text = (value or "").strip()
+    text = _strip_markdown_link((value or "").strip())
     if not text.lower().startswith("ed2k://"):
         return None
     body = text[7:]
@@ -116,20 +123,30 @@ def parse_ed2k(value: str) -> dict[str, Any] | None:
         body = body[:-2]
     elif body.endswith("|"):
         body = body[:-1]
-    parts = body.split("|")
+    parts = [p.strip() for p in body.split("|") if p.strip()]
     if len(parts) < 3:
         return None
-    name, size, file_hash = parts[0].strip(), parts[1].strip(), parts[2].strip().upper()
+    if parts[0].lower() == "file" and len(parts) >= 4:
+        name, size, file_hash = parts[1], parts[2], parts[3].upper()
+    else:
+        name, size, file_hash = parts[0], parts[1], parts[2].upper()
     if not name or not size.isdigit() or len(file_hash) != 32:
         return None
+    uri = build_ed2k_uri(name, size, file_hash)
     return {
         "type": "url",
-        "url": text,
+        "url": uri,
         "name": unquote(name),
         "size": size,
         "hash": file_hash,
-        "uri": text,
+        "uri": uri,
     }
+
+
+def normalize_ed2k_uri(value: str) -> str | None:
+    """Return canonical ed2k://|file|name|size|hash|/ or None."""
+    parsed = parse_ed2k(value)
+    return parsed["uri"] if parsed else None
 
 
 def parse_pipe_code(line: str) -> dict[str, Any] | None:

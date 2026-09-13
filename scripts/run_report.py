@@ -3,12 +3,17 @@
 """Write per-run Markdown reports under reports/ and optionally push to GitHub."""
 from __future__ import annotations
 
+import html
 import re
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pikpak_links import normalize_ed2k_uri
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 REPORTS_DIR = SKILL_DIR / "reports"
@@ -85,20 +90,18 @@ def _infer_link_type(item: dict[str, Any]) -> str:
     return link_type or "url"
 
 
-def _format_fail_reason(err: str) -> str:
-    text = (err or "").strip()
-    if "task_url_resolve_error" in text:
-        return "URL解析失败"
-    if "not cached" in text.lower() or "no cache" in text.lower():
-        return "特征码秒传失败 (PikPak 无缓存)"
-    return text[:120] if text else "未知错误"
+def _canonical_uri(uri: str) -> str:
+    text = (uri or "").strip()
+    if text.lower().startswith("ed2k://"):
+        return normalize_ed2k_uri(text) or text
+    return text
 
 
 def _collect_fail_uris(failed: list[dict[str, Any]]) -> list[str]:
     seen: set[str] = set()
     uris: list[str] = []
     for item in failed:
-        uri = (item.get("uri") or item.get("url") or "").strip()
+        uri = _canonical_uri(item.get("uri") or item.get("url") or "")
         if not uri or uri in seen:
             continue
         seen.add(uri)
@@ -107,19 +110,19 @@ def _collect_fail_uris(failed: list[dict[str, Any]]) -> list[str]:
 
 
 def _md_fail_links(failed: list[dict[str, Any]]) -> str:
-    """Render all failed URIs in one copyable code block."""
+    """Render all failed URIs in one HTML pre block (avoids @ → mailto autolink)."""
     if not failed:
         return "_（无）_\n"
 
     all_uris = _collect_fail_uris(failed)
     lines = [
-        "> 点击下面代码块右上角 **Copy**，可一次复制全部失败 URI（每行一条）。\n",
+        "> 选中下方代码区域复制，或使用 GitHub **Copy**（每行一条，含 `|file|` 标准 ed2k 格式）。\n",
         f"### 全部失败链接（{len(all_uris)} 条）\n",
     ]
     if all_uris:
-        lines.append("```text")
-        lines.extend(all_uris)
-        lines.append("```\n")
+        lines.append("<pre><code>")
+        lines.extend(html.escape(u) for u in all_uris)
+        lines.append("</code></pre>\n")
     else:
         lines.append("_（无链接）_\n")
     return "\n".join(lines)
