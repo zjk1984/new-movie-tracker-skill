@@ -6,7 +6,7 @@ description: Scan sehuatang.org forums for recent posts and match them against a
 # New Movie Tracker
 
 ## Purpose
-Monitor sehuatang.org forums for posts published in the last N days, match post titles against an actor list, and report which actors have new releases. Optionally open matched threads to extract magnet links.
+Monitor sehuatang.org forums for posts published in the last N days, match post titles against an actor list, and report which actors have new releases. Optionally open matched threads to extract magnet links, or fetch magnets and metadata from JavDB via its mobile App API (ported from [zjk1984/javdb-cli](https://github.com/zjk1984/javdb-cli)).
 
 ## When to Use
 - The user asks to check sehuatang for updates
@@ -73,7 +73,7 @@ To view the current list, read `actors.json`.
 
 ## Prerequisites
 - Python 3.9+ installed on Windows
-- `playwright` Python package
+- `playwright`, `curl_cffi`, and `requests` Python packages
 - Google Chrome installed
 
 ## Workflow
@@ -81,7 +81,7 @@ To view the current list, read `actors.json`.
 ### 1. Verify Environment
 Check that `scripts/scan.py` exists in the skill directory. If the user has not installed dependencies, instruct them to run:
 ```bash
-pip install playwright
+pip install -r requirements.txt
 python -m playwright install
 ```
 
@@ -110,7 +110,24 @@ If the script reports a Cloudflare challenge:
 ### 5. Report Results
 Read `result.txt` from the output directory (default: current working directory) and present matched results. Include post date, title, matched actors, link, and **magnet links** when available. Present magnet links directly in the chat response so the user can copy them immediately.
 
-### 6. PikPak Download (optional)
+### 6. JavDB Magnet Lookup (optional)
+
+When forum threads lack inline magnets (common for `[BT种子]` torrent attachments), use JavDB to resolve magnets by AV number extracted from the post title:
+
+```bash
+python scripts/scan.py --days 3 --javdb --javdb-magnets --fetch-magnets
+python scripts/javdb_lookup.py SSIS-589 --magnets --best
+```
+
+Flags:
+- `--javdb` — add release date and JavDB title
+- `--javdb-magnets` — fetch ranked magnets from JavDB (merged with forum magnets when both are used)
+- `--javdb-best` — keep only the best magnet (prefers cnsub, then HD, then size)
+- `--javdb-cnsub` / `--javdb-hd` — filter JavDB magnets
+
+Optional env: `JAVDB_HOST`, `JAVDB_TOKEN`, `JAVDB_DEVICE_UUID`.
+
+### 7. PikPak Download (optional)
 If PikPak MCP is configured (see `.cursor/mcp.json` and [reference.md](reference.md)), use the `add_link` tool to submit magnet links. Default target folder is **My Pack** — resolve its folder ID with `ls` at root and pass it as `parent`.
 
 If MCP is unavailable, fall back to:

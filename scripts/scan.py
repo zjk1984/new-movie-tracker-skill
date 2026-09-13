@@ -527,6 +527,43 @@ def extract_magnets(page, href: str, forum_url: str) -> list[str]:
     return extract_thread_links(page, href, forum_url)["magnets"]
 
 
+def enrich_with_javdb(item: dict, client, args) -> None:
+    from javdb_client import extract_av_number
+
+    number = extract_av_number(item.get("title", ""))
+    if not number:
+        return
+    item["av_number"] = number
+    try:
+        info = client.lookup(
+            number,
+            fetch_magnets=bool(getattr(args, "javdb_magnets", False)),
+            cnsub=bool(getattr(args, "javdb_cnsub", False)),
+            hd=bool(getattr(args, "javdb_hd", False)),
+            best_only=bool(getattr(args, "javdb_best", False)),
+        )
+    except Exception as exc:
+        item["javdb_error"] = str(exc)
+        print(f"[warn] javdb lookup failed for {number}: {exc}")
+        return
+
+    item["javdb"] = {
+        "id": info.get("javdb_id"),
+        "number": info.get("number"),
+        "title": info.get("title"),
+        "release_date": info.get("release_date"),
+    }
+    if info.get("release_date") and not item.get("release_date"):
+        item["release_date"] = info["release_date"]
+
+    javdb_magnets = info.get("magnets") or []
+    if javdb_magnets:
+        item["javdb_magnets"] = javdb_magnets
+        if getattr(args, "javdb_magnets", False):
+            merged = list(dict.fromkeys((item.get("magnets") or []) + javdb_magnets))
+            item["magnets"] = merged
+
+
 def match_post(
     post: dict,
     *,
@@ -575,6 +612,17 @@ def scrape(args):
     if keywords:
         print(f"[info] title keyword filter: {keywords}")
     print(f"[info] tracking {len(actors)} actors ({len(match_names)} names including aliases)")
+
+    javdb_client = None
+    if getattr(args, "javdb", False) or getattr(args, "javdb_magnets", False):
+        try:
+            from javdb_client import JavDBClient
+
+            javdb_client = JavDBClient(host=getattr(args, "javdb_host", None))
+            print(f"[info] javdb enabled (host={javdb_client.host})")
+        except ImportError as exc:
+            print(f"[err] {exc}")
+            sys.exit(1)
 
     chrome = find_chrome()
     if not chrome:
@@ -703,6 +751,9 @@ def scrape(args):
                             links = extract_thread_links(page, post["href"], forum_url)
                             item["magnets"] = links["magnets"]
                             item["ed2k"] = links["ed2k"]
+                        if javdb_client:
+                            print(f"[info] javdb lookup: {item['title'][:40]}...")
+                            enrich_with_javdb(item, javdb_client, args)
                         all_matched.append(item)
 
                     print(f"[info] page {page_num}: {len(posts)} rows, {new_posts} new, matched total {len(all_matched)}")
@@ -770,6 +821,15 @@ def scrape(args):
                 if m.get("matched_names") and sorted(m["actors"]) != sorted(m["matched_names"]):
                     lines.append(f"matched_names: {', '.join(m['matched_names'])}")
                 lines.append(f"href: {m['href']}")
+                if m.get("av_number"):
+                    lines.append(f"av_number: {m['av_number']}")
+                if m.get("release_date"):
+                    lines.append(f"release_date: {m['release_date']}")
+                if m.get("javdb"):
+                    j = m["javdb"]
+                    lines.append(f"javdb: {j.get('number')} | {j.get('release_date')} | {j.get('title', '')[:60]}")
+                if m.get("javdb_error"):
+                    lines.append(f"javdb_error: {m['javdb_error']}")
                 if "magnets" in m:
                     if m["magnets"]:
                         lines.append("magnets:")
@@ -844,7 +904,15 @@ def main():
     parser.add_argument("--output-dir", default=".", help="Directory for results")
     parser.add_argument("--fetch-magnets", action="store_true", help="Open matched threads and extract magnet links")
     parser.add_argument("--keyword", "--keywords", dest="keywords", nargs="+", default=None, help="Match posts whose title contains any of these keywords")
+    parser.add_argument("--javdb", action="store_true", help="Enrich matched posts with JavDB metadata (release date, title)")
+    parser.add_argument("--javdb-magnets", action="store_true", help="Fetch magnets from JavDB API (implies --javdb)")
+    parser.add_argument("--javdb-best", action="store_true", help="Only keep the best JavDB magnet (cnsub > hd > size)")
+    parser.add_argument("--javdb-cnsub", action="store_true", help="Filter JavDB magnets to those with Chinese subtitles")
+    parser.add_argument("--javdb-hd", action="store_true", help="Filter JavDB magnets to HD only")
+    parser.add_argument("--javdb-host", default=None, help="JavDB API host (default: https://jdforrepam.com)")
     args = parser.parse_args()
+    if args.javdb_magnets:
+        args.javdb = True
     scrape(args)
 
 

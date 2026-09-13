@@ -6,7 +6,7 @@
 2. Install Playwright and its browser binaries:
 
 ```bash
-pip install playwright
+pip install -r requirements.txt
 python -m playwright install
 ```
 
@@ -84,6 +84,44 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `--headless` | `False` | Run without visible browser window. |
 | `--output-dir` | `.` | Where to write results. |
 | `--fetch-magnets` | `False` | Open matched threads and extract magnet links. |
+| `--keyword` | `None` | Match posts whose title contains any keyword (e.g. `流出`). |
+| `--since` / `--until` | `None` | Date range filter (`YYYY-MM-DD` or `YYYY-MM`). |
+| `--start-page` | `1` | First forum page to scan. |
+| `--javdb` | `False` | Enrich matched posts with JavDB metadata. |
+| `--javdb-magnets` | `False` | Fetch magnets from JavDB API (implies `--javdb`). |
+| `--javdb-best` | `False` | Keep only the best JavDB magnet. |
+| `--javdb-cnsub` | `False` | Filter JavDB magnets to Chinese-subtitled entries. |
+| `--javdb-hd` | `False` | Filter JavDB magnets to HD entries. |
+| `--javdb-host` | mirror | JavDB API host (default `https://jdforrepam.com`). |
+
+## JavDB API
+
+The skill includes a Python port of [zjk1984/javdb-cli](https://github.com/zjk1984/javdb-cli) mobile App API client in `scripts/javdb_client.py`. It signs requests with the `jdsignature` header and calls `/api/v2/search`, `/api/v4/movies/{id}`, and `/api/v1/movies/{id}/magnets`.
+
+Requires `curl_cffi` (plain `requests` often gets HTTP 400 from JavDB).
+
+### Standalone lookup
+
+```bash
+python scripts/javdb_lookup.py SSIS-589 --magnets --best --json
+python scripts/javdb_lookup.py MIDA-749 --magnets --cnsub
+```
+
+### Scan + JavDB
+
+```bash
+python scripts/scan.py --keyword 流出 --javdb --javdb-magnets --javdb-best --fetch-magnets
+```
+
+Forum magnets and JavDB magnets are merged (deduplicated). When forum threads only have `.torrent` attachments, JavDB often still provides usable magnet links.
+
+### Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `JAVDB_HOST` | API base URL (default mirror `https://jdforrepam.com`) |
+| `JAVDB_TOKEN` | Optional bearer token for authenticated endpoints |
+| `JAVDB_DEVICE_UUID` | Stable device id for API params |
 
 ## First Run (Pass Cloudflare)
 
