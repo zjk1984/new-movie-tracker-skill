@@ -5,6 +5,7 @@ download_state.json
 data/
 page_debug.html
 javdb_auth.json
+pikpak_auth.json
 .env
 .env.local
 

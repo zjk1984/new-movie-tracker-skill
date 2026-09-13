@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Track submitted magnets so daily runs only download new content."""
+"""Track submitted downloads so daily runs only fetch new content."""
 from __future__ import annotations
 
 import json
@@ -26,6 +26,7 @@ def empty_state() -> dict[str, Any]:
     return {
         "last_run": None,
         "magnets": {},
+        "hashes": {},
         "threads": {},
     }
 
@@ -40,6 +41,7 @@ def load_state(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         return empty_state()
     data.setdefault("magnets", {})
+    data.setdefault("hashes", {})
     data.setdefault("threads", {})
     return data
 
@@ -54,17 +56,27 @@ def item_thread_key(item: dict[str, Any]) -> str | None:
     return href or None
 
 
-def item_magnet_key(item: dict[str, Any], magnet: str | None = None) -> str | None:
-    uri = magnet or item.get("selected_magnet") or ""
-    if not uri and item.get("magnets"):
-        uri = item["magnets"][0]
-    return extract_btih(uri)
+def item_download_key(item: dict[str, Any]) -> str | None:
+    btih = extract_btih(item.get("url") or item.get("magnet") or item.get("uri") or "")
+    if btih:
+        return f"btih:{btih}"
+    file_hash = (item.get("hash") or "").upper()
+    if file_hash:
+        return f"hash:{file_hash}"
+    uri = (item.get("uri") or item.get("pikpak_sha") or item.get("url") or "").strip()
+    return f"uri:{uri}" if uri else None
 
 
 def is_already_submitted(item: dict[str, Any], state: dict[str, Any]) -> bool:
-    magnet_key = item_magnet_key(item)
-    if magnet_key and magnet_key in state.get("magnets", {}):
-        return True
+    key = item_download_key(item)
+    if key:
+        store = key.split(":", 1)[0]
+        bucket = state.get("hashes" if store == "hash" else "magnets", {})
+        lookup = key.split(":", 1)[1]
+        if lookup in bucket:
+            return True
+        if store == "uri" and lookup in state.get("magnets", {}):
+            return True
     thread_key = item_thread_key(item)
     if thread_key and thread_key in state.get("threads", {}):
         return True
@@ -83,21 +95,27 @@ def mark_submitted(
 ) -> None:
     ts = (when or datetime.now()).isoformat(timespec="seconds")
     magnets = state.setdefault("magnets", {})
+    hashes = state.setdefault("hashes", {})
     threads = state.setdefault("threads", {})
     for item in items:
-        magnet = item.get("magnet") or item.get("selected_magnet") or ""
-        magnet_key = extract_btih(magnet)
-        thread_key = item_thread_key(item)
+        uri = item.get("uri") or item.get("pikpak_sha") or item.get("url") or item.get("magnet") or ""
         record = {
             "name": item.get("name") or item.get("av_number") or "",
             "title": (item.get("title") or "")[:120],
-            "magnet": magnet,
+            "uri": uri,
+            "type": item.get("type", "url"),
             "submitted_at": ts,
         }
-        if magnet_key:
-            magnets[magnet_key] = record
+        key = item_download_key(item)
+        if key:
+            store, lookup = key.split(":", 1)
+            if store == "hash":
+                hashes[lookup] = record
+            else:
+                magnets[lookup] = record
+        thread_key = item_thread_key(item)
         if thread_key:
-            threads[thread_key] = magnet_key or magnet
+            threads[thread_key] = key or uri
 
 
 def touch_run(state: dict[str, Any], *, when: datetime | None = None) -> None:

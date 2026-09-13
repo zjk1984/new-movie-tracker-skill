@@ -78,7 +78,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `--aliases-file` | `<skill-dir>/aliases.json` | Path to Japanese / Chinese alias mapping. |
 | `--actors-dir` | `E:\sakana` | Folder to read actor names from (fallback). |
 | `--save-actors` | `False` | Save loaded actors back to `--actors-file`. |
-| `--urls` | forum-103 + forum-36 | Target forum URLs to scan. |
+| `--urls` | forum-2/95/142 + forum-103 + forum-37 | Target forum URLs to scan. |
 | `--days` | `3` | Number of recent days to include. |
 | `--max-pages` | `5` | Max pages to scan per forum. |
 | `--headless` | `False` | Run without visible browser window. |
@@ -100,21 +100,47 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 
 ## Content filter (default)
 
-**Kept** (`selected_magnet` preserved, submitted to PikPak):
+### 日本 JAV
+
+**Kept:**
 
 | Region | Examples |
 |--------|----------|
 | `jav_censored` | MIDA-749, SNOS-270, [有码高清] |
-| `uncensored` | ATID-799 无码破解, [无码高清] |
+| `uncensored` | ATID-799 无码破解, HEYZO (日本无码) |
 
-**Excluded** (magnets cleared, `skip_reason: excluded_*`):
+### 国产无码（forum-2 / forum-95 / forum-142 等）
+
+识别：标题含 `[国产无码]` / `国产无码` / `[国产]`（优先于普通无码关键字）。
+
+**保留** `domestic_leak` — 满足任一且未命中排除项：
+
+| `domestic_subtype` | 条件 |
+|--------------------|------|
+| 泄密 | 泄密 / 泄露 |
+| 流出 | 流出（不含「未流出」） |
+| AI增强 | AI增强 / AI 增强 |
+
+**排除** `domestic_other` — 命中即排除（优先级高于保留标签）：
+
+| 原因 | 条件 |
+|------|------|
+| 私拍 | 私拍 |
+| 伪番号 | XJX, JDSY, MDSY, MDSR, JDSC, CNXX, RXAJ, TMW, TMG, YCM + 数字 |
+| OnlyFans | OnlyFans, HongKongDoll, 玩偶姐姐 |
+
+其他国产（探花、推特、剧情、福利姬等）→ `domestic_other`。
+
+### 其他排除
 
 | Region | Examples |
 |--------|----------|
 | `western` | Blacked, Brazzers, 欧美 |
 | `fc2` | FC2-PPV-* |
 | `amateur` | MAAN-*, 348NTR-*, 200GANA-*, 229SCUTE-* |
-| `other` | Unrecognized numbering |
+| `other` | [主播录制] 等 |
+
+Implementation: `scripts/content_filter.py`. Disable all filters: `--all-regions`.
 
 ## Cnsub-first workflow
 
@@ -127,10 +153,10 @@ Magnet selection order (`scripts/magnet_select.py`):
 End-to-end:
 
 ```bash
-export PIKPAK_TOKEN="your-token"
+python scripts/pikpak_login.py login
 python scripts/scan.py --days 3 --cnsub-priority --pikpak
-python scripts/pikpak_download.py
-python scripts/pikpak_download.py --all
+python scripts/pikpak_download.py --new-only
+python scripts/pikpak_download.py --all --new-only
 ```
 
 With PikPak MCP: scan with `--cnsub-priority` only, then MCP `add_link` each `selected_magnet` into **My Pack**.
@@ -206,16 +232,19 @@ If a Cloudflare challenge appears, complete it manually in the opened window. Th
 
 ## Daily Schedule (07:00, incremental download)
 
-`scripts/daily_run.py` scans forum-37 + forum-103, applies cnsub-first + content filter, then submits **only new magnets** to PikPak (dedup via `download_state.json` in the output directory).
+`scripts/daily_run.py` scans **forum-2 / forum-95 / forum-142** (今日下载链接) + forum-103 + forum-37, applies cnsub-first + content filter, then submits **only new downloads** to PikPak (dedup via `download_state.json` in the output directory).
 
 ### Prepare once
 
-1. Save PikPak token to `.env.local` in the skill directory:
+1. Save PikPak token (persisted in skill directory, like JavDB):
 
 ```bash
-PIKPAK_TOKEN=your-token-here
-PIKPAK_FOLDER=My Pack
+python scripts/pikpak_login.py login
+python scripts/pikpak_login.py login --from-env   # import from .env.local / PIKPAK_TOKEN
+python scripts/pikpak_login.py status --check
 ```
+
+Stored in `pikpak_auth.json` (gitignored, mode 600). Priority: `PIKPAK_TOKEN` env → saved file.
 
 2. First Cloudflare pass (headed browser):
 
@@ -302,13 +331,13 @@ This repo includes `.cursor/mcp.json`:
 ### Token setup
 
 1. In PikPak, go to **Account & Security → Connected Apps → Personal Access Tokens** and create a token with `cloud_download` permission.
-2. Set the token as an environment variable (do not commit it):
+2. Save it in the skill directory:
 
 ```bash
-export PIKPAK_TOKEN="your-token-here"
+python scripts/pikpak_login.py login
 ```
 
-For Cursor IDE, you can also set `PIKPAK_TOKEN` in **Settings → Secrets** so `${env:PIKPAK_TOKEN}` resolves automatically.
+For **Cursor MCP**, also set `PIKPAK_TOKEN` in **Settings → Secrets** (MCP reads env only). Scripts and `daily_run.py` use `pikpak_auth.json` automatically.
 
 ### Cloud Agent
 
@@ -323,7 +352,22 @@ Enable the PikPak MCP toggle when starting an agent run.
 
 After scanning, use the PikPak MCP `add_link` tool for each magnet. Default target folder is **My Pack** — pass its folder ID as `parent` (use `ls` at root to find it).
 
-Fallback without MCP: `python scripts/pikpak_download.py` (uses the same token via `PIKPAK_TOKEN`).
+Fallback without MCP: `python scripts/pikpak_download.py` (uses saved token in `pikpak_auth.json`).
+
+### PikPak feature codes (特征码 / GCID 秒传)
+
+Format: `PikPak://filename|size_bytes|GCID_HASH` (40-char GCID, not btih/ed2k MD4).
+
+```bash
+python scripts/pikpak_download.py --sha 'PikPak://MIDA-749.mp4|6123456789|ABCDEF0123456789ABCDEF0123456789ABCD'
+python scripts/pikpak_download.py --sha-file feature_codes.txt
+```
+
+- **Instant add** when PikPak cloud already has the GCID (`PHASE_TYPE_COMPLETE`).
+- **Fails** if the hash is not cached (no offline fetch by hash alone).
+- When a post has **no magnet links**, the scanner collects from the thread body: `ed2k://`, `PikPak://`, `filename|size|hash` pipe codes, and labeled 哈希校验/特征码 (`hash_entries`).
+- Selection order with magnets: cnsub forum → JavDB → forum fallback. **Without magnets:** PikPak SHA → ed2k → JavDB (if `--cnsub-priority`).
+- **ed2k** links are submitted as URL offline tasks (different hash algorithm from GCID).
 
 ## Troubleshooting
 

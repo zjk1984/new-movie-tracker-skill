@@ -483,12 +483,14 @@ def post_in_range(
     return bool(dt and dt >= cutoff)
 
 
-def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list[str]]:
+def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
     if not href:
-        return {"magnets": [], "ed2k": []}
+        return {"magnets": [], "ed2k": [], "pikpak_sha": [], "hash_entries": []}
     full_url = urljoin(forum_url, href)
     magnets: set[str] = set()
     ed2k: set[str] = set()
+    pikpak_sha: set[str] = set()
+    hash_entries: list[dict] = []
     try:
         page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
@@ -515,12 +517,22 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list[str]
         text = page.content()
         for m in re.findall(r'magnet:\?xt=urn:btih:[a-fA-F0-9]+(?:&[^"\s<>]+)?', text):
             magnets.add(m)
-        for e in re.findall(r'ed2k://[^"\s<>]+', text):
-            ed2k.add(e)
+
+        from pikpak_links import collect_alternatives_from_text
+
+        alts = collect_alternatives_from_text(text)
+        ed2k.update(alts["ed2k"])
+        pikpak_sha.update(alts["pikpak_sha"])
+        hash_entries = alts["hash_entries"]
 
     except Exception as e:
         print(f"[warn] failed to extract links from {full_url}: {e}")
-    return {"magnets": list(magnets), "ed2k": list(ed2k)}
+    return {
+        "magnets": list(magnets),
+        "ed2k": list(ed2k),
+        "pikpak_sha": list(pikpak_sha),
+        "hash_entries": hash_entries,
+    }
 
 
 def extract_magnets(page, href: str, forum_url: str) -> list[str]:
@@ -820,14 +832,24 @@ def scrape(args):
                             links = extract_thread_links(page, post["href"], forum_url)
                             item["magnets"] = links["magnets"]
                             item["ed2k"] = links["ed2k"]
-                        if getattr(args, "cnsub_priority", False):
+                            item["pikpak_sha"] = links["pikpak_sha"]
+                            item["hash_entries"] = links.get("hash_entries", [])
                             from magnet_select import apply_selection
 
-                            print(f"[info] selecting magnet: {item['title'][:40]}...")
-                            if apply_selection(item, javdb_client):
-                                print(f"[info]   -> {item.get('magnet_source')}")
+                            jd = javdb_client if getattr(args, "cnsub_priority", False) else None
+                            print(f"[info] selecting download: {item['title'][:40]}...")
+                            if apply_selection(item, jd):
+                                src = item.get("magnet_source") or item.get("download_source", "?")
+                                print(f"[info]   -> {src}")
+                            elif not item.get("magnets"):
+                                n_alt = (
+                                    len(item.get("ed2k") or [])
+                                    + len(item.get("pikpak_sha") or [])
+                                    + len(item.get("hash_entries") or [])
+                                )
+                                print(f"[info]   -> no magnet; collected {n_alt} alternative(s)")
                             else:
-                                print("[info]   -> no magnet selected")
+                                print("[info]   -> no download selected")
                         elif javdb_client:
                             print(f"[info] javdb lookup: {item['title'][:40]}...")
                             enrich_with_javdb(item, javdb_client, args)
@@ -937,11 +959,23 @@ def scrape(args):
                 if m.get("javdb_error"):
                     lines.append(f"javdb_error: {m['javdb_error']}")
                 if m.get("content_region"):
-                    lines.append(f"content_region: {m['content_region']}")
+                    region_line = f"content_region: {m['content_region']}"
+                    if m.get("domestic_subtype"):
+                        region_line += f" ({m['domestic_subtype']})"
+                    lines.append(region_line)
                 if m.get("skip_reason"):
                     lines.append(f"skip_reason: {m['skip_reason']}")
                 if m.get("selected_magnet"):
                     lines.append(f"selected_magnet ({m.get('magnet_source', '?')}): {m['selected_magnet']}")
+                if m.get("selected_pikpak_sha"):
+                    lines.append(
+                        f"selected_pikpak_sha ({m.get('download_source', '?')}): "
+                        f"{m['selected_pikpak_sha']}"
+                    )
+                if m.get("selected_ed2k"):
+                    lines.append(
+                        f"selected_ed2k ({m.get('download_source', '?')}): {m['selected_ed2k']}"
+                    )
                 if "magnets" in m:
                     if m["magnets"]:
                         lines.append("magnets:")
@@ -956,6 +990,23 @@ def scrape(args):
                             lines.append(f"  - {link}")
                     else:
                         lines.append("ed2k: (none found)")
+                if "pikpak_sha" in m:
+                    if m["pikpak_sha"]:
+                        lines.append("pikpak_sha:")
+                        for link in m["pikpak_sha"]:
+                            lines.append(f"  - {link}")
+                    else:
+                        lines.append("pikpak_sha: (none found)")
+                if "hash_entries" in m and m["hash_entries"]:
+                    lines.append("hash_entries:")
+                    for entry in m["hash_entries"]:
+                        label = entry.get("label") or entry.get("uri") or entry.get("hash", "")
+                        lines.append(f"  - [{entry.get('kind', '?')}] {label}")
+                if m.get("selected_download") and not m.get("selected_magnet"):
+                    lines.append(
+                        f"selected_download ({m.get('download_source', '?')}): "
+                        f"{m['selected_download']}"
+                    )
                 lines.append("-" * 40)
 
             result_text = "\n".join(lines)
@@ -982,7 +1033,9 @@ def scrape(args):
                 try:
                     from pikpak_download import submit_from_result
 
-                    folder = getattr(args, "pikpak_folder", None) or "My Pack"
+                    from pikpak_auth import resolve_folder
+
+                    folder = resolve_folder(getattr(args, "pikpak_folder", None))
                     ok, total = submit_from_result(
                         result_json,
                         folder=folder,
@@ -1021,8 +1074,11 @@ def main():
     parser.add_argument("--actors-dir", default=r"E:\sakana", help="Local actor directory (fallback)")
     parser.add_argument("--save-actors", action="store_true", help="Save loaded actors to --actors-file")
     parser.add_argument("--urls", nargs="+", default=[
+        "https://www.sehuatang.org/forum-2-1.html",
+        "https://www.sehuatang.org/forum-95-1.html",
+        "https://www.sehuatang.org/forum-142-1.html",
         "https://www.sehuatang.org/forum-103-1.html",
-        "https://www.sehuatang.org/forum-36-1.html",
+        "https://www.sehuatang.org/forum-37-1.html",
     ], help="Target forum URLs to scan")
     parser.add_argument("--days", type=int, default=3, help="How many recent days to check (ignored if --since is set)")
     parser.add_argument("--since", default=None, help="Start date YYYY-MM-DD or YYYY-MM (inclusive)")
@@ -1062,7 +1118,7 @@ def main():
     parser.add_argument(
         "--pikpak",
         action="store_true",
-        help="After scan, submit selected magnets to PikPak (requires PIKPAK_TOKEN)",
+        help="After scan, submit selected magnets to PikPak (uses saved token or PIKPAK_TOKEN)",
     )
     parser.add_argument(
         "--pikpak-folder",
@@ -1082,7 +1138,7 @@ def main():
     args.region_filter = not args.all_regions
     args.javdb_query = not args.no_javdb_query
     if args.region_filter:
-        print("[info] download filter: Japanese censored + uncensored JAV")
+        print("[info] download filter: JAV 有码/无码 + 国产(泄密/流出/AI增强; 排除私拍/伪番号/OnlyFans)")
     if args.javdb_query:
         print("[info] javdb query report: enabled for matched 有码/无码 items")
     scrape(args)
