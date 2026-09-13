@@ -407,6 +407,7 @@ def submit_downloads(
 
     ok = 0
     succeeded: list[dict] = []
+    failed: list[dict] = []
     for item in items:
         kind = "sha" if item.get("type") == "sha" else "url"
         try:
@@ -423,10 +424,41 @@ def submit_downloads(
             print(f"[ok] {label}{suffix} -> task={task_id} phase={phase}")
             print(f"     {item['title'][:80]}")
             ok += 1
-            succeeded.append(item)
+            record = dict(item)
+            record.update({"status": "ok", "task_id": task_id, "phase": phase})
+            succeeded.append(record)
         except Exception as exc:
-            print(f"[err] {item['name']} ({kind}): {exc}", file=sys.stderr)
-    return ok, len(items), succeeded
+            err = str(exc)
+            print(f"[err] {item['name']} ({kind}): {err}", file=sys.stderr)
+            record = dict(item)
+            record.update({"status": "failed", "error": err})
+            failed.append(record)
+    return ok, len(items), succeeded, failed
+
+
+def save_download_report(
+    path: Path,
+    *,
+    succeeded: list[dict],
+    failed: list[dict],
+    folder: str = DEFAULT_FOLDER,
+    source: str = "",
+) -> dict:
+    from datetime import datetime
+
+    report = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "folder": folder,
+        "source": source,
+        "ok": len(succeeded),
+        "failed_count": len(failed),
+        "total": len(succeeded) + len(failed),
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    return report
 
 
 # Backward-compatible alias
@@ -470,7 +502,18 @@ def submit_from_result(
             save_state(state_path, state)
         return 0, 0
     print(f"[info] submitting {len(items)} cloud download task(s)...")
-    ok, total, succeeded = submit_downloads(items, folder=folder, access_token=access_token)
+    ok, total, succeeded, failed = submit_downloads(
+        items, folder=folder, access_token=access_token,
+    )
+    report_path = result_path.parent / "download_report.json"
+    save_download_report(
+        report_path,
+        succeeded=succeeded,
+        failed=failed,
+        folder=folder,
+        source=str(result_path),
+    )
+    print(f"[info] download report: {report_path}")
     if new_only and state is not None:
         if succeeded:
             mark_submitted(state, succeeded)
@@ -558,7 +601,7 @@ def main() -> int:
             if not items:
                 print("[err] no feature codes provided", file=sys.stderr)
                 return 1
-            ok, total, _ = submit_downloads(items, folder=folder)
+            ok, total, _, _ = submit_downloads(items, folder=folder)
         except (RuntimeError, ValueError) as exc:
             print(f"[err] {exc}", file=sys.stderr)
             return 1

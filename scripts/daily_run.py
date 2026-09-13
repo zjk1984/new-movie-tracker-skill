@@ -91,7 +91,7 @@ def maybe_feishu_notify(
     if not enabled:
         return
     sys.path.insert(0, str(SCRIPTS_DIR))
-    from feishu_notify import is_configured, notify_scan_result
+    from feishu_notify import is_configured, notify_cards
 
     if not is_configured():
         print("[info] feishu: credentials or FEISHU_RECEIVE_ID not set, skip notify")
@@ -101,12 +101,13 @@ def maybe_feishu_notify(
         print("[warn] feishu: no last_result.json to summarize")
         return
     try:
-        notify_scan_result(
-            result_path,
-            pikpak_ok=pikpak_ok,
-            pikpak_total=pikpak_total,
+        report_path = output_dir / "download_report.json"
+        notify_cards(
+            [result_path],
+            download_report_path=report_path if report_path.exists() else None,
+            reconstruct_report=not report_path.exists(),
         )
-        print("[ok] feishu summary sent")
+        print("[ok] feishu cards sent (scan / fail / success)")
     except Exception as exc:
         print(f"[warn] feishu notify failed: {exc}")
 
