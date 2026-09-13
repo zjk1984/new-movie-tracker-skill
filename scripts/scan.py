@@ -527,8 +527,52 @@ def extract_magnets(page, href: str, forum_url: str) -> list[str]:
     return extract_thread_links(page, href, forum_url)["magnets"]
 
 
+def build_javdb_summary(matched: list[dict]) -> dict:
+    from collections import Counter
+
+    queried = [m for m in matched if m.get("javdb_query")]
+    errors = [m for m in queried if m["javdb_query"].get("query_status") == "error"]
+    with_mag = [
+        m for m in queried
+        if m["javdb_query"].get("magnet_status") == "available"
+    ]
+    empty = [
+        m for m in queried
+        if m["javdb_query"].get("magnet_status") == "empty"
+    ]
+    by_type = Counter(
+        m["javdb_query"].get("content_type_label") or "?"
+        for m in queried
+        if m["javdb_query"].get("query_status") == "ok"
+    )
+    return {
+        "queried": len(queried),
+        "errors": len(errors),
+        "with_magnets": len(with_mag),
+        "without_magnets": len(empty),
+        "by_content_type": dict(by_type),
+    }
+
+
+def format_javdb_summary_text(summary: dict) -> str:
+    if not summary.get("queried"):
+        return ""
+    lines = [
+        "",
+        "javdb_query_summary:",
+        f"  queried: {summary['queried']}",
+        f"  with_magnets: {summary['with_magnets']}",
+        f"  without_magnets: {summary['without_magnets']}",
+        f"  errors: {summary['errors']}",
+    ]
+    if summary.get("by_content_type"):
+        parts = ", ".join(f"{k} {v}" for k, v in summary["by_content_type"].items())
+        lines.append(f"  by_type: {parts}")
+    return "\n".join(lines)
+
+
 def enrich_with_javdb(item: dict, client, args) -> None:
-    from javdb_client import extract_av_number
+    from javdb_client import build_query_report, extract_av_number
 
     number = extract_av_number(item.get("title", ""))
     if not number:
@@ -537,7 +581,7 @@ def enrich_with_javdb(item: dict, client, args) -> None:
     try:
         info = client.lookup(
             number,
-            fetch_magnets=bool(getattr(args, "javdb_magnets", False)),
+            fetch_magnets=True,
             cnsub=bool(getattr(args, "javdb_cnsub", False)),
             hd=bool(getattr(args, "javdb_hd", False)),
             best_only=bool(getattr(args, "javdb_best", False)),
@@ -547,11 +591,14 @@ def enrich_with_javdb(item: dict, client, args) -> None:
         print(f"[warn] javdb lookup failed for {number}: {exc}")
         return
 
+    item["javdb_query"] = build_query_report(info)
     item["javdb"] = {
         "id": info.get("javdb_id"),
         "number": info.get("number"),
         "title": info.get("title"),
         "release_date": info.get("release_date"),
+        "content_type": info.get("content_type"),
+        "content_type_label": info.get("content_type_label"),
     }
     if info.get("release_date") and not item.get("release_date"):
         item["release_date"] = info["release_date"]
@@ -632,6 +679,7 @@ def scrape(args):
         getattr(args, "javdb", False)
         or getattr(args, "javdb_magnets", False)
         or getattr(args, "cnsub_priority", False)
+        or getattr(args, "javdb_query", True)
     ):
         try:
             from javdb_client import JavDBClient
@@ -793,6 +841,14 @@ def scrape(args):
                                     f"[skip] {item.get('content_region')}: "
                                     f"{item['title'][:50]}"
                                 )
+                            elif javdb_client and getattr(args, "javdb_query", True):
+                                from content_filter import is_downloadable as _is_dl
+                                from javdb_client import attach_javdb_query
+
+                                if _is_dl(item) and not item.get("javdb_query"):
+                                    attach_javdb_query(item, javdb_client)
+                                    q = item.get("javdb_query") or {}
+                                    print(f"[info]   javdb: {q.get('summary', '')}")
                         all_matched.append(item)
 
                     print(f"[info] page {page_num}: {len(posts)} rows, {new_posts} new, matched total {len(all_matched)}")
@@ -849,6 +905,11 @@ def scrape(args):
             lines.append(f"range: {range_label}")
             lines.append("=" * 60)
             lines.append(f"\nmatched {len(all_matched)} posts\n")
+            javdb_summary = build_javdb_summary(all_matched)
+            summary_text = format_javdb_summary_text(javdb_summary)
+            if summary_text:
+                lines.append(summary_text.strip())
+                lines.append("")
 
             for m in all_matched:
                 lines.append(f"date: {m['date']} ({m['date_raw']})")
@@ -866,7 +927,13 @@ def scrape(args):
                     lines.append(f"release_date: {m['release_date']}")
                 if m.get("javdb"):
                     j = m["javdb"]
-                    lines.append(f"javdb: {j.get('number')} | {j.get('release_date')} | {j.get('title', '')[:60]}")
+                    label = j.get("content_type_label") or ""
+                    lines.append(
+                        f"javdb: {j.get('number')} [{label}] | {j.get('release_date')} | "
+                        f"{j.get('title', '')[:50]}"
+                    )
+                if m.get("javdb_query"):
+                    lines.append(f"javdb_query: {m['javdb_query'].get('summary', '')}")
                 if m.get("javdb_error"):
                     lines.append(f"javdb_error: {m['javdb_error']}")
                 if m.get("content_region"):
@@ -901,6 +968,7 @@ def scrape(args):
                     "cutoff": cutoff.strftime("%Y-%m-%d"),
                     "today": today.strftime("%Y-%m-%d"),
                     "matched": all_matched,
+                    "javdb_summary": javdb_summary,
                     "total_posts": total_posts,
                     "pages_scanned": total_pages_scanned,
                 }, ensure_ascii=False, indent=2),
@@ -977,6 +1045,11 @@ def main():
         help="Download all content types (default: 日本有码 + 无码 JAV only)",
     )
     parser.add_argument(
+        "--no-javdb-query",
+        action="store_true",
+        help="Skip JavDB metadata/magnet report per matched item",
+    )
+    parser.add_argument(
         "--cnsub-priority",
         action="store_true",
         help="Cnsub-first magnets: forum cnsub -> JavDB cnsub -> forum fallback (implies --fetch-magnets)",
@@ -997,8 +1070,11 @@ def main():
     if args.cnsub_priority:
         args.fetch_magnets = True
     args.region_filter = not args.all_regions
+    args.javdb_query = not args.no_javdb_query
     if args.region_filter:
         print("[info] download filter: Japanese censored + uncensored JAV")
+    if args.javdb_query:
+        print("[info] javdb query report: enabled for matched 有码/无码 items")
     scrape(args)
 
 

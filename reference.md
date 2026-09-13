@@ -156,6 +156,23 @@ python scripts/scan.py --keyword 流出 --javdb --javdb-magnets --javdb-best --f
 
 Forum magnets and JavDB magnets are merged (deduplicated). When forum threads only have `.torrent` attachments, JavDB often still provides usable magnet links.
 
+### JavDB query report (default on)
+
+Each kept 有码/无码 item gets `javdb_query`:
+
+| Field | Meaning |
+|-------|---------|
+| `content_type_label` | `有码` or `无码` (from JavDB title/number) |
+| `magnet_status` | `available` / `empty` / `error` |
+| `magnet_total` | Total magnets on JavDB |
+| `magnet_filtered` | After `--cnsub`/`--hd` filter |
+| `best_magnet` | Best magnet URI |
+| `summary` | One-line Chinese explanation for chat |
+
+`last_result.json` includes `javdb_summary` aggregate counts.
+
+Disable with `--no-javdb-query`.
+
 ### Environment variables
 
 | Variable | Description |
