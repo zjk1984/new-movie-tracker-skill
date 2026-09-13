@@ -12,8 +12,10 @@ from playwright.sync_api import sync_playwright
 SKILL_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL_DIR / "scripts"))
 
+from content_filter import apply_region_filter
+from forum_browser import pass_age_gate
 from magnet_select import apply_selection
-from scan import extract_thread_links, pass_age_gate
+from scan import extract_thread_links
 
 
 def refetch_threads(
@@ -35,7 +37,6 @@ def refetch_threads(
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
         )
         page = context.new_page()
-        # Warm up forum session (helps Cloudflare + age gate)
         try:
             page.goto(forum_url, wait_until="domcontentloaded", timeout=90000)
             page.wait_for_timeout(8000)
@@ -57,6 +58,7 @@ def refetch_threads(
             links = extract_thread_links(page, href, forum_url)
             item.update(links)
             apply_selection(item, javdb_client=None)
+            apply_region_filter(item, region_filter=True)
             m = len(item.get("magnets") or [])
             e = len(item.get("ed2k") or [])
             h = len(item.get("hash_entries") or [])
@@ -80,11 +82,25 @@ def main() -> int:
     parser.add_argument("--forum-url", default="https://www.sehuatang.org/forum-142-1.html")
     parser.add_argument("--headless", action="store_true", default=True)
     parser.add_argument("--no-headless", action="store_true")
+    parser.add_argument(
+        "--submit",
+        action="store_true",
+        help="After refetch, submit gated magnets to PikPak",
+    )
+    parser.add_argument(
+        "--dry-run-gate",
+        action="store_true",
+        help="Print gated eligible/skipped counts without submitting",
+    )
+    parser.add_argument("--matched", default="", help="Optional last_result.json for gate context")
+    parser.add_argument("--folder", default=None, help="PikPak folder when --submit")
     args = parser.parse_args()
     if args.no_headless:
         args.headless = False
 
     threads = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    if isinstance(threads, dict):
+        threads = threads.get("threads") or []
     results = refetch_threads(
         threads,
         output_dir=Path(args.output_dir),
@@ -100,6 +116,43 @@ def main() -> int:
         "with_selected": sum(1 for x in results if x.get("selected_download") or x.get("selected_magnet")),
         "threads": results,
     }
+
+    if args.submit or args.dry_run_gate:
+        from submit_gate import collect_gated_downloads
+
+        matched_by_href: dict[str, dict] = {}
+        if args.matched:
+            mp = Path(args.matched)
+            if mp.exists():
+                matched = json.loads(mp.read_text(encoding="utf-8")).get("matched") or []
+                matched_by_href = {m.get("href"): m for m in matched if m.get("href")}
+        eligible, skipped = collect_gated_downloads(results, matched_by_href)
+        summary["gated_eligible"] = len(eligible)
+        summary["gated_skipped"] = len(skipped)
+        print(f"[info] gate: eligible={len(eligible)} skipped={len(skipped)}")
+        for row in skipped[:8]:
+            print(f"  [skip] {(row.get('name') or '?')[:50]} — {row.get('skip_reason', '?')}")
+
+        if args.submit and eligible:
+            from pikpak_auth import resolve_folder
+            from pikpak_download import save_download_report, submit_downloads
+
+            ok, total, succeeded, failed = submit_downloads(
+                eligible,
+                folder=resolve_folder(args.folder),
+            )
+            report_path = Path(args.output_dir) / "download_report.json"
+            save_download_report(
+                report_path,
+                succeeded=succeeded,
+                failed=failed,
+                folder=resolve_folder(args.folder),
+                source=str(out_path),
+            )
+            summary["submitted_ok"] = ok
+            summary["submitted_total"] = total
+            print(f"[done] submitted {ok}/{total}; report={report_path}")
+
     out_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n[done] {summary['with_selected']}/{summary['total']} with selected download")
     print(f"[done] saved to {out_path}")

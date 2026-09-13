@@ -2,9 +2,20 @@
 """Translate Japanese title fragments to Chinese for reports."""
 from __future__ import annotations
 
+import json
+import os
 import re
 import time
+from pathlib import Path
 from typing import Any
+
+SKILL_DIR = Path(__file__).resolve().parent.parent
+CACHE_FILE = Path(
+    os.environ.get("TITLE_TRANSLATE_CACHE", str(SKILL_DIR / "data" / "title_translate_cache.json")),
+)
+TRANSLATE_ENABLED = os.environ.get("TITLE_TRANSLATE", "1").strip().lower() not in {
+    "0", "false", "no", "off",
+}
 
 HIRAGANA_KATAKANA_RE = re.compile(r"[\u3040-\u309f\u30a0-\u30ff]")
 AV_PREFIX_RE = re.compile(
@@ -15,10 +26,34 @@ AV_PREFIX_RE = re.compile(
 
 _cache: dict[str, str] = {}
 _last_request_at = 0.0
+_cache_loaded = False
 
 
 def has_japanese(text: str) -> bool:
     return bool(HIRAGANA_KATAKANA_RE.search(text or ""))
+
+
+def _load_disk_cache() -> None:
+    global _cache_loaded
+    if _cache_loaded:
+        return
+    _cache_loaded = True
+    if not CACHE_FILE.exists():
+        return
+    try:
+        data = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            _cache.update({str(k): str(v) for k, v in data.items()})
+    except (OSError, json.JSONDecodeError):
+        pass
+
+
+def _save_disk_cache() -> None:
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE.write_text(
+        json.dumps(_cache, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _rate_limit_pause(min_interval: float = 0.35) -> None:
@@ -34,6 +69,9 @@ def translate_ja_to_zh(text: str) -> str:
     text = (text or "").strip()
     if not text or not has_japanese(text):
         return ""
+    if not TRANSLATE_ENABLED:
+        return ""
+    _load_disk_cache()
     if text in _cache:
         return _cache[text]
     try:
@@ -45,9 +83,11 @@ def translate_ja_to_zh(text: str) -> str:
             target="chinese simplified",
         ).translate(text[:500])
         _cache[text] = zh or ""
+        _save_disk_cache()
         return _cache[text]
     except Exception:
         _cache[text] = ""
+        _save_disk_cache()
         return ""
 
 

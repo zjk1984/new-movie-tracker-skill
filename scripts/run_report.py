@@ -524,18 +524,11 @@ def _is_jav_success_item(
     item: dict[str, Any],
     matched_by_href: dict[str, dict[str, Any]],
 ) -> bool:
-    from content_filter import classify_region
-    from javdb_client import extract_av_number, item_needs_javdb_score
+    from javdb_client import item_needs_javdb_score
+    from submit_gate import build_submit_probe
 
-    number = extract_av_number(item.get("name") or "") or extract_av_number(
-        item.get("title") or "",
-    )
-    if number:
-        return classify_region(
-            {"title": item.get("name") or item.get("title", ""), "av_number": number},
-        ) in JAV_REGIONS
-    base = matched_by_href.get(item.get("href") or "")
-    return bool(base and item_needs_javdb_score(base))
+    probe = build_submit_probe(item, matched_by_href)
+    return item_needs_javdb_score(probe)
 
 
 def _fill_missing_jav_scores(

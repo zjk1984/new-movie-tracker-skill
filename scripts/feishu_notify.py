@@ -27,19 +27,7 @@ FORUM_LABELS = {
     "forum-37": "forum-37 无码",
 }
 
-def load_env_local(skill_dir: Path | None = None) -> None:
-    env_path = (skill_dir or SKILL_DIR) / ".env.local"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        key = key.strip()
-        val = val.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = val
+from env_utils import load_env_local
 
 
 def resolve_app_credentials() -> tuple[str, str]:
@@ -307,98 +295,6 @@ def load_download_report(path: Path | None) -> dict[str, Any]:
     return {"succeeded": [], "failed": [], "ok": 0, "failed_count": 0, "total": 0}
 
 
-def build_download_report_from_scans(
-    result_paths: list[Path],
-    *,
-    ed2k_refetch_path: Path | None = None,
-    ed2k_error: str = "task_url_resolve_error: PikPak 无法解析 ed2k 链接",
-    matched: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Rebuild download report when only scan + ed2k refetch data exist."""
-    sys.path.insert(0, str(SKILL_DIR / "scripts"))
-    from pikpak_download import item_download_name, pick_item_download
-
-    if matched is None:
-        matched = analyze_scan(
-            result_paths, ed2k_refetch_path=ed2k_refetch_path,
-        )["matched"]
-    succeeded: list[dict] = []
-    failed: list[dict] = []
-
-    submit_summary = SKILL_DIR / "data" / "submit_summary.json"
-    magnet_ok = 0
-    if submit_summary.exists():
-        s = json.loads(submit_summary.read_text(encoding="utf-8"))
-        magnet_ok = int(s.get("grand_ok", 0)) - int((s.get("ed2k") or {}).get("ok", 0))
-
-    from javdb_client import is_submit_eligible
-
-    magnet_added = 0
-    for item in matched:
-        if not is_submit_eligible(item, query_if_missing=False):
-            continue
-        dl = pick_item_download(item)
-        if not dl:
-            continue
-        uri = dl.get("uri") or dl.get("url") or ""
-        ltype = _link_type(uri)
-        # ed2k 统一由 refetch 段写入，避免与多文件 refetch 重复
-        if ltype == "ed2k":
-            continue
-        if ltype == "magnet" and magnet_added < magnet_ok:
-            succeeded.append({
-                "name": dl.get("name") or item_download_name(item),
-                "title": item.get("title", ""),
-                "href": item.get("href", ""),
-                "uri": uri,
-                "url": uri,
-                "link_type": "magnet",
-                "source": dl.get("source", ""),
-                "status": "ok",
-                "phase": "PHASE_TYPE_RUNNING",
-            })
-            magnet_added += 1
-
-    # ed2k URIs (multi-file posts) — same region + JavDB score rules as magnet
-    from pikpak_links import normalize_ed2k_uri, parse_download_link
-
-    seen_uri = {x.get("uri") for x in failed}
-    for item in matched:
-        if not is_submit_eligible(item, query_if_missing=False):
-            continue
-        if not item.get("ed2k"):
-            continue
-        for ed2k in item["ed2k"]:
-            uri = normalize_ed2k_uri(ed2k) or ed2k
-            if uri in seen_uri:
-                continue
-            parsed = parse_download_link(uri)
-            if not parsed:
-                continue
-            failed.append({
-                "name": parsed.get("name") or "ed2k",
-                "title": item.get("title", ""),
-                "href": item.get("href", ""),
-                "uri": uri,
-                "url": uri,
-                "link_type": "ed2k",
-                "source": "forum_ed2k",
-                "status": "failed",
-                "error": ed2k_error,
-            })
-            seen_uri.add(uri)
-
-    return {
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "ok": len(succeeded),
-        "failed_count": len(failed),
-        "total": len(succeeded) + len(failed),
-        "succeeded": succeeded,
-        "failed": failed,
-        "reconstructed": True,
-    }
-
-
 def _truncate(text: str, limit: int = 80) -> str:
     text = (text or "").replace("\n", " ").strip()
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -496,7 +392,6 @@ def notify_cards(
     download_report_path: Path | None = None,
     extra_download_reports: list[Path] | None = None,
     ed2k_refetch_path: Path | None = None,
-    reconstruct_report: bool = False,
     push_report: bool = True,
     run_label: str = "scan",
 ) -> tuple[list[dict[str, Any]], Path, str | None]:
@@ -512,25 +407,19 @@ def notify_cards(
         ed2k_refetch_path=ed2k_refetch_path,
         enrich_javdb=True,
     )
-    if reconstruct_report or not (download_report_path and download_report_path.exists()):
-        download_report = build_download_report_from_scans(
-            result_paths,
-            ed2k_refetch_path=ed2k_refetch_path,
-            matched=scan_stats.get("matched"),
-        )
-    else:
-        download_report = load_download_report(download_report_path)
-
-    merge_paths = list(extra_download_reports or [])
-    default_bt = SKILL_DIR / "scan-bt-refetch/download_report.json"
-    if default_bt not in merge_paths:
-        merge_paths.append(default_bt)
-    extras = [load_download_report(p) for p in merge_paths if p.exists()]
+    download_report = load_download_report(download_report_path)
+    merge_paths = [p for p in (extra_download_reports or []) if p and p.exists()]
+    extras = [load_download_report(p) for p in merge_paths]
     if extras:
         download_report = merge_download_reports(download_report, *extras)
         print(
             f"[info] merged download reports: ok={download_report.get('ok')} "
             f"fail={download_report.get('failed_count')}"
+        )
+    elif not (download_report.get("succeeded") or download_report.get("failed")):
+        print(
+            "[warn] download report empty; pass --download-report and/or "
+            "--bt-download-report with real submit results"
         )
 
     from javdb_client import filter_download_report_by_jav_score
@@ -559,7 +448,7 @@ def notify_scan_result(
     *,
     push_report: bool = True,
 ) -> dict[str, Any]:
-    results, _, _ = notify_cards([result_path], reconstruct_report=True, push_report=push_report)
+    results, _, _ = notify_cards([result_path], push_report=push_report)
     return results[0]
 
 
@@ -615,11 +504,6 @@ def main() -> int:
         help="BT refetch submit report (merged into success list)",
     )
     cards.add_argument(
-        "--reconstruct",
-        action="store_true",
-        help="Rebuild download report from scan + submit_summary",
-    )
-    cards.add_argument(
         "--no-push",
         action="store_true",
         help="Save report locally without git commit/push",
@@ -648,7 +532,6 @@ def main() -> int:
         if args.func == "summary":
             _, report_path, report_url = notify_cards(
                 [Path(args.input)],
-                reconstruct_report=True,
                 push_report=not args.no_push,
             )
             print(f"[ok] summary sent; report: {report_path}")
@@ -664,12 +547,12 @@ def main() -> int:
             extra_reports = []
             if args.bt_download_report:
                 extra_reports.append(Path(args.bt_download_report))
+            dl_report = Path(args.download_report)
             _, report_path, report_url = notify_cards(
                 [Path(p) for p in inputs],
-                download_report_path=Path(args.download_report),
+                download_report_path=dl_report if dl_report.exists() else None,
                 extra_download_reports=extra_reports,
                 ed2k_refetch_path=Path(args.ed2k_refetch) if args.ed2k_refetch else None,
-                reconstruct_report=args.reconstruct or not Path(args.download_report).exists(),
                 push_report=not args.no_push,
                 run_label=args.run_label,
             )

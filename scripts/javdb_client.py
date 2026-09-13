@@ -44,6 +44,37 @@ AV_NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 
+JAVDB_CACHE_FILE = Path(
+    os.environ.get("JAVDB_CACHE_FILE", str(SKILL_DIR / "data" / "javdb_cache.json")),
+)
+JAVDB_CACHE_ENABLED = os.environ.get("JAVDB_CACHE", "1").strip().lower() not in {
+    "0", "false", "no", "off",
+}
+
+
+def _load_javdb_cache() -> dict[str, Any]:
+    if not JAVDB_CACHE_ENABLED or not JAVDB_CACHE_FILE.exists():
+        return {}
+    try:
+        data = json.loads(JAVDB_CACHE_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_javdb_cache(cache: dict[str, Any]) -> None:
+    if not JAVDB_CACHE_ENABLED:
+        return
+    JAVDB_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    JAVDB_CACHE_FILE.write_text(
+        json.dumps(cache, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _javdb_cache_key(number: str, *, fetch_magnets: bool, best_only: bool) -> str:
+    return f"{number.upper()}|m={int(fetch_magnets)}|b={int(best_only)}"
+
 
 def sign(ts: int | None = None) -> str:
     if ts is None or ts <= 0:
@@ -449,6 +480,16 @@ class JavDBClient:
         hd: bool = False,
         best_only: bool = False,
     ) -> dict[str, Any]:
+        cache_key = _javdb_cache_key(
+            number,
+            fetch_magnets=fetch_magnets,
+            best_only=best_only,
+        )
+        cache = _load_javdb_cache()
+        cached = cache.get(cache_key)
+        if isinstance(cached, dict) and cached.get("query_status") == "ok":
+            return dict(cached)
+
         movie_id = self.resolve_movie_id(number, exact=exact)
         detail = self.movie_detail(movie_id)
         resolved_number = _any_str(detail.get("number") or number).upper()
@@ -488,6 +529,10 @@ class JavDBClient:
             result["cnsub_magnet_count"] = 0
             result["best_magnet"] = ""
         result["summary"] = format_lookup_summary(result)
+        if JAVDB_CACHE_ENABLED and result.get("query_status") == "ok":
+            cache = _load_javdb_cache()
+            cache[cache_key] = result
+            _save_javdb_cache(cache)
         return result
 
 
@@ -710,43 +755,14 @@ def filter_download_report_by_jav_score(
     min_score: float = JAVDB_MIN_DOWNLOAD_SCORE,
 ) -> dict[str, Any]:
     """Drop succeeded download rows for Japanese items failing the JavDB score gate."""
-    if not report:
-        return report
-    href_map = {
-        m.get("href"): m for m in (matched or []) if m.get("href")
-    }
-    own_client = client is None
-    if own_client:
-        client = JavDBClient()
+    from submit_gate import filter_download_report
 
-    kept: list[dict[str, Any]] = []
-    removed = 0
-    for item in report.get("succeeded") or []:
-        base = href_map.get(item.get("href") or "")
-        probe: dict[str, Any]
-        if base:
-            probe = dict(base)
-        else:
-            probe = {
-                "title": item.get("title") or "",
-                "name": item.get("name") or "",
-                "href": item.get("href") or "",
-                "content_region": item.get("content_region") or "",
-            }
-        if ensure_javdb_score_gate(
-            probe, client, min_score=min_score, query_if_missing=True,
-        ):
-            kept.append(item)
-        else:
-            removed += 1
-
-    if removed:
-        report = dict(report)
-        report["succeeded"] = kept
-        report["ok"] = len(kept)
-        report["total"] = len(kept) + int(report.get("failed_count") or 0)
-        report["javdb_score_filtered"] = removed
-    return report
+    return filter_download_report(
+        report,
+        matched,
+        client,
+        min_score=min_score,
+    )
 
 
 def enrich_matched_javdb(

@@ -3,6 +3,17 @@ result.txt
 last_result.json
 download_state.json
 data/
+reports/*.md
+!reports/.gitkeep
+
+# Local scan artifacts
+scan-*/
+*.html
+!reference.md
+
+# Caches
+**/javdb_cache.json
+**/title_translate_cache.json
 page_debug.html
 javdb_auth.json
 pikpak_auth.json
