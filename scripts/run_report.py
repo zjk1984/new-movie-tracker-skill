@@ -501,12 +501,115 @@ def _jav_report_section(matched: list[dict[str, Any]], summary: dict[str, Any] |
     return "\n".join(lines)
 
 
-def _success_rows(succeeded: list[dict[str, Any]]) -> list[list[str]]:
+def _build_jav_score_lookup(matched: list[dict[str, Any]]) -> dict[str, float]:
+    from javdb_client import extract_av_number
+
+    lookup: dict[str, float] = {}
+    for item in matched:
+        q = item.get("javdb_query") or {}
+        score = q.get("score")
+        if score is None or q.get("query_status") != "ok":
+            continue
+        for key in (
+            item.get("av_number"),
+            q.get("number"),
+            extract_av_number(item.get("title", "")),
+        ):
+            if key:
+                lookup[key.upper()] = float(score)
+    return lookup
+
+
+def _is_jav_success_item(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]],
+) -> bool:
+    from content_filter import classify_region
+    from javdb_client import extract_av_number, item_needs_javdb_score
+
+    number = extract_av_number(item.get("name") or "") or extract_av_number(
+        item.get("title") or "",
+    )
+    if number:
+        return classify_region(
+            {"title": item.get("name") or item.get("title", ""), "av_number": number},
+        ) in JAV_REGIONS
+    base = matched_by_href.get(item.get("href") or "")
+    return bool(base and item_needs_javdb_score(base))
+
+
+def _fill_missing_jav_scores(
+    succeeded: list[dict[str, Any]],
+    score_lookup: dict[str, float],
+    matched_by_href: dict[str, dict[str, Any]],
+) -> None:
+    from javdb_client import JavDBClient, attach_javdb_query, extract_av_number
+
+    missing: set[str] = set()
+    for item in succeeded:
+        if not _is_jav_success_item(item, matched_by_href):
+            continue
+        number = extract_av_number(item.get("name") or "") or extract_av_number(
+            item.get("title") or "",
+        )
+        if number and number.upper() not in score_lookup:
+            missing.add(number.upper())
+    if not missing:
+        return
+    client = JavDBClient()
+    for key in sorted(missing):
+        probe = {"av_number": key, "title": key, "name": key}
+        attach_javdb_query(probe, client)
+        q = probe.get("javdb_query") or {}
+        if q.get("query_status") == "ok" and q.get("score") is not None:
+            score_lookup[key] = float(q["score"])
+
+
+def _success_item_score(
+    item: dict[str, Any],
+    *,
+    score_lookup: dict[str, float],
+    matched_by_href: dict[str, dict[str, Any]],
+) -> str:
+    from javdb_client import extract_av_number
+
+    if not _is_jav_success_item(item, matched_by_href):
+        return "-"
+    number = extract_av_number(item.get("name") or "") or extract_av_number(
+        item.get("title") or "",
+    )
+    if number:
+        score = score_lookup.get(number.upper())
+        if score is not None:
+            return f"{score:.2f}"
+    base = matched_by_href.get(item.get("href") or "")
+    if base:
+        q = base.get("javdb_query") or {}
+        score = q.get("score")
+        if score is not None and q.get("query_status") == "ok":
+            return f"{float(score):.2f}"
+    return "-"
+
+
+def _success_rows(
+    succeeded: list[dict[str, Any]],
+    matched: list[dict[str, Any]] | None = None,
+) -> list[list[str]]:
+    matched = matched or []
+    matched_by_href = {m.get("href"): m for m in matched if m.get("href")}
+    score_lookup = _build_jav_score_lookup(matched)
+    _fill_missing_jav_scores(succeeded, score_lookup, matched_by_href)
+
     rows: list[list[str]] = []
     for item in succeeded:
         rows.append([
             item.get("name") or "?",
             _format_success_type(item),
+            _success_item_score(
+                item,
+                score_lookup=score_lookup,
+                matched_by_href=matched_by_href,
+            ),
             _item_uri(item),
             item.get("phase") or item.get("status") or "ok",
         ])
@@ -536,7 +639,10 @@ def write_run_report(
 
     failed_items = list(download_report.get("failed") or [])
 
-    ok_rows = _success_rows(list(download_report.get("succeeded") or []))
+    ok_rows = _success_rows(
+        list(download_report.get("succeeded") or []),
+        scan_stats.get("matched") or [],
+    )
 
     dl_posts = scan_stats.get("downloadable", 0)
     with_link = scan_stats.get("with_link", 0)
@@ -584,7 +690,7 @@ def write_run_report(
 
 ## 下载成功
 
-{_md_table(["名称", "类型", "下载链接", "状态"], ok_rows)}
+{_md_table(["名称", "类型", "评分", "下载链接", "状态"], ok_rows)}
 
 {jav_section}
 
