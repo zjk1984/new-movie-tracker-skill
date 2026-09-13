@@ -441,11 +441,54 @@ def pass_age_gate(page) -> bool:
     return False
 
 
-def extract_magnets(page, href: str, forum_url: str) -> list[str]:
+def parse_date_arg(value: str) -> datetime:
+    value = value.strip()
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m", "%Y/%m"):
+        try:
+            dt = datetime.strptime(value, fmt)
+            if fmt in ("%Y-%m", "%Y/%m"):
+                return dt.replace(day=1)
+            return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        except ValueError:
+            continue
+    raise ValueError(f"invalid date: {value}")
+
+
+def month_end(dt: datetime) -> datetime:
+    if dt.month == 12:
+        nxt = dt.replace(year=dt.year + 1, month=1, day=1)
+    else:
+        nxt = dt.replace(month=dt.month + 1, day=1)
+    return nxt - timedelta(days=1)
+
+
+def post_in_range(
+    dt: datetime | None,
+    since: datetime | None,
+    until: datetime | None,
+    cutoff: datetime,
+    *,
+    keyword_only: bool = False,
+) -> bool:
+    if keyword_only and not since and not until:
+        return True
+    if since or until:
+        if not dt:
+            return False
+        if since and dt < since:
+            return False
+        if until and dt > until:
+            return False
+        return True
+    return bool(dt and dt >= cutoff)
+
+
+def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list[str]]:
     if not href:
-        return []
+        return {"magnets": [], "ed2k": []}
     full_url = urljoin(forum_url, href)
-    magnets = set()
+    magnets: set[str] = set()
+    ed2k: set[str] = set()
     try:
         page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
@@ -460,14 +503,67 @@ def extract_magnets(page, href: str, forum_url: str) -> list[str]:
             except Exception:
                 continue
 
+        ed2k_anchors = page.locator('a[href^="ed2k://"]')
+        for i in range(ed2k_anchors.count()):
+            try:
+                href_val = ed2k_anchors.nth(i).get_attribute("href")
+                if href_val:
+                    ed2k.add(href_val)
+            except Exception:
+                continue
+
         text = page.content()
-        found = re.findall(r'magnet:\?xt=urn:btih:[a-fA-F0-9]+(?:&[^"\s<>]+)?', text)
-        for m in found:
+        for m in re.findall(r'magnet:\?xt=urn:btih:[a-fA-F0-9]+(?:&[^"\s<>]+)?', text):
             magnets.add(m)
+        for e in re.findall(r'ed2k://[^"\s<>]+', text):
+            ed2k.add(e)
 
     except Exception as e:
-        print(f"[warn] failed to extract magnets from {full_url}: {e}")
-    return list(magnets)
+        print(f"[warn] failed to extract links from {full_url}: {e}")
+    return {"magnets": list(magnets), "ed2k": list(ed2k)}
+
+
+def extract_magnets(page, href: str, forum_url: str) -> list[str]:
+    return extract_thread_links(page, href, forum_url)["magnets"]
+
+
+def match_post(
+    post: dict,
+    *,
+    keywords: list[str],
+    match_names: set[str],
+    match_index: dict[str, set[str]],
+    since: datetime | None,
+    until: datetime | None,
+    cutoff: datetime,
+    today: datetime,
+) -> dict | None:
+    dt = parse_date(post["date_text"], today)
+    if keywords:
+        if not any(kw in post["title"] for kw in keywords):
+            return None
+        if not post_in_range(dt, since, until, cutoff, keyword_only=True):
+            return None
+    else:
+        if not post_in_range(dt, since, until, cutoff):
+            return None
+        matched_names = sorted(name for name in match_names if name in post["title"])
+        found = sorted({actor for name in matched_names for actor in match_index.get(name, {name})})
+        if not found:
+            return None
+    matched_names = sorted(name for name in match_names if name in post["title"])
+    found = sorted({actor for name in matched_names for actor in match_index.get(name, {name})})
+    item = {
+        "date": (dt or today).strftime("%Y-%m-%d"),
+        "date_raw": post["date_text"],
+        "title": post["title"],
+        "href": post["href"],
+        "actors": found,
+        "matched_names": matched_names,
+    }
+    if keywords:
+        item["keywords"] = [kw for kw in keywords if kw in post["title"]]
+    return item
 
 
 def scrape(args):
@@ -492,7 +588,13 @@ def scrape(args):
     screenshot_dir.mkdir(exist_ok=True)
 
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    since = parse_date_arg(args.since) if getattr(args, "since", None) else None
+    until = parse_date_arg(args.until) if getattr(args, "until", None) else None
+    if since and not args.until and len(args.since.strip()) in (7, 6):
+        until = month_end(since)
     cutoff = today - timedelta(days=args.days - 1)
+    if since:
+        print(f"[info] date range: {since.strftime('%Y-%m-%d')} ~ {(until or today).strftime('%Y-%m-%d')}")
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
@@ -519,13 +621,19 @@ def scrape(args):
             total_pages_scanned = 0
             cf_keywords = ["赫拉克利特", "亚里士多德", "希腊谚语", "佛教谚语", "cf-browser-verification", "challenge-platform"]
 
+            keywords = [k for k in (getattr(args, "keywords", None) or []) if k]
+
             for forum_url in args.urls:
                 print(f"\n[info] scanning forum: {forum_url}")
                 seen_hrefs = set()
-                forum_posts = []
                 last_page_num = 0
 
-                for page_num in range(1, args.max_pages + 1):
+                start_page = max(1, getattr(args, "start_page", 1) or 1)
+                end_page = start_page + args.max_pages - 1
+                if start_page > 1:
+                    print(f"[info] page range: {start_page} ~ {end_page}")
+
+                for page_num in range(start_page, end_page + 1):
                     url = build_page_url(forum_url, page_num)
                     print(f"[info] opening page {page_num}: {url}")
                     page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -559,69 +667,59 @@ def scrape(args):
                                 context.close()
                                 return
                         else:
-                            print("[err] blocked by cloudflare in headless mode. run once without --headless to pass challenge.")
-                            context.close()
-                            return
+                            print("[warn] cloudflare on page {0}, saving partial results".format(page_num))
+                            page.screenshot(path=str(screenshot_dir / f"cf_block_{page_num}.png"))
+                            break
 
                     posts = parse_posts_from_page(page)
                     new_posts = 0
+                    page_new = []
                     for post in posts:
                         if post["href"] and post["href"] not in seen_hrefs:
                             seen_hrefs.add(post["href"])
-                            forum_posts.append(post)
+                            page_new.append(post)
                             new_posts += 1
-                        elif not post["href"] and post["title"] not in {p["title"] for p in forum_posts}:
-                            forum_posts.append(post)
+                        elif not post["href"] and post["title"] not in seen_hrefs:
+                            seen_hrefs.add(post["title"])
+                            page_new.append(post)
                             new_posts += 1
 
-                    print(f"[info] page {page_num}: {len(posts)} rows, {new_posts} new posts (total {len(forum_posts)})")
+                    for post in page_new:
+                        item = match_post(
+                            post,
+                            keywords=keywords,
+                            match_names=match_names,
+                            match_index=match_index,
+                            since=since,
+                            until=until,
+                            cutoff=cutoff,
+                            today=today,
+                        )
+                        if not item:
+                            continue
+                        item["forum"] = forum_url
+                        if args.fetch_magnets and post.get("href"):
+                            print(f"[info] fetching links for: {post['title'][:40]}...")
+                            links = extract_thread_links(page, post["href"], forum_url)
+                            item["magnets"] = links["magnets"]
+                            item["ed2k"] = links["ed2k"]
+                        all_matched.append(item)
+
+                    print(f"[info] page {page_num}: {len(posts)} rows, {new_posts} new, matched total {len(all_matched)}")
                     total_posts += len(posts)
                     total_pages_scanned += 1
                     last_page_num = page_num
 
-                    if page_num >= 2 and posts:
+                    if start_page == 1 and page_num >= 2 and posts:
                         dates = [parse_date(p["date_text"], today) for p in posts]
                         valid_dates = [d for d in dates if d]
-                        if valid_dates and max(valid_dates) < cutoff:
-                            print(f"[info] page {page_num} oldest post is before cutoff, stopping early")
+                        stop_before = since if since else cutoff
+                        if valid_dates and max(valid_dates) < stop_before:
+                            print(f"[info] page {page_num} newest post is before range, stopping early")
                             break
 
-                    if page_num < args.max_pages:
-                        page.wait_for_timeout(2000)
-
-                keywords = [k for k in (getattr(args, "keywords", None) or []) if k]
-
-                for post in forum_posts:
-                    dt = parse_date(post["date_text"], today)
-                    if keywords:
-                        if not any(kw in post["title"] for kw in keywords):
-                            continue
-                        if dt and dt < cutoff:
-                            continue
-                    else:
-                        if not (dt and dt >= cutoff):
-                            continue
-                        matched_names = sorted(name for name in match_names if name in post["title"])
-                        found = sorted({actor for name in matched_names for actor in match_index.get(name, {name})})
-                        if not found:
-                            continue
-                    matched_names = sorted(name for name in match_names if name in post["title"])
-                    found = sorted({actor for name in matched_names for actor in match_index.get(name, {name})})
-                    item = {
-                        "date": (dt or today).strftime("%Y-%m-%d"),
-                        "date_raw": post["date_text"],
-                        "title": post["title"],
-                        "href": post["href"],
-                        "actors": found,
-                        "matched_names": matched_names,
-                        "forum": forum_url,
-                    }
-                    if keywords:
-                        item["keywords"] = [kw for kw in keywords if kw in post["title"]]
-                    if args.fetch_magnets and post.get("href"):
-                        print(f"[info] fetching magnets for: {post['title'][:40]}...")
-                        item["magnets"] = extract_magnets(page, post["href"], forum_url)
-                    all_matched.append(item)
+                    if page_num < end_page:
+                        page.wait_for_timeout(4000 if since or start_page > 1 else 2000)
 
             if not all_matched:
                 lines = []
@@ -631,7 +729,11 @@ def scrape(args):
                 lines.append(f"match_names: {len(match_names)}")
                 lines.append(f"posts_scanned: {total_posts}")
                 lines.append(f"pages_scanned: {total_pages_scanned}")
-                lines.append(f"range: {cutoff.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}")
+                range_label = (
+                    f"{since.strftime('%Y-%m-%d')} ~ {(until or today).strftime('%Y-%m-%d')}"
+                    if since else f"{cutoff.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}"
+                )
+                lines.append(f"range: {range_label}")
                 lines.append("=" * 60)
                 lines.append("\nno matched posts in the recent period.")
                 result_text = "\n".join(lines)
@@ -650,7 +752,11 @@ def scrape(args):
             lines.append(f"posts_scanned: {total_posts}")
             lines.append(f"pages_scanned: {total_pages_scanned}")
             lines.append(f"forums: {len(args.urls)}")
-            lines.append(f"range: {cutoff.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}")
+            range_label = (
+                f"{since.strftime('%Y-%m-%d')} ~ {(until or today).strftime('%Y-%m-%d')}"
+                if since else f"{cutoff.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}"
+            )
+            lines.append(f"range: {range_label}")
             lines.append("=" * 60)
             lines.append(f"\nmatched {len(all_matched)} posts\n")
 
@@ -666,11 +772,18 @@ def scrape(args):
                 lines.append(f"href: {m['href']}")
                 if "magnets" in m:
                     if m["magnets"]:
-                        lines.append(f"magnets:")
+                        lines.append("magnets:")
                         for mg in m["magnets"]:
                             lines.append(f"  - {mg}")
                     else:
                         lines.append("magnets: (none found)")
+                if "ed2k" in m:
+                    if m["ed2k"]:
+                        lines.append("ed2k:")
+                        for link in m["ed2k"]:
+                            lines.append(f"  - {link}")
+                    else:
+                        lines.append("ed2k: (none found)")
                 lines.append("-" * 40)
 
             result_text = "\n".join(lines)
@@ -722,8 +835,11 @@ def main():
         "https://www.sehuatang.org/forum-103-1.html",
         "https://www.sehuatang.org/forum-36-1.html",
     ], help="Target forum URLs to scan")
-    parser.add_argument("--days", type=int, default=3, help="How many recent days to check")
-    parser.add_argument("--max-pages", type=int, default=5, help="Max pages per forum")
+    parser.add_argument("--days", type=int, default=3, help="How many recent days to check (ignored if --since is set)")
+    parser.add_argument("--since", default=None, help="Start date YYYY-MM-DD or YYYY-MM (inclusive)")
+    parser.add_argument("--until", default=None, help="End date YYYY-MM-DD (inclusive; defaults to month-end for --since YYYY-MM)")
+    parser.add_argument("--start-page", type=int, default=1, help="First page number to scan (default: 1)")
+    parser.add_argument("--max-pages", type=int, default=5, help="Number of pages to scan from start-page")
     parser.add_argument("--headless", action="store_true", help="Run browser headless")
     parser.add_argument("--output-dir", default=".", help="Directory for results")
     parser.add_argument("--fetch-magnets", action="store_true", help="Open matched threads and extract magnet links")
