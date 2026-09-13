@@ -3,6 +3,8 @@ result.txt
 last_result.json
 page_debug.html
 javdb_auth.json
+.env
+.env.local
 
 # Browser session & debug artifacts
 chrome_profile/
