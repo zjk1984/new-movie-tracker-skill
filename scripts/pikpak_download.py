@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Submit magnet links to PikPak cloud download via API."""
+import argparse
 import hashlib
 import json
 import os
 import sys
 import time
-import uuid
 from pathlib import Path
 
 import requests
+
+DEFAULT_FOLDER = "My Pack"
 
 CLIENT_ID = "YUMx5nI8ZU8Ap8pm"
 CLIENT_VERSION = "1.0.0"
@@ -90,6 +92,50 @@ def api_headers(access_token: str, device_id: str, captcha_token: str | None = N
     return headers
 
 
+def list_files(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    parent_id: str = "",
+    limit: int = 200,
+) -> list[dict]:
+    filters = json.dumps(
+        {"phase": {"eq": "PHASE_TYPE_COMPLETE"}, "trashed": {"eq": False}},
+        separators=(",", ":"),
+    )
+    params = {
+        "parent_id": parent_id,
+        "thumbnail_size": "SIZE_MEDIUM",
+        "limit": str(limit),
+        "with_audit": "true",
+        "filters": filters,
+    }
+    captcha_token = get_captcha_token(session, device_id, user_id, "GET:/drive/v1/files/")
+    resp = session.get(
+        f"{DRIVE_HOST}/drive/v1/files",
+        headers=api_headers(access_token, device_id, captcha_token),
+        params=params,
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"list files failed: HTTP {resp.status_code} {resp.text[:300]}")
+    return resp.json().get("files") or []
+
+
+def find_folder_id(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    folder_name: str,
+) -> str | None:
+    for item in list_files(session, access_token, device_id, user_id):
+        if item.get("kind") == "drive#folder" and item.get("name") == folder_name:
+            return item.get("id")
+    return None
+
+
 def offline_download(
     session: requests.Session,
     access_token: str,
@@ -97,6 +143,7 @@ def offline_download(
     user_id: str,
     name: str,
     magnet: str,
+    parent_id: str | None = None,
 ) -> dict:
     body = {
         "kind": "drive#file",
@@ -104,6 +151,11 @@ def offline_download(
         "upload_type": "UPLOAD_TYPE_URL",
         "url": {"url": magnet},
     }
+    if parent_id:
+        body["parent_id"] = parent_id
+        body["folder_type"] = ""
+    else:
+        body["folder_type"] = "DOWNLOAD"
     captcha_token = get_captcha_token(session, device_id, user_id, "POST:/drive/v1/files")
     resp = session.post(
         f"{DRIVE_HOST}/drive/v1/files",
@@ -133,6 +185,14 @@ def load_today_magnets(result_path: Path) -> list[dict]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Submit magnets to PikPak cloud download")
+    parser.add_argument(
+        "--folder",
+        default=os.environ.get("PIKPAK_FOLDER", DEFAULT_FOLDER),
+        help=f"Target folder name (default: {DEFAULT_FOLDER})",
+    )
+    args = parser.parse_args()
+
     access_token = os.environ.get("PIKPAK_TOKEN", "").strip()
     if not access_token:
         print("[err] set PIKPAK_TOKEN environment variable", file=sys.stderr)
@@ -153,13 +213,25 @@ def main() -> int:
         return 0
 
     session = requests.Session()
+    parent_id = find_folder_id(session, access_token, device_id, user_id, args.folder)
+    if parent_id:
+        print(f"[info] download folder: {args.folder} ({parent_id})")
+    else:
+        print(f"[warn] folder '{args.folder}' not found, using folder_type=DOWNLOAD fallback")
+
     print(f"[info] submitting {len(items)} cloud download task(s)...")
 
     ok = 0
     for item in items:
         try:
             result = offline_download(
-                session, access_token, device_id, user_id, item["name"], item["magnet"]
+                session,
+                access_token,
+                device_id,
+                user_id,
+                item["name"],
+                item["magnet"],
+                parent_id=parent_id,
             )
             task = result.get("task") or {}
             file_info = result.get("file") or {}
