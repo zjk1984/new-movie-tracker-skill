@@ -107,13 +107,13 @@ def _collect_fail_uris(failed: list[dict[str, Any]]) -> list[str]:
 
 
 def _md_fail_links(failed: list[dict[str, Any]]) -> str:
-    """Render failed downloads with copy-all and per-item code blocks."""
+    """Render all failed URIs in one copyable code block."""
     if not failed:
         return "_（无）_\n"
 
     all_uris = _collect_fail_uris(failed)
     lines = [
-        "> 点击下面 **全部失败链接** 代码块右上角 **Copy**，可一次复制所有 URI（每行一条）。\n",
+        "> 点击下面代码块右上角 **Copy**，可一次复制全部失败 URI（每行一条）。\n",
         f"### 全部失败链接（{len(all_uris)} 条）\n",
     ]
     if all_uris:
@@ -122,21 +122,75 @@ def _md_fail_links(failed: list[dict[str, Any]]) -> str:
         lines.append("```\n")
     else:
         lines.append("_（无链接）_\n")
-
-    lines.append("### 明细\n")
-    for idx, item in enumerate(failed, 1):
-        name = (item.get("name") or "?").replace("\n", " ").strip()
-        link_type = _infer_link_type(item)
-        reason = _format_fail_reason(item.get("error") or "")
-        uri = (item.get("uri") or item.get("url") or "").strip()
-        lines.append(f"#### {idx}. {name} · {link_type} · {reason}\n")
-        if uri:
-            lines.append("```text")
-            lines.append(uri)
-            lines.append("```\n")
-        else:
-            lines.append("_（无链接）_\n")
     return "\n".join(lines)
+
+
+def _item_uri(item: dict[str, Any]) -> str:
+    return (item.get("uri") or item.get("url") or "").strip()
+
+
+def merge_download_reports(*reports: dict[str, Any]) -> dict[str, Any]:
+    """Merge multiple PikPak download_report payloads, dedupe by URI."""
+    succeeded: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    seen_ok: set[str] = set()
+    seen_fail: set[str] = set()
+    sources: list[str] = []
+
+    for report in reports:
+        if not report:
+            continue
+        src = report.get("source")
+        if src:
+            sources.append(str(src))
+        for item in report.get("succeeded") or []:
+            uri = _item_uri(item)
+            if not uri or uri in seen_ok:
+                continue
+            seen_ok.add(uri)
+            succeeded.append(item)
+        for item in report.get("failed") or []:
+            uri = _item_uri(item)
+            key = uri or f"{item.get('name')}:{item.get('error')}"
+            if key in seen_fail:
+                continue
+            seen_fail.add(key)
+            failed.append(item)
+
+    merged: dict[str, Any] = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "ok": len(succeeded),
+        "failed_count": len(failed),
+        "total": len(succeeded) + len(failed),
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+    if sources:
+        merged["source"] = "; ".join(sources)
+    return merged
+
+
+def _format_success_type(item: dict[str, Any]) -> str:
+    base = _infer_link_type(item)
+    src = (item.get("source") or "").lower()
+    if src in {"bt_refetch", "forum_bt_feature", "forum_bt_seed_code"} or "bt" in src:
+        return f"{base} (BT)"
+    title = item.get("title") or ""
+    if base == "magnet" and ("BT种子" in title or "【BT" in title or "[BT" in title):
+        return f"{base} (BT)"
+    return base
+
+
+def _success_rows(succeeded: list[dict[str, Any]]) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for item in succeeded:
+        rows.append([
+            item.get("name") or "?",
+            _format_success_type(item),
+            _item_uri(item),
+            item.get("phase") or item.get("status") or "ok",
+        ])
+    return rows
 
 
 def write_run_report(
@@ -162,14 +216,7 @@ def write_run_report(
 
     failed_items = list(download_report.get("failed") or [])
 
-    ok_rows = []
-    for item in download_report.get("succeeded") or []:
-        ok_rows.append([
-            item.get("name") or "?",
-            item.get("link_type") or "?",
-            item.get("uri") or item.get("url") or "",
-            item.get("phase") or "ok",
-        ])
+    ok_rows = _success_rows(list(download_report.get("succeeded") or []))
 
     dl_posts = scan_stats.get("downloadable", 0)
     with_link = scan_stats.get("with_link", 0)

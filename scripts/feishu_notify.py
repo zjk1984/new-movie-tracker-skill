@@ -448,6 +448,7 @@ def notify_cards(
     result_paths: list[Path],
     *,
     download_report_path: Path | None = None,
+    extra_download_reports: list[Path] | None = None,
     ed2k_refetch_path: Path | None = None,
     reconstruct_report: bool = False,
     push_report: bool = True,
@@ -456,6 +457,7 @@ def notify_cards(
     from run_report import (
         commit_and_push_report,
         github_blob_url,
+        merge_download_reports,
         write_run_report,
     )
 
@@ -466,6 +468,18 @@ def notify_cards(
         )
     else:
         download_report = load_download_report(download_report_path)
+
+    merge_paths = list(extra_download_reports or [])
+    default_bt = SKILL_DIR / "scan-bt-refetch/download_report.json"
+    if default_bt not in merge_paths:
+        merge_paths.append(default_bt)
+    extras = [load_download_report(p) for p in merge_paths if p.exists()]
+    if extras:
+        download_report = merge_download_reports(download_report, *extras)
+        print(
+            f"[info] merged download reports: ok={download_report.get('ok')} "
+            f"fail={download_report.get('failed_count')}"
+        )
 
     report_path = write_run_report(scan_stats, download_report, run_label=run_label)
     rel = report_path.relative_to(SKILL_DIR)
@@ -537,6 +551,11 @@ def main() -> int:
         help="download_report.json from pikpak_download",
     )
     cards.add_argument(
+        "--bt-download-report",
+        default=str(SKILL_DIR / "scan-bt-refetch/download_report.json"),
+        help="BT refetch submit report (merged into success list)",
+    )
+    cards.add_argument(
         "--reconstruct",
         action="store_true",
         help="Rebuild download report from scan + submit_summary",
@@ -583,9 +602,13 @@ def main() -> int:
                 str(SKILL_DIR / "scan-forum-95-142-today/last_result.json"),
                 str(SKILL_DIR / "scan-today-f37-f103/last_result.json"),
             ]
+            extra_reports = []
+            if args.bt_download_report:
+                extra_reports.append(Path(args.bt_download_report))
             _, report_path, report_url = notify_cards(
                 [Path(p) for p in inputs],
                 download_report_path=Path(args.download_report),
+                extra_download_reports=extra_reports,
                 ed2k_refetch_path=Path(args.ed2k_refetch) if args.ed2k_refetch else None,
                 reconstruct_report=args.reconstruct or not Path(args.download_report).exists(),
                 push_report=not args.no_push,
