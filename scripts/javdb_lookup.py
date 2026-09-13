@@ -19,6 +19,10 @@ def print_lookup_result(item: dict) -> None:
     print(f"{item['number']} [{label}] ({q.get('release_date', '?')})")
     if q.get("title"):
         print(f"  title: {q['title']}")
+    if q.get("score") is not None:
+        print(f"  score: {q['score']:.2f}")
+    if q.get("cnsub_label"):
+        print(f"  cnsub: {q['cnsub_label']}")
     print(f"  query: {q.get('summary', '')}")
     magnets = item.get("magnets") or []
     if magnets:

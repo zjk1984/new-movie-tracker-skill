@@ -211,6 +211,7 @@ def analyze_scan(
     result_paths: list[Path],
     *,
     ed2k_refetch_path: Path | None = None,
+    enrich_javdb: bool = False,
 ) -> dict[str, Any]:
     sys.path.insert(0, str(SKILL_DIR / "scripts"))
     from content_filter import apply_region_filter, is_downloadable
@@ -268,6 +269,12 @@ def analyze_scan(
             if counts[k] > 0:
                 posts_with[k] += 1
 
+    javdb_summary: dict[str, Any] = {}
+    if enrich_javdb:
+        from javdb_client import enrich_matched_javdb
+
+        javdb_summary = enrich_matched_javdb(matched)
+
     return {
         "scan_time": max(scan_times) if scan_times else datetime.now().isoformat(timespec="seconds"),
         "forums": dict(forums),
@@ -280,6 +287,7 @@ def analyze_scan(
         "link_totals": link_totals,
         "posts_with": posts_with,
         "matched": matched,
+        "javdb_summary": javdb_summary,
     }
 
 
@@ -416,6 +424,23 @@ def build_scan_summary_card(
     dl_posts = scan_stats.get("downloadable", 0)
     with_link = scan_stats.get("with_link", 0)
     without_link = scan_stats.get("without_link", 0)
+    jav = scan_stats.get("javdb_summary") or {}
+    subtype = scan_stats.get("subtype_counts") or {}
+
+    jav_lines = ""
+    if jav.get("total"):
+        avg = jav.get("avg_score")
+        avg_text = f"{avg:.2f}" if avg is not None else "-"
+        jav_lines = (
+            f"\n**日本片 JavDB** 共 **{jav.get('total', 0)}** 帖"
+            f" | 已查 **{jav.get('queried', 0)}**"
+            f" | 含中字 **{jav.get('with_cnsub', 0)}**"
+            f" | 均分 **{avg_text}**\n"
+        )
+    domestic_lines = ""
+    if subtype:
+        sub_text = " | ".join(f"{k} {v}" for k, v in sorted(subtype.items(), key=lambda x: -x[1]))
+        domestic_lines = f"\n**国产子类** {sub_text}\n"
 
     md = (
         f"**扫描时间** {str(scan_stats.get('scan_time', ''))[:19]}\n\n"
@@ -429,7 +454,8 @@ def build_scan_summary_card(
         f"• ed2k: **{lt.get('ed2k', 0)}** 条 ({pw.get('ed2k', 0)} 帖)\n"
         f"• BT种子: **{lt.get('bt', 0)}** 条 ({pw.get('bt', 0)} 帖)\n\n"
         f"**PikPak 提交**(按**链接**计) 成功 **{ok}** + 失败 **{fail}** = **{total}** 条\n"
-        f"_(可下载 {dl_posts} 帖 ≠ 提交 {total} 条：{without_link} 帖无链接 + 多文件帖按链接计)_\n\n"
+        f"_(可下载 {dl_posts} 帖 ≠ 提交 {total} 条：{without_link} 帖无链接 + 多文件帖按链接计)_"
+        f"{jav_lines}{domestic_lines}\n"
         f"**失败原因汇总**\n{_error_summary(download_report.get('failed') or [])}\n"
     )
     if report_url:
@@ -464,7 +490,11 @@ def notify_cards(
         write_run_report,
     )
 
-    scan_stats = analyze_scan(result_paths, ed2k_refetch_path=ed2k_refetch_path)
+    scan_stats = analyze_scan(
+        result_paths,
+        ed2k_refetch_path=ed2k_refetch_path,
+        enrich_javdb=True,
+    )
     if reconstruct_report or not (download_report_path and download_report_path.exists()):
         download_report = build_download_report_from_scans(
             result_paths, ed2k_refetch_path=ed2k_refetch_path,

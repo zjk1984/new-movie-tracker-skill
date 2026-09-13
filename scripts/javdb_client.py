@@ -88,6 +88,28 @@ def _any_str(value: Any) -> str:
     return str(value)
 
 
+def _parse_score(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    return score if score > 0 else None
+
+
+def format_cnsub_label(info: dict[str, Any]) -> str:
+    """Human-readable Chinese-subtitle status from JavDB metadata + magnets."""
+    if info.get("query_status") == "error":
+        return "-"
+    if _truthy(info.get("has_cnsub")):
+        return "库内标注"
+    cnsub_count = int(info.get("cnsub_magnet_count") or 0)
+    if cnsub_count > 0:
+        return f"磁力{cnsub_count}条"
+    return "无"
+
+
 def magnet_uri(row: dict[str, Any]) -> str:
     h = _any_str(row.get("hash"))
     if not h:
@@ -438,6 +460,7 @@ class JavDBClient:
             "release_date": _any_str(detail.get("release_date")),
             "duration": detail.get("duration"),
             "has_cnsub": detail.get("has_cnsub"),
+            "score": _parse_score(detail.get("score")),
             "content_type": content_type,
             "content_type_label": content_type_label(content_type),
             "query_status": "ok",
@@ -445,6 +468,9 @@ class JavDBClient:
         if fetch_magnets:
             all_rows = self.movie_magnets(movie_id)
             result["magnet_total"] = len(all_rows)
+            result["cnsub_magnet_count"] = sum(
+                1 for row in all_rows if _truthy(row.get("cnsub"))
+            )
             magnets = filter_magnets(all_rows, cnsub=cnsub, hd=hd)
             result["magnet_filtered"] = len(magnets)
             if best_only:
@@ -459,6 +485,7 @@ class JavDBClient:
             result["magnet_status"] = "not_requested"
             result["magnet_total"] = 0
             result["magnet_filtered"] = 0
+            result["cnsub_magnet_count"] = 0
             result["best_magnet"] = ""
         result["summary"] = format_lookup_summary(result)
         return result
@@ -486,8 +513,14 @@ def format_lookup_summary(info: dict[str, Any], *, error: str | None = None) -> 
     number = info.get("number", "?")
     label = info.get("content_type_label") or content_type_label(info.get("content_type", ""))
     parts = [f"JavDB {number} [{label}]", f"发行 {info.get('release_date') or '-'}"]
-    if info.get("has_cnsub"):
-        parts.append("库内标注含中字")
+    score = info.get("score")
+    if score is not None:
+        parts.append(f"评分 {score:.2f}")
+    cnsub_label = format_cnsub_label(info)
+    if cnsub_label not in {"-", "无"}:
+        parts.append(f"中字 {cnsub_label}")
+    elif info.get("query_status") == "ok":
+        parts.append("中字 无")
     status = info.get("magnet_status")
     if status == "available":
         total = info.get("magnet_total", 0)
@@ -509,6 +542,9 @@ def build_query_report(info: dict[str, Any]) -> dict[str, Any]:
         "release_date": info.get("release_date"),
         "title": info.get("title"),
         "has_cnsub": info.get("has_cnsub"),
+        "cnsub_magnet_count": info.get("cnsub_magnet_count", 0),
+        "cnsub_label": format_cnsub_label(info),
+        "score": info.get("score"),
         "magnet_status": info.get("magnet_status"),
         "magnet_total": info.get("magnet_total", 0),
         "magnet_filtered": info.get("magnet_filtered", 0),
@@ -526,6 +562,9 @@ def build_error_report(number: str, error: str) -> dict[str, Any]:
         "release_date": "",
         "title": "",
         "has_cnsub": None,
+        "cnsub_magnet_count": 0,
+        "cnsub_label": "-",
+        "score": None,
         "magnet_status": "error",
         "magnet_total": 0,
         "magnet_filtered": 0,
@@ -551,9 +590,99 @@ def attach_javdb_query(item: dict[str, Any], client: JavDBClient) -> None:
             "release_date": info.get("release_date"),
             "content_type": info.get("content_type"),
             "content_type_label": info.get("content_type_label"),
+            "has_cnsub": info.get("has_cnsub"),
+            "cnsub_magnet_count": info.get("cnsub_magnet_count", 0),
+            "score": info.get("score"),
         }
         if info.get("release_date") and not item.get("release_date"):
             item["release_date"] = info["release_date"]
     except Exception as exc:
         item["javdb_query"] = build_error_report(number, str(exc))
         item["javdb_error"] = str(exc)
+
+
+JAV_REPORT_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
+
+
+def enrich_matched_javdb(
+    matched: list[dict[str, Any]],
+    client: JavDBClient | None = None,
+    *,
+    only_downloadable: bool = True,
+) -> dict[str, Any]:
+    """Query JavDB for Japanese items missing javdb_query; return summary stats."""
+    from content_filter import is_downloadable
+
+    own_client = client is None
+    if own_client:
+        client = JavDBClient()
+    queried = skipped = errors = 0
+    with_cnsub = 0
+
+    for item in matched:
+        region = item.get("content_region") or ""
+        if region not in JAV_REPORT_REGIONS:
+            continue
+        if only_downloadable and not is_downloadable(item):
+            continue
+        number = item.get("av_number") or extract_av_number(item.get("title", ""))
+        if not number:
+            skipped += 1
+            continue
+        if item.get("javdb_query"):
+            q = item["javdb_query"]
+            if q.get("query_status") == "ok" and q.get("score") is None:
+                attach_javdb_query(item, client)
+                queried += 1
+            continue
+        attach_javdb_query(item, client)
+        queried += 1
+        q = item.get("javdb_query") or {}
+        if q.get("query_status") == "error":
+            errors += 1
+        elif q.get("cnsub_label") not in {"无", "-", None, ""}:
+            with_cnsub += 1
+
+    if own_client:
+        del client
+
+    summary = build_javdb_report_summary(matched)
+    summary.update({"newly_queried": queried, "skipped_no_number": skipped, "query_errors": errors})
+    return summary
+
+
+def build_javdb_report_summary(matched: list[dict[str, Any]]) -> dict[str, Any]:
+    from collections import Counter
+
+    from content_filter import is_downloadable
+
+    items = [
+        m for m in matched
+        if m.get("content_region") in JAV_REPORT_REGIONS and is_downloadable(m)
+    ]
+    queried = [m for m in items if m.get("javdb_query")]
+    ok = [m for m in queried if m["javdb_query"].get("query_status") == "ok"]
+    errors = [m for m in queried if m["javdb_query"].get("query_status") == "error"]
+    with_cnsub = [
+        m for m in ok
+        if m["javdb_query"].get("cnsub_label") not in {"无", "-", None, ""}
+    ]
+    scores = [
+        m["javdb_query"]["score"]
+        for m in ok
+        if m["javdb_query"].get("score") is not None
+    ]
+    by_type = Counter(
+        m["javdb_query"].get("content_type_label") or "?"
+        for m in ok
+    )
+    return {
+        "total": len(items),
+        "queried": len(queried),
+        "ok": len(ok),
+        "errors": len(errors),
+        "with_cnsub": len(with_cnsub),
+        "without_cnsub": len(ok) - len(with_cnsub),
+        "avg_score": round(sum(scores) / len(scores), 2) if scores else None,
+        "by_content_type": dict(by_type),
+    }

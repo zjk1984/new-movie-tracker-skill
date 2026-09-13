@@ -184,6 +184,110 @@ def _format_success_type(item: dict[str, Any]) -> str:
     return base
 
 
+def _truncate(text: str, limit: int = 60) -> str:
+    text = (text or "").replace("\n", " ").strip()
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _jav_report_rows(matched: list[dict[str, Any]]) -> list[list[str]]:
+    from content_filter import is_downloadable
+
+    rows: list[list[str]] = []
+    for item in matched:
+        region = item.get("content_region") or ""
+        if region not in {"jav_censored", "uncensored", "fc2"}:
+            continue
+        if not is_downloadable(item):
+            continue
+        number = item.get("av_number") or item.get("title", "")[:20]
+        q = item.get("javdb_query") or {}
+        if q.get("query_status") == "error":
+            rows.append([
+                number,
+                q.get("content_type_label") or "-",
+                "-",
+                "-",
+                "-",
+                q.get("error") or "查询失败",
+            ])
+            continue
+        if not q:
+            rows.append([number, "-", "-", "-", "-", "未查询 JavDB"])
+            continue
+        score = q.get("score")
+        rows.append([
+            q.get("number") or number,
+            q.get("content_type_label") or "-",
+            q.get("cnsub_label") or "-",
+            f"{score:.2f}" if score is not None else "-",
+            q.get("release_date") or "-",
+            _truncate(q.get("title") or item.get("title", "")),
+        ])
+    rows.sort(key=lambda r: (r[4], r[0]), reverse=True)
+    return rows
+
+
+def _domestic_report_sections(matched: list[dict[str, Any]]) -> str:
+    from collections import Counter
+
+    from content_filter import is_downloadable
+
+    items = [
+        m for m in matched
+        if m.get("content_region") == "domestic_leak" and is_downloadable(m)
+    ]
+    if not items:
+        return "## 国产分类\n\n_（无）_\n"
+
+    subtype_counts = Counter(m.get("domestic_subtype") or "其他" for m in items)
+    count_lines = "\n".join(
+        f"- {name}: **{count}** 帖"
+        for name, count in subtype_counts.most_common()
+    )
+
+    sections: list[str] = [
+        "## 国产分类\n",
+        "### 子类统计\n",
+        count_lines + "\n",
+    ]
+    for subtype, _ in subtype_counts.most_common():
+        group = [m for m in items if (m.get("domestic_subtype") or "其他") == subtype]
+        rows = [
+            [
+                _truncate(m.get("title", ""), 70),
+                "有" if m.get("magnets") or m.get("ed2k") or m.get("selected_download") else "无",
+            ]
+            for m in group
+        ]
+        sections.append(f"### {subtype}（{len(group)} 帖）\n")
+        sections.append(_md_table(["标题", "链接"], rows))
+    return "\n".join(sections)
+
+
+def _jav_report_section(matched: list[dict[str, Any]], summary: dict[str, Any] | None) -> str:
+    summary = summary or {}
+    avg = summary.get("avg_score")
+    avg_text = f"{avg:.2f}" if avg is not None else "-"
+    lines = [
+        "## 日本片 JavDB\n",
+        "### 汇总\n",
+        f"- 可下载日本片: **{summary.get('total', 0)}** 帖\n",
+        f"- 已查 JavDB: **{summary.get('queried', 0)}** 帖"
+        f"（成功 {summary.get('ok', 0)} / 失败 {summary.get('errors', 0)}）\n",
+        f"- 含中字: **{summary.get('with_cnsub', 0)}** 帖"
+        f" | 无中字: **{summary.get('without_cnsub', 0)}** 帖\n",
+        f"- 平均评分: **{avg_text}**\n",
+    ]
+    by_type = summary.get("by_content_type") or {}
+    if by_type:
+        type_line = " | ".join(f"{k} {v}" for k, v in sorted(by_type.items()))
+        lines.append(f"- 类型: {type_line}\n")
+    lines.append("\n### 明细\n")
+    rows = _jav_report_rows(matched)
+    lines.append(_md_table(["番号", "类型", "中字", "评分", "发行", "JavDB 标题"], rows))
+    return "\n".join(lines)
+
+
 def _success_rows(succeeded: list[dict[str, Any]]) -> list[list[str]]:
     rows: list[list[str]] = []
     for item in succeeded:
@@ -225,6 +329,10 @@ def write_run_report(
     with_link = scan_stats.get("with_link", 0)
     without_link = scan_stats.get("without_link", 0)
 
+    jav_summary = scan_stats.get("javdb_summary") or {}
+    jav_section = _jav_report_section(scan_stats.get("matched") or [], jav_summary)
+    domestic_section = _domestic_report_sections(scan_stats.get("matched") or [])
+
     body = f"""# 论坛扫描报告
 
 - **生成时间**: {datetime.now().isoformat(timespec="seconds")}
@@ -252,6 +360,10 @@ def write_run_report(
 | PikPak 合计 | {total} | 成功+失败链接数，非帖数 |
 
 > **为何可下载 {dl_posts} ≠ PikPak {total}？** {without_link} 帖无链接未提交；有链接帖中多 ed2k 文件按链接逐条提交。
+
+{jav_section}
+
+{domestic_section}
 
 ## 下载失败
 
