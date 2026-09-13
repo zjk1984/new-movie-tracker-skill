@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pikpak_links import normalize_ed2k_uri
@@ -110,6 +110,25 @@ def _collect_fail_uris(failed: list[dict[str, Any]]) -> list[str]:
 
 
 JAV_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
+FORUM_SITE_BASE = "https://www.sehuatang.org/"
+
+
+def _thread_post_url(item: dict[str, Any]) -> str:
+    href = (item.get("href") or "").strip()
+    if not href:
+        return ""
+    if href.startswith("http://") or href.startswith("https://"):
+        return href
+    return urljoin(FORUM_SITE_BASE, href.lstrip("/"))
+
+
+def _md_title_line(title: str, thread_url: str) -> str:
+    if thread_url:
+        return (
+            f"**标题**: <a href=\"{html.escape(thread_url, quote=True)}\">"
+            f"{html.escape(title)}</a>\n"
+        )
+    return f"**标题**: `{title}`\n"
 
 
 def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
@@ -225,12 +244,16 @@ def _build_undownloaded_entries(
         href = item.get("href") or ""
         errors = [failed_by_uri.get(uri, "") for _, uri in pending if failed_by_uri.get(uri)]
         failed_error = errors[0] if errors else failed_by_href.get(href, "")
+        from title_translate import translate_title_for_item
+
         entry = {
             "title": (item.get("title") or "").replace("\n", " ").strip(),
+            "title_zh": translate_title_for_item(item),
             "label": item.get("av_number") or _truncate(item.get("title", ""), 40),
             "reason": _skip_reason_label(item, failed_error=failed_error),
             "links": pending,
             "href": href,
+            "thread_url": _thread_post_url(item),
         }
         if region in JAV_REGIONS:
             jav_entries.append(entry)
@@ -277,7 +300,9 @@ def _md_undownloaded_posts(
         lines.append(f"### 日本片（{len(jav_entries)} 帖）\n")
         for entry in jav_entries:
             lines.append(f"#### {entry['label']} · {entry['reason']}\n")
-            lines.append(f"**标题**: `{entry['title']}`\n")
+            lines.append(_md_title_line(entry["title"], entry.get("thread_url", "")))
+            if entry.get("title_zh"):
+                lines.append(f"**中文**: {entry['title_zh']}\n")
             lines.append(_md_copyable_links(entry["links"]))
 
     if domestic_entries:
@@ -287,7 +312,9 @@ def _md_undownloaded_posts(
             lines.append(
                 f"#### [{sub}] {_truncate(entry['label'], 36)} · {entry['reason']}\n"
             )
-            lines.append(f"**标题**: `{entry['title']}`\n")
+            lines.append(_md_title_line(entry["title"], entry.get("thread_url", "")))
+            if entry.get("title_zh"):
+                lines.append(f"**中文**: {entry['title_zh']}\n")
             lines.append(_md_copyable_links(entry["links"]))
 
     return "\n".join(lines)
