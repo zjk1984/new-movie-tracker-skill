@@ -229,9 +229,15 @@ def submit_magnets(
     folder: str = DEFAULT_FOLDER,
     access_token: str | None = None,
 ) -> tuple[int, int, list[dict]]:
-    token = (access_token or os.environ.get("PIKPAK_TOKEN", "")).strip()
+    from pikpak_auth import resolve_folder, resolve_token
+
+    token = resolve_token(access_token)
     if not token:
-        raise RuntimeError("set PIKPAK_TOKEN environment variable")
+        raise RuntimeError(
+            "no PikPak token: run `python scripts/pikpak_login.py login` "
+            "or set PIKPAK_TOKEN"
+        )
+    folder = resolve_folder(folder, DEFAULT_FOLDER)
 
     payload = decode_jwt_payload(token)
     user_id = payload.get("sub", "")
@@ -321,8 +327,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Submit magnets to PikPak cloud download")
     parser.add_argument(
         "--folder",
-        default=os.environ.get("PIKPAK_FOLDER", DEFAULT_FOLDER),
-        help=f"Target folder name (default: {DEFAULT_FOLDER})",
+        default=None,
+        help=f"Target folder name (default: saved or {DEFAULT_FOLDER})",
     )
     parser.add_argument(
         "--all",
@@ -352,10 +358,12 @@ def main() -> int:
         return 1
 
     try:
+        from pikpak_auth import resolve_folder
+
         state_file = Path(args.state_file) if args.state_file else None
         ok, total = submit_from_result(
             result_path,
-            folder=args.folder,
+            folder=resolve_folder(args.folder, DEFAULT_FOLDER),
             today_only=not args.all,
             region_filter=not args.all_regions,
             new_only=args.new_only,

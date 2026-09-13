@@ -982,7 +982,9 @@ def scrape(args):
                 try:
                     from pikpak_download import submit_from_result
 
-                    folder = getattr(args, "pikpak_folder", None) or "My Pack"
+                    from pikpak_auth import resolve_folder
+
+                    folder = resolve_folder(getattr(args, "pikpak_folder", None))
                     ok, total = submit_from_result(
                         result_json,
                         folder=folder,
@@ -1062,7 +1064,7 @@ def main():
     parser.add_argument(
         "--pikpak",
         action="store_true",
-        help="After scan, submit selected magnets to PikPak (requires PIKPAK_TOKEN)",
+        help="After scan, submit selected magnets to PikPak (uses saved token or PIKPAK_TOKEN)",
     )
     parser.add_argument(
         "--pikpak-folder",

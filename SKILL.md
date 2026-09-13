@@ -172,9 +172,16 @@ When the user wants **Chinese-subtitled magnets** from forum posts and automatic
 3. Else fall back to any forum magnet
 4. Submit selected magnets to PikPak folder **My Pack** (有码 + 无码 JAV only)
 
+**Save PikPak token once (persisted in skill directory):**
+```bash
+python scripts/pikpak_login.py login
+python scripts/pikpak_login.py status --check
+```
+
+Token is saved to `pikpak_auth.json` (gitignored). Scripts pick it up automatically; env `PIKPAK_TOKEN` overrides if set.
+
 **One command (API fallback):**
 ```bash
-export PIKPAK_TOKEN="your-token"
 python scripts/scan.py --days 3 --cnsub-priority --pikpak --pikpak-folder "My Pack"
 ```
 
@@ -200,7 +207,6 @@ If PikPak MCP is configured (see `.cursor/mcp.json` and [reference.md](reference
 
 If MCP is unavailable, fall back to:
 ```bash
-export PIKPAK_TOKEN="your-token"
 python scripts/pikpak_download.py --new-only
 ```
 
@@ -209,7 +215,7 @@ python scripts/pikpak_download.py --new-only
 Run every morning at **07:00** to scan recent forum posts and submit **only new magnets** since the last run (tracked in `download_state.json`).
 
 **One-time setup**
-1. Put `PIKPAK_TOKEN` in `.env.local` (or system env).
+1. Save PikPak token: `python scripts/pikpak_login.py login` (stored in `pikpak_auth.json`).
 2. Pass Cloudflare once: `python scripts/daily_run.py --no-headless` (uses `data/chrome_profile/`).
 3. Register the scheduled task (see [reference.md](reference.md)).
 
@@ -229,6 +235,7 @@ Explain results to the user:
 - `result.txt` — Human-readable report (overwritten each run)
 - `last_result.json` — Structured data for downstream use
 - `download_state.json` — Submitted magnet/thread history (for incremental runs)
+- `pikpak_auth.json` — Saved PikPak token (gitignored)
 - `screenshots/` — Debug screenshots if errors occur
 - `chrome_profile/` — Persistent browser session (do not delete)
 

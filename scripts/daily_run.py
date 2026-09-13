@@ -55,6 +55,7 @@ def run_scan(args: argparse.Namespace, output_dir: Path) -> int:
 
 def run_download(args: argparse.Namespace, output_dir: Path) -> int:
     sys.path.insert(0, str(SCRIPTS_DIR))
+    from pikpak_auth import resolve_folder
     from pikpak_download import submit_from_result
 
     result_path = output_dir / "last_result.json"
@@ -64,7 +65,7 @@ def run_download(args: argparse.Namespace, output_dir: Path) -> int:
     try:
         ok, total = submit_from_result(
             result_path,
-            folder=args.pikpak_folder,
+            folder=resolve_folder(args.pikpak_folder),
             today_only=False,
             region_filter=True,
             new_only=True,
@@ -119,8 +120,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--pikpak-folder",
-        default=os.environ.get("PIKPAK_FOLDER", "My Pack"),
-        help="PikPak target folder",
+        default=None,
+        help="PikPak target folder (default: saved or My Pack)",
     )
     args = parser.parse_args()
     if args.no_headless:

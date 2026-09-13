@@ -127,10 +127,10 @@ Magnet selection order (`scripts/magnet_select.py`):
 End-to-end:
 
 ```bash
-export PIKPAK_TOKEN="your-token"
+python scripts/pikpak_login.py login
 python scripts/scan.py --days 3 --cnsub-priority --pikpak
-python scripts/pikpak_download.py
-python scripts/pikpak_download.py --all
+python scripts/pikpak_download.py --new-only
+python scripts/pikpak_download.py --all --new-only
 ```
 
 With PikPak MCP: scan with `--cnsub-priority` only, then MCP `add_link` each `selected_magnet` into **My Pack**.
@@ -210,12 +210,15 @@ If a Cloudflare challenge appears, complete it manually in the opened window. Th
 
 ### Prepare once
 
-1. Save PikPak token to `.env.local` in the skill directory:
+1. Save PikPak token (persisted in skill directory, like JavDB):
 
 ```bash
-PIKPAK_TOKEN=your-token-here
-PIKPAK_FOLDER=My Pack
+python scripts/pikpak_login.py login
+python scripts/pikpak_login.py login --from-env   # import from .env.local / PIKPAK_TOKEN
+python scripts/pikpak_login.py status --check
 ```
+
+Stored in `pikpak_auth.json` (gitignored, mode 600). Priority: `PIKPAK_TOKEN` env → saved file.
 
 2. First Cloudflare pass (headed browser):
 
@@ -302,13 +305,13 @@ This repo includes `.cursor/mcp.json`:
 ### Token setup
 
 1. In PikPak, go to **Account & Security → Connected Apps → Personal Access Tokens** and create a token with `cloud_download` permission.
-2. Set the token as an environment variable (do not commit it):
+2. Save it in the skill directory:
 
 ```bash
-export PIKPAK_TOKEN="your-token-here"
+python scripts/pikpak_login.py login
 ```
 
-For Cursor IDE, you can also set `PIKPAK_TOKEN` in **Settings → Secrets** so `${env:PIKPAK_TOKEN}` resolves automatically.
+For **Cursor MCP**, also set `PIKPAK_TOKEN` in **Settings → Secrets** (MCP reads env only). Scripts and `daily_run.py` use `pikpak_auth.json` automatically.
 
 ### Cloud Agent
 
