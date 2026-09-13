@@ -328,6 +328,7 @@ def write_run_report(
     dl_posts = scan_stats.get("downloadable", 0)
     with_link = scan_stats.get("with_link", 0)
     without_link = scan_stats.get("without_link", 0)
+    skipped_jav_score = scan_stats.get("skipped_jav_score", 0)
 
     jav_summary = scan_stats.get("javdb_summary") or {}
     jav_section = _jav_report_section(scan_stats.get("matched") or [], jav_summary)
@@ -358,8 +359,9 @@ def write_run_report(
 | PikPak 成功 | {ok} | 按**链接**提交成功 |
 | PikPak 失败 | {fail} | 按**链接**提交失败 |
 | PikPak 合计 | {total} | 成功+失败链接数，非帖数 |
+| JavDB 低分/无分跳过 | {skipped_jav_score} | 日本片评分&lt;4 或无评分不下载 |
 
-> **为何可下载 {dl_posts} ≠ PikPak {total}？** {without_link} 帖无链接未提交；有链接帖中多 ed2k 文件按链接逐条提交。
+> **为何可下载 {dl_posts} ≠ PikPak {total}？** {without_link} 帖无链接未提交；有链接帖中多 ed2k 文件按链接逐条提交。日本片 JavDB 评分&lt;4 或无评分不提交 PikPak。
 
 {jav_section}
 

@@ -602,6 +602,146 @@ def attach_javdb_query(item: dict[str, Any], client: JavDBClient) -> None:
 
 
 JAV_REPORT_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
+JAVDB_MIN_DOWNLOAD_SCORE = float(os.environ.get("JAVDB_MIN_DOWNLOAD_SCORE", "4"))
+
+
+def _clear_download_selection(item: dict[str, Any]) -> None:
+    item.pop("selected_magnet", None)
+    item.pop("selected_pikpak_sha", None)
+    item.pop("selected_ed2k", None)
+    item.pop("selected_download", None)
+    item.pop("download_source", None)
+
+
+def item_needs_javdb_score(item: dict[str, Any]) -> bool:
+    region = item.get("content_region") or ""
+    if region in JAV_REPORT_REGIONS:
+        return True
+    title = item.get("title") or item.get("name") or ""
+    number = item.get("av_number") or extract_av_number(title)
+    if not number:
+        return False
+    from content_filter import classify_region
+
+    return classify_region({"title": title, "av_number": number}) in JAV_REPORT_REGIONS
+
+
+def javdb_score_ok(
+    item: dict[str, Any],
+    *,
+    min_score: float = JAVDB_MIN_DOWNLOAD_SCORE,
+) -> bool | None:
+    """Return True/False when JavDB score applies; None if item is not Japanese JAV."""
+    if not item_needs_javdb_score(item):
+        return None
+    q = item.get("javdb_query") or {}
+    if q.get("query_status") != "ok":
+        return False
+    score = q.get("score")
+    if score is None:
+        return False
+    return float(score) >= min_score
+
+
+def ensure_javdb_score_gate(
+    item: dict[str, Any],
+    client: JavDBClient | None = None,
+    *,
+    min_score: float = JAVDB_MIN_DOWNLOAD_SCORE,
+    query_if_missing: bool = True,
+) -> bool:
+    """Ensure JavDB is queried; return True if the item may be downloaded."""
+    if not item_needs_javdb_score(item):
+        return True
+
+    number = item.get("av_number") or extract_av_number(item.get("title") or item.get("name") or "")
+    if not number:
+        item["skip_reason"] = "javdb_no_number"
+        _clear_download_selection(item)
+        return False
+    item["av_number"] = number
+
+    if query_if_missing and not item.get("javdb_query"):
+        own_client = client is None
+        if own_client:
+            client = JavDBClient()
+        attach_javdb_query(item, client)
+
+    ok = javdb_score_ok(item, min_score=min_score)
+    if ok is False:
+        q = item.get("javdb_query") or {}
+        score = q.get("score")
+        if q.get("query_status") == "error":
+            item["skip_reason"] = "javdb_query_error"
+        elif score is None:
+            item["skip_reason"] = "javdb_no_score"
+        else:
+            item["skip_reason"] = f"javdb_score_low_{score:.2f}"
+        _clear_download_selection(item)
+        return False
+    return True
+
+
+def is_submit_eligible(
+    item: dict[str, Any],
+    *,
+    min_score: float = JAVDB_MIN_DOWNLOAD_SCORE,
+) -> bool:
+    from content_filter import is_downloadable
+
+    if not is_downloadable(item):
+        return False
+    check = javdb_score_ok(item, min_score=min_score)
+    if check is None:
+        return True
+    return check
+
+
+def filter_download_report_by_jav_score(
+    report: dict[str, Any],
+    matched: list[dict[str, Any]] | None = None,
+    client: JavDBClient | None = None,
+    *,
+    min_score: float = JAVDB_MIN_DOWNLOAD_SCORE,
+) -> dict[str, Any]:
+    """Drop succeeded download rows for Japanese items failing the JavDB score gate."""
+    if not report:
+        return report
+    href_map = {
+        m.get("href"): m for m in (matched or []) if m.get("href")
+    }
+    own_client = client is None
+    if own_client:
+        client = JavDBClient()
+
+    kept: list[dict[str, Any]] = []
+    removed = 0
+    for item in report.get("succeeded") or []:
+        base = href_map.get(item.get("href") or "")
+        probe: dict[str, Any]
+        if base:
+            probe = dict(base)
+        else:
+            probe = {
+                "title": item.get("title") or "",
+                "name": item.get("name") or "",
+                "href": item.get("href") or "",
+                "content_region": item.get("content_region") or "",
+            }
+        if ensure_javdb_score_gate(
+            probe, client, min_score=min_score, query_if_missing=True,
+        ):
+            kept.append(item)
+        else:
+            removed += 1
+
+    if removed:
+        report = dict(report)
+        report["succeeded"] = kept
+        report["ok"] = len(kept)
+        report["total"] = len(kept) + int(report.get("failed_count") or 0)
+        report["javdb_score_filtered"] = removed
+    return report
 
 
 def enrich_matched_javdb(

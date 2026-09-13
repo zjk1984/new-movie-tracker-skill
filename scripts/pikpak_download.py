@@ -303,19 +303,26 @@ def load_downloads_from_result(
     *,
     today_only: bool = True,
     region_filter: bool = True,
+    javdb_score_gate: bool = True,
 ) -> list[dict]:
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent))
     from content_filter import is_downloadable
+    from javdb_client import JavDBClient, ensure_javdb_score_gate
 
     data = json.loads(result_path.read_text(encoding="utf-8"))
     today = data.get("today") or data.get("scan_time", "")[:10]
+    javdb_client = JavDBClient() if javdb_score_gate else None
     items = []
+    skipped_score = 0
     for item in data.get("matched", []):
         if today_only and item.get("date") != today:
             continue
         if region_filter and not is_downloadable(item):
+            continue
+        if javdb_score_gate and not ensure_javdb_score_gate(item, javdb_client):
+            skipped_score += 1
             continue
         download = pick_item_download(item)
         if not download:
@@ -340,6 +347,8 @@ def load_downloads_from_result(
             entry["url"] = download["url"]
             entry["magnet"] = download["url"]
         items.append(entry)
+    if skipped_score:
+        print(f"[info] javdb score gate: skipped {skipped_score} Japanese item(s)")
     return items
 
 
