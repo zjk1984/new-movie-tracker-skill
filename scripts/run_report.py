@@ -71,6 +71,52 @@ def _md_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _infer_link_type(item: dict[str, Any]) -> str:
+    link_type = (item.get("link_type") or item.get("type") or "").strip()
+    if link_type and link_type != "url":
+        return link_type
+    uri = (item.get("uri") or item.get("url") or "").lower()
+    if uri.startswith("ed2k:"):
+        return "ed2k"
+    if uri.startswith("magnet:"):
+        return "magnet"
+    if uri.startswith("pikpak:"):
+        return "pikpak_sha"
+    return link_type or "url"
+
+
+def _format_fail_reason(err: str) -> str:
+    text = (err or "").strip()
+    if "task_url_resolve_error" in text:
+        return "URL解析失败"
+    if "not cached" in text.lower() or "no cache" in text.lower():
+        return "特征码秒传失败 (PikPak 无缓存)"
+    return text[:120] if text else "未知错误"
+
+
+def _md_fail_links(failed: list[dict[str, Any]]) -> str:
+    """Render failed downloads with fenced code blocks for one-click copy."""
+    if not failed:
+        return "_（无）_\n"
+
+    lines = [
+        "> 每条失败链接单独放在代码块中，点击代码块右上角 **Copy** 即可复制完整 URI。\n",
+    ]
+    for idx, item in enumerate(failed, 1):
+        name = (item.get("name") or "?").replace("\n", " ").strip()
+        link_type = _infer_link_type(item)
+        reason = _format_fail_reason(item.get("error") or "")
+        uri = (item.get("uri") or item.get("url") or "").strip()
+        lines.append(f"### {idx}. {name} · {link_type} · {reason}\n")
+        if uri:
+            lines.append("```text")
+            lines.append(uri)
+            lines.append("```\n")
+        else:
+            lines.append("_（无链接）_\n")
+    return "\n".join(lines)
+
+
 def write_run_report(
     scan_stats: dict[str, Any],
     download_report: dict[str, Any],
@@ -92,17 +138,7 @@ def write_run_report(
 
     forum_lines = "\n".join(f"- {name}: {count} 帖" for name, count in sorted(forums.items()))
 
-    fail_rows = []
-    for item in download_report.get("failed") or []:
-        err = item.get("error") or ""
-        if "task_url_resolve_error" in err:
-            err = "URL解析失败"
-        fail_rows.append([
-            item.get("name") or "?",
-            item.get("link_type") or "?",
-            item.get("uri") or item.get("url") or "",
-            err[:120],
-        ])
+    failed_items = list(download_report.get("failed") or [])
 
     ok_rows = []
     for item in download_report.get("succeeded") or []:
@@ -147,7 +183,7 @@ def write_run_report(
 
 ## 下载失败
 
-{_md_table(["名称", "类型", "下载链接", "失败原因"], fail_rows)}
+{_md_fail_links(failed_items)}
 
 ## 下载成功
 
