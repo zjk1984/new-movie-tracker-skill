@@ -94,20 +94,42 @@ def _format_fail_reason(err: str) -> str:
     return text[:120] if text else "未知错误"
 
 
+def _collect_fail_uris(failed: list[dict[str, Any]]) -> list[str]:
+    seen: set[str] = set()
+    uris: list[str] = []
+    for item in failed:
+        uri = (item.get("uri") or item.get("url") or "").strip()
+        if not uri or uri in seen:
+            continue
+        seen.add(uri)
+        uris.append(uri)
+    return uris
+
+
 def _md_fail_links(failed: list[dict[str, Any]]) -> str:
-    """Render failed downloads with fenced code blocks for one-click copy."""
+    """Render failed downloads with copy-all and per-item code blocks."""
     if not failed:
         return "_（无）_\n"
 
+    all_uris = _collect_fail_uris(failed)
     lines = [
-        "> 每条失败链接单独放在代码块中，点击代码块右上角 **Copy** 即可复制完整 URI。\n",
+        "> 点击下面 **全部失败链接** 代码块右上角 **Copy**，可一次复制所有 URI（每行一条）。\n",
+        f"### 全部失败链接（{len(all_uris)} 条）\n",
     ]
+    if all_uris:
+        lines.append("```text")
+        lines.extend(all_uris)
+        lines.append("```\n")
+    else:
+        lines.append("_（无链接）_\n")
+
+    lines.append("### 明细\n")
     for idx, item in enumerate(failed, 1):
         name = (item.get("name") or "?").replace("\n", " ").strip()
         link_type = _infer_link_type(item)
         reason = _format_fail_reason(item.get("error") or "")
         uri = (item.get("uri") or item.get("url") or "").strip()
-        lines.append(f"### {idx}. {name} · {link_type} · {reason}\n")
+        lines.append(f"#### {idx}. {name} · {link_type} · {reason}\n")
         if uri:
             lines.append("```text")
             lines.append(uri)
