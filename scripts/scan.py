@@ -959,7 +959,10 @@ def scrape(args):
                 if m.get("javdb_error"):
                     lines.append(f"javdb_error: {m['javdb_error']}")
                 if m.get("content_region"):
-                    lines.append(f"content_region: {m['content_region']}")
+                    region_line = f"content_region: {m['content_region']}"
+                    if m.get("domestic_subtype"):
+                        region_line += f" ({m['domestic_subtype']})"
+                    lines.append(region_line)
                 if m.get("skip_reason"):
                     lines.append(f"skip_reason: {m['skip_reason']}")
                 if m.get("selected_magnet"):
@@ -1133,7 +1136,7 @@ def main():
     args.region_filter = not args.all_regions
     args.javdb_query = not args.no_javdb_query
     if args.region_filter:
-        print("[info] download filter: Japanese censored + uncensored JAV")
+        print("[info] download filter: JAV 有码/无码 + 国产(私拍/泄密/流出)")
     if args.javdb_query:
         print("[info] javdb query report: enabled for matched 有码/无码 items")
     scrape(args)

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Classify forum posts; default download filter keeps Japanese censored + uncensored JAV."""
+"""Classify forum posts; default filter keeps JAV + selected domestic leak/private content."""
 from __future__ import annotations
 
 import re
@@ -27,9 +27,28 @@ AMATEUR_NUM_RE = re.compile(
 )
 STUDIO_NUM_RE = re.compile(r"^[A-Z]{2,6}-\d{2,5}$", re.IGNORECASE)
 
-UNCENSORED_MARKERS = ("无码", "無碼", "无码破解", "無碼破解", "uncensored", "無修正")
+UNCENSORED_MARKERS = ("无码破解", "無碼破解", "uncensored", "無修正", "[无码", "[無碼")
+DOMESTIC_MARKERS = ("国产无码", "國產無碼", "[国产", "[國產")
+DOMESTIC_LEAK_OUT_RE = re.compile(r"(?<!未)流出")
 
-DOWNLOADABLE_REGIONS = frozenset({"jav_censored", "uncensored"})
+DOWNLOADABLE_REGIONS = frozenset({"jav_censored", "uncensored", "domestic_leak"})
+
+
+def is_domestic_uncensored(title: str) -> bool:
+    text = title or ""
+    return any(marker in text for marker in DOMESTIC_MARKERS)
+
+
+def domestic_keep_reason(title: str) -> str | None:
+    """Return keep label for domestic posts: 私拍 / 泄密 / 流出."""
+    text = title or ""
+    if "私拍" in text:
+        return "私拍"
+    if "泄密" in text or "泄露" in text:
+        return "泄密"
+    if DOMESTIC_LEAK_OUT_RE.search(text):
+        return "流出"
+    return None
 
 
 def classify_region(item: dict[str, Any]) -> str:
@@ -38,11 +57,20 @@ def classify_region(item: dict[str, Any]) -> str:
 
     if WESTERN_RE.search(title):
         return "western"
-    if FC2_RE.search(title) or (number.startswith("FC2")):
+    if FC2_RE.search(title) or number.startswith("FC2"):
         return "fc2"
     if HEYZO_RE.search(title) or number.startswith("HEYZO"):
         return "uncensored"
-    if any(m in title for m in UNCENSORED_MARKERS) or "[无码" in title:
+
+    # Domestic uncensored — must be checked before generic 无码 markers
+    if is_domestic_uncensored(title):
+        if domestic_keep_reason(title):
+            return "domestic_leak"
+        return "domestic_other"
+
+    if any(m in title for m in UNCENSORED_MARKERS):
+        return "uncensored"
+    if "无码" in title or "無碼" in title:
         return "uncensored"
 
     if number:
@@ -75,8 +103,12 @@ def apply_region_filter(item: dict[str, Any], *, region_filter: bool = True) -> 
     if number:
         item["av_number"] = number
 
-    if not region_filter or region in DOWNLOADABLE_REGIONS:
-        return region in DOWNLOADABLE_REGIONS
+    if region == "domestic_leak":
+        item["domestic_subtype"] = domestic_keep_reason(item.get("title", ""))
+
+    downloadable = region in DOWNLOADABLE_REGIONS
+    if not region_filter or downloadable:
+        return downloadable
 
     item["skip_reason"] = f"excluded_{region}"
     item.pop("selected_magnet", None)
@@ -89,5 +121,6 @@ def apply_region_filter(item: dict[str, Any], *, region_filter: bool = True) -> 
     item.pop("selected_ed2k", None)
     item.pop("selected_download", None)
     item.pop("download_source", None)
+    item.pop("domestic_subtype", None)
     item.pop("javdb_magnets", None)
     return False

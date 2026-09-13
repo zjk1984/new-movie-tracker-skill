@@ -100,21 +100,23 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 
 ## Content filter (default)
 
-**Kept** (`selected_magnet` preserved, submitted to PikPak):
+**Kept** (`selected_download` preserved, submitted to PikPak):
 
 | Region | Examples |
 |--------|----------|
 | `jav_censored` | MIDA-749, SNOS-270, [有码高清] |
-| `uncensored` | ATID-799 无码破解, [无码高清] |
+| `uncensored` | ATID-799 无码破解, HEYZO (日本无码) |
+| `domestic_leak` | [国产无码] …**私拍** / **泄密** / **流出** (`domestic_subtype`) |
 
 **Excluded** (magnets cleared, `skip_reason: excluded_*`):
 
 | Region | Examples |
 |--------|----------|
+| `domestic_other` | [国产无码] 探花、推特、OnlyFans、剧情（无私拍/泄密/流出） |
 | `western` | Blacked, Brazzers, 欧美 |
 | `fc2` | FC2-PPV-* |
 | `amateur` | MAAN-*, 348NTR-*, 200GANA-*, 229SCUTE-* |
-| `other` | Unrecognized numbering |
+| `other` | [主播录制] 等 |
 
 ## Cnsub-first workflow
 
