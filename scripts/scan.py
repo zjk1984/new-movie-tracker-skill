@@ -930,6 +930,16 @@ def scrape(args):
                                     attach_javdb_query(item, javdb_client)
                                     q = item.get("javdb_query") or {}
                                     print(f"[info]   javdb: {q.get('summary', '')}")
+                                from javdb_client import ensure_javdb_score_gate
+
+                                if _is_dl(item) and not ensure_javdb_score_gate(
+                                    item, javdb_client,
+                                ):
+                                    print(
+                                        f"[skip] javdb score: "
+                                        f"{item.get('skip_reason', '?')} "
+                                        f"{item['title'][:50]}"
+                                    )
                         all_matched.append(item)
 
                     print(f"[info] page {page_num}: {len(posts)} rows, {new_posts} new, matched total {len(all_matched)}")

@@ -246,8 +246,17 @@ def analyze_scan(
     posts_with = {"magnet": 0, "ed2k": 0, "bt": 0}
     downloadable = 0
 
+    javdb_summary: dict[str, Any] = {}
+    if enrich_javdb:
+        from javdb_client import enrich_matched_javdb, ensure_javdb_score_gate
+
+        javdb_summary = enrich_matched_javdb(matched)
+        for item in matched:
+            ensure_javdb_score_gate(item, query_if_missing=False)
+
     with_link = 0
     without_link = 0
+    skipped_jav_score = 0
     from pikpak_download import pick_item_download
 
     for item in matched:
@@ -259,7 +268,10 @@ def analyze_scan(
             subtype_counts[sub] += 1
         if is_downloadable(item):
             downloadable += 1
-            if pick_item_download(item):
+            if item.get("skip_reason", "").startswith("javdb_"):
+                skipped_jav_score += 1
+                without_link += 1
+            elif pick_item_download(item):
                 with_link += 1
             else:
                 without_link += 1
@@ -269,11 +281,8 @@ def analyze_scan(
             if counts[k] > 0:
                 posts_with[k] += 1
 
-    javdb_summary: dict[str, Any] = {}
-    if enrich_javdb:
-        from javdb_client import enrich_matched_javdb
-
-        javdb_summary = enrich_matched_javdb(matched)
+    if javdb_summary:
+        javdb_summary["skipped_low_score"] = skipped_jav_score
 
     return {
         "scan_time": max(scan_times) if scan_times else datetime.now().isoformat(timespec="seconds"),
@@ -288,6 +297,7 @@ def analyze_scan(
         "posts_with": posts_with,
         "matched": matched,
         "javdb_summary": javdb_summary,
+        "skipped_jav_score": skipped_jav_score,
     }
 
 
@@ -318,9 +328,13 @@ def build_download_report_from_scans(
         s = json.loads(submit_summary.read_text(encoding="utf-8"))
         magnet_ok = int(s.get("grand_ok", 0)) - int((s.get("ed2k") or {}).get("ok", 0))
 
+    from javdb_client import ensure_javdb_score_gate
+
     magnet_added = 0
     for item in stats["matched"]:
         if not is_downloadable(item):
+            continue
+        if not ensure_javdb_score_gate(item, query_if_missing=False):
             continue
         dl = pick_item_download(item)
         if not dl:
@@ -427,6 +441,7 @@ def build_scan_summary_card(
     jav = scan_stats.get("javdb_summary") or {}
     subtype = scan_stats.get("subtype_counts") or {}
 
+    skipped_score = scan_stats.get("skipped_jav_score", 0)
     jav_lines = ""
     if jav.get("total"):
         avg = jav.get("avg_score")
@@ -435,7 +450,8 @@ def build_scan_summary_card(
             f"\n**日本片 JavDB** 共 **{jav.get('total', 0)}** 帖"
             f" | 已查 **{jav.get('queried', 0)}**"
             f" | 含中字 **{jav.get('with_cnsub', 0)}**"
-            f" | 均分 **{avg_text}**\n"
+            f" | 均分 **{avg_text}**"
+            f" | 低分/无分跳过 **{skipped_score or jav.get('skipped_low_score', 0)}**\n"
         )
     domestic_lines = ""
     if subtype:
@@ -513,6 +529,13 @@ def notify_cards(
             f"[info] merged download reports: ok={download_report.get('ok')} "
             f"fail={download_report.get('failed_count')}"
         )
+
+    from javdb_client import filter_download_report_by_jav_score
+
+    download_report = filter_download_report_by_jav_score(
+        download_report,
+        scan_stats.get("matched") or [],
+    )
 
     report_path = write_run_report(scan_stats, download_report, run_label=run_label)
     rel = report_path.relative_to(SKILL_DIR)
