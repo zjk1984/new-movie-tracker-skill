@@ -298,6 +298,60 @@ def pick_item_download(item: dict) -> dict | None:
     return None
 
 
+def _item_has_non_ed2k_download(item: dict) -> bool:
+    selected = (item.get("selected_download") or "").strip().lower()
+    if selected and not selected.startswith("ed2k:"):
+        return True
+    if item.get("selected_magnet") or item.get("magnets"):
+        return True
+    if item.get("selected_pikpak_sha") or item.get("pikpak_sha"):
+        return True
+    for entry in item.get("hash_entries") or []:
+        uri = (entry.get("uri") or "").strip().lower()
+        if uri and not uri.startswith("ed2k:"):
+            return True
+    return False
+
+
+def iter_item_downloads(item: dict) -> list[dict]:
+    """Yield download link dicts; ed2k-only posts return every ed2k file."""
+    from pikpak_links import parse_download_link
+
+    if _item_has_non_ed2k_download(item):
+        picked = pick_item_download(item)
+        return [picked] if picked else []
+
+    seen: set[str] = set()
+    downloads: list[dict] = []
+    if item.get("selected_ed2k"):
+        parsed = parse_download_link(item["selected_ed2k"])
+        if parsed:
+            uri = parsed.get("uri") or ""
+            if uri:
+                seen.add(uri)
+                parsed["name"] = item_download_name(item, parsed.get("name", "download"))
+                parsed["source"] = item.get("download_source") or "forum_ed2k"
+                downloads.append(parsed)
+
+    for ed2k in item.get("ed2k") or []:
+        parsed = parse_download_link(ed2k)
+        if not parsed:
+            continue
+        uri = parsed.get("uri") or ""
+        if not uri or uri in seen:
+            continue
+        seen.add(uri)
+        parsed["name"] = item_download_name(item, parsed.get("name", "download"))
+        parsed["source"] = "forum_ed2k"
+        downloads.append(parsed)
+
+    if downloads:
+        return downloads
+
+    picked = pick_item_download(item)
+    return [picked] if picked else []
+
+
 def load_downloads_from_result(
     result_path: Path,
     *,
@@ -308,8 +362,9 @@ def load_downloads_from_result(
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent))
-    from content_filter import is_downloadable
-    from javdb_client import JavDBClient, ensure_javdb_score_gate
+    from javdb_client import JavDBClient, is_submit_eligible
+
+    from content_filter import apply_region_filter
 
     data = json.loads(result_path.read_text(encoding="utf-8"))
     today = data.get("today") or data.get("scan_time", "")[:10]
@@ -319,34 +374,42 @@ def load_downloads_from_result(
     for item in data.get("matched", []):
         if today_only and item.get("date") != today:
             continue
-        if region_filter and not is_downloadable(item):
-            continue
-        if javdb_score_gate and not ensure_javdb_score_gate(item, javdb_client):
-            skipped_score += 1
-            continue
-        download = pick_item_download(item)
-        if not download:
+        if region_filter:
+            apply_region_filter(item, region_filter=True)
+        if region_filter and javdb_score_gate:
+            if not is_submit_eligible(item, javdb_client, query_if_missing=True):
+                skipped_score += 1
+                continue
+        elif region_filter:
+            from content_filter import is_downloadable
+
+            if not is_downloadable(item):
+                continue
+
+        downloads = iter_item_downloads(item)
+        if not downloads:
             continue
         title = item.get("title", "download")
-        entry = {
-            "name": download.get("name") or item_download_name(item),
-            "title": title,
-            "type": download["type"],
-            "source": download.get("source", ""),
-            "href": item.get("href", ""),
-            "av_number": item.get("av_number", ""),
-            "uri": download.get("uri") or download.get("url") or "",
-        }
-        if download["type"] == "sha":
-            entry.update({
-                "size": download["size"],
-                "hash": download["hash"],
-                "pikpak_sha": download["uri"],
-            })
-        else:
-            entry["url"] = download["url"]
-            entry["magnet"] = download["url"]
-        items.append(entry)
+        for download in downloads:
+            entry = {
+                "name": download.get("name") or item_download_name(item),
+                "title": title,
+                "type": download["type"],
+                "source": download.get("source", ""),
+                "href": item.get("href", ""),
+                "av_number": item.get("av_number", ""),
+                "uri": download.get("uri") or download.get("url") or "",
+            }
+            if download["type"] == "sha":
+                entry.update({
+                    "size": download["size"],
+                    "hash": download["hash"],
+                    "pikpak_sha": download["uri"],
+                })
+            else:
+                entry["url"] = download["url"]
+                entry["magnet"] = download["url"]
+            items.append(entry)
     if skipped_score:
         print(f"[info] javdb score gate: skipped {skipped_score} Japanese item(s)")
     return items

@@ -684,17 +684,22 @@ def ensure_javdb_score_gate(
 
 def is_submit_eligible(
     item: dict[str, Any],
+    client: JavDBClient | None = None,
     *,
     min_score: float = JAVDB_MIN_DOWNLOAD_SCORE,
+    query_if_missing: bool = False,
 ) -> bool:
+    """Region filter (国产保留规则) + JavDB score gate for Japanese items."""
     from content_filter import is_downloadable
 
     if not is_downloadable(item):
         return False
-    check = javdb_score_ok(item, min_score=min_score)
-    if check is None:
-        return True
-    return check
+    return ensure_javdb_score_gate(
+        item,
+        client,
+        min_score=min_score,
+        query_if_missing=query_if_missing,
+    )
 
 
 def filter_download_report_by_jav_score(

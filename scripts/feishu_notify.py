@@ -248,11 +248,11 @@ def analyze_scan(
 
     javdb_summary: dict[str, Any] = {}
     if enrich_javdb:
-        from javdb_client import enrich_matched_javdb, ensure_javdb_score_gate
+        from javdb_client import enrich_matched_javdb, is_submit_eligible
 
         javdb_summary = enrich_matched_javdb(matched)
         for item in matched:
-            ensure_javdb_score_gate(item, query_if_missing=False)
+            is_submit_eligible(item, query_if_missing=False)
 
     with_link = 0
     without_link = 0
@@ -312,13 +312,16 @@ def build_download_report_from_scans(
     *,
     ed2k_refetch_path: Path | None = None,
     ed2k_error: str = "task_url_resolve_error: PikPak 无法解析 ed2k 链接",
+    matched: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Rebuild download report when only scan + ed2k refetch data exist."""
     sys.path.insert(0, str(SKILL_DIR / "scripts"))
-    from content_filter import is_downloadable
     from pikpak_download import item_download_name, pick_item_download
 
-    stats = analyze_scan(result_paths, ed2k_refetch_path=ed2k_refetch_path)
+    if matched is None:
+        matched = analyze_scan(
+            result_paths, ed2k_refetch_path=ed2k_refetch_path,
+        )["matched"]
     succeeded: list[dict] = []
     failed: list[dict] = []
 
@@ -328,13 +331,11 @@ def build_download_report_from_scans(
         s = json.loads(submit_summary.read_text(encoding="utf-8"))
         magnet_ok = int(s.get("grand_ok", 0)) - int((s.get("ed2k") or {}).get("ok", 0))
 
-    from javdb_client import ensure_javdb_score_gate
+    from javdb_client import is_submit_eligible
 
     magnet_added = 0
-    for item in stats["matched"]:
-        if not is_downloadable(item):
-            continue
-        if not ensure_javdb_score_gate(item, query_if_missing=False):
+    for item in matched:
+        if not is_submit_eligible(item, query_if_missing=False):
             continue
         dl = pick_item_download(item)
         if not dl:
@@ -358,34 +359,34 @@ def build_download_report_from_scans(
             })
             magnet_added += 1
 
-    # Extra ed2k URIs from refetch (multi-file posts)
-    if ed2k_refetch_path and ed2k_refetch_path.exists():
-        from pikpak_links import parse_download_link
+    # ed2k URIs (multi-file posts) — same region + JavDB score rules as magnet
+    from pikpak_links import normalize_ed2k_uri, parse_download_link
 
-        refetch = json.loads(ed2k_refetch_path.read_text(encoding="utf-8"))
-        seen_uri = {x.get("uri") for x in failed}
-        from pikpak_links import normalize_ed2k_uri
-
-        for t in refetch.get("threads") or []:
-            for ed2k in t.get("ed2k") or []:
-                uri = normalize_ed2k_uri(ed2k) or ed2k
-                if uri in seen_uri:
-                    continue
-                parsed = parse_download_link(uri)
-                if not parsed:
-                    continue
-                failed.append({
-                    "name": parsed.get("name") or "ed2k",
-                    "title": t.get("title", ""),
-                    "href": t.get("href", ""),
-                    "uri": uri,
-                    "url": uri,
-                    "link_type": "ed2k",
-                    "source": "forum_ed2k",
-                    "status": "failed",
-                    "error": ed2k_error,
-                })
-                seen_uri.add(ed2k)
+    seen_uri = {x.get("uri") for x in failed}
+    for item in matched:
+        if not is_submit_eligible(item, query_if_missing=False):
+            continue
+        if not item.get("ed2k"):
+            continue
+        for ed2k in item["ed2k"]:
+            uri = normalize_ed2k_uri(ed2k) or ed2k
+            if uri in seen_uri:
+                continue
+            parsed = parse_download_link(uri)
+            if not parsed:
+                continue
+            failed.append({
+                "name": parsed.get("name") or "ed2k",
+                "title": item.get("title", ""),
+                "href": item.get("href", ""),
+                "uri": uri,
+                "url": uri,
+                "link_type": "ed2k",
+                "source": "forum_ed2k",
+                "status": "failed",
+                "error": ed2k_error,
+            })
+            seen_uri.add(uri)
 
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -513,7 +514,9 @@ def notify_cards(
     )
     if reconstruct_report or not (download_report_path and download_report_path.exists()):
         download_report = build_download_report_from_scans(
-            result_paths, ed2k_refetch_path=ed2k_refetch_path,
+            result_paths,
+            ed2k_refetch_path=ed2k_refetch_path,
+            matched=scan_stats.get("matched"),
         )
     else:
         download_report = load_download_report(download_report_path)
