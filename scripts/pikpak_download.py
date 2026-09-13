@@ -168,65 +168,85 @@ def offline_download(
     return resp.json()
 
 
-def load_today_magnets(result_path: Path) -> list[dict]:
+def pick_item_magnet(item: dict) -> str | None:
+    selected = (item.get("selected_magnet") or "").strip()
+    if selected:
+        return selected
+    magnets = item.get("magnets") or []
+    return magnets[0] if magnets else None
+
+
+def item_download_name(item: dict) -> str:
+    for key in ("av_number",):
+        value = item.get(key)
+        if value:
+            return str(value)
+    title = item.get("title", "download")
+    return title.split()[0] if title else "download"
+
+
+def load_magnets_from_result(
+    result_path: Path,
+    *,
+    today_only: bool = True,
+    region_filter: bool = True,
+) -> list[dict]:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from content_filter import is_downloadable
+
     data = json.loads(result_path.read_text(encoding="utf-8"))
     today = data.get("today") or data.get("scan_time", "")[:10]
     items = []
     for item in data.get("matched", []):
-        if item.get("date") != today:
+        if today_only and item.get("date") != today:
             continue
-        magnets = item.get("magnets") or []
-        if not magnets:
+        if region_filter and not is_downloadable(item):
+            continue
+        magnet = pick_item_magnet(item)
+        if not magnet:
             continue
         title = item.get("title", "download")
-        code = title.split()[0] if title else "download"
-        items.append({"name": code, "title": title, "magnet": magnets[0]})
+        items.append({
+            "name": item_download_name(item),
+            "title": title,
+            "magnet": magnet,
+            "source": item.get("magnet_source", ""),
+        })
     return items
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Submit magnets to PikPak cloud download")
-    parser.add_argument(
-        "--folder",
-        default=os.environ.get("PIKPAK_FOLDER", DEFAULT_FOLDER),
-        help=f"Target folder name (default: {DEFAULT_FOLDER})",
-    )
-    args = parser.parse_args()
+def load_today_magnets(result_path: Path) -> list[dict]:
+    return load_magnets_from_result(result_path, today_only=True)
 
-    access_token = os.environ.get("PIKPAK_TOKEN", "").strip()
-    if not access_token:
-        print("[err] set PIKPAK_TOKEN environment variable", file=sys.stderr)
-        return 1
 
-    payload = decode_jwt_payload(access_token)
+def submit_magnets(
+    items: list[dict],
+    *,
+    folder: str = DEFAULT_FOLDER,
+    access_token: str | None = None,
+) -> tuple[int, int]:
+    token = (access_token or os.environ.get("PIKPAK_TOKEN", "")).strip()
+    if not token:
+        raise RuntimeError("set PIKPAK_TOKEN environment variable")
+
+    payload = decode_jwt_payload(token)
     user_id = payload.get("sub", "")
     device_id = hashlib.md5(user_id.encode()).hexdigest()
-
-    result_path = Path(os.environ.get("RESULT_JSON", "/workspace/last_result.json"))
-    if not result_path.exists():
-        print(f"[err] result file not found: {result_path}", file=sys.stderr)
-        return 1
-
-    items = load_today_magnets(result_path)
-    if not items:
-        print("[info] no magnets for today in result file")
-        return 0
-
     session = requests.Session()
-    parent_id = find_folder_id(session, access_token, device_id, user_id, args.folder)
+    parent_id = find_folder_id(session, token, device_id, user_id, folder)
     if parent_id:
-        print(f"[info] download folder: {args.folder} ({parent_id})")
+        print(f"[info] download folder: {folder} ({parent_id})")
     else:
-        print(f"[warn] folder '{args.folder}' not found, using folder_type=DOWNLOAD fallback")
-
-    print(f"[info] submitting {len(items)} cloud download task(s)...")
+        print(f"[warn] folder '{folder}' not found, using folder_type=DOWNLOAD fallback")
 
     ok = 0
     for item in items:
         try:
             result = offline_download(
                 session,
-                access_token,
+                token,
                 device_id,
                 user_id,
                 item["name"],
@@ -237,14 +257,73 @@ def main() -> int:
             file_info = result.get("file") or {}
             task_id = task.get("id") or file_info.get("id") or "unknown"
             phase = task.get("phase") or file_info.get("phase") or "submitted"
-            print(f"[ok] {item['name']} -> task={task_id} phase={phase}")
+            source = item.get("source")
+            suffix = f" [{source}]" if source else ""
+            print(f"[ok] {item['name']}{suffix} -> task={task_id} phase={phase}")
             print(f"     {item['title'][:80]}")
             ok += 1
-        except Exception as e:
-            print(f"[err] {item['name']}: {e}", file=sys.stderr)
+        except Exception as exc:
+            print(f"[err] {item['name']}: {exc}", file=sys.stderr)
+    return ok, len(items)
 
-    print(f"\n[done] {ok}/{len(items)} submitted")
-    return 0 if ok == len(items) else 1
+
+def submit_from_result(
+    result_path: Path,
+    *,
+    folder: str = DEFAULT_FOLDER,
+    today_only: bool = True,
+    region_filter: bool = True,
+    access_token: str | None = None,
+) -> tuple[int, int]:
+    items = load_magnets_from_result(
+        result_path,
+        today_only=today_only,
+        region_filter=region_filter,
+    )
+    if not items:
+        print("[info] no magnets to submit")
+        return 0, 0
+    print(f"[info] submitting {len(items)} cloud download task(s)...")
+    return submit_magnets(items, folder=folder, access_token=access_token)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Submit magnets to PikPak cloud download")
+    parser.add_argument(
+        "--folder",
+        default=os.environ.get("PIKPAK_FOLDER", DEFAULT_FOLDER),
+        help=f"Target folder name (default: {DEFAULT_FOLDER})",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Submit all matched items in the result file, not just today's date",
+    )
+    parser.add_argument(
+        "--all-regions",
+        action="store_true",
+        help="Include western/FC2/amateur (default: 日本有码 + 无码 JAV only)",
+    )
+    args = parser.parse_args()
+
+    result_path = Path(os.environ.get("RESULT_JSON", "last_result.json"))
+    if not result_path.exists():
+        print(f"[err] result file not found: {result_path}", file=sys.stderr)
+        return 1
+
+    try:
+        ok, total = submit_from_result(
+            result_path,
+            folder=args.folder,
+            today_only=not args.all,
+            region_filter=not args.all_regions,
+        )
+    except RuntimeError as exc:
+        print(f"[err] {exc}", file=sys.stderr)
+        return 1
+
+    print(f"\n[done] {ok}/{total} submitted")
+    return 0 if ok == total else 1
 
 
 if __name__ == "__main__":

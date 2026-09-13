@@ -574,12 +574,16 @@ def match_post(
     until: datetime | None,
     cutoff: datetime,
     today: datetime,
+    all_posts: bool = False,
 ) -> dict | None:
     dt = parse_date(post["date_text"], today)
     if keywords:
         if not any(kw in post["title"] for kw in keywords):
             return None
         if not post_in_range(dt, since, until, cutoff, keyword_only=True):
+            return None
+    elif all_posts:
+        if not post_in_range(dt, since, until, cutoff):
             return None
     else:
         if not post_in_range(dt, since, until, cutoff):
@@ -604,17 +608,31 @@ def match_post(
 
 
 def scrape(args):
-    actors, inline_aliases = load_actors(args)
-    alias_map = load_alias_map(args, inline_aliases)
-    match_index = build_match_index(actors, alias_map)
-    match_names = set(match_index.keys())
+    all_posts = bool(getattr(args, "all_posts", False))
+    if all_posts:
+        actors: set[str] = set()
+        inline_aliases: dict[str, set[str]] = {}
+        alias_map: dict[str, set[str]] = {}
+        match_index: dict[str, set[str]] = {}
+        match_names: set[str] = set()
+        print("[info] matching all posts in date range (no actor filter)")
+    else:
+        actors, inline_aliases = load_actors(args)
+        alias_map = load_alias_map(args, inline_aliases)
+        match_index = build_match_index(actors, alias_map)
+        match_names = set(match_index.keys())
     keywords = [k for k in (getattr(args, "keywords", None) or []) if k]
     if keywords:
         print(f"[info] title keyword filter: {keywords}")
-    print(f"[info] tracking {len(actors)} actors ({len(match_names)} names including aliases)")
+    if not all_posts:
+        print(f"[info] tracking {len(actors)} actors ({len(match_names)} names including aliases)")
 
     javdb_client = None
-    if getattr(args, "javdb", False) or getattr(args, "javdb_magnets", False):
+    if (
+        getattr(args, "javdb", False)
+        or getattr(args, "javdb_magnets", False)
+        or getattr(args, "cnsub_priority", False)
+    ):
         try:
             from javdb_client import JavDBClient
 
@@ -623,6 +641,8 @@ def scrape(args):
         except ImportError as exc:
             print(f"[err] {exc}")
             sys.exit(1)
+    if getattr(args, "cnsub_priority", False):
+        print("[info] cnsub-first magnet policy: forum cnsub -> javdb cnsub -> forum fallback")
 
     chrome = find_chrome()
     if not chrome:
@@ -742,6 +762,7 @@ def scrape(args):
                             until=until,
                             cutoff=cutoff,
                             today=today,
+                            all_posts=all_posts,
                         )
                         if not item:
                             continue
@@ -751,9 +772,27 @@ def scrape(args):
                             links = extract_thread_links(page, post["href"], forum_url)
                             item["magnets"] = links["magnets"]
                             item["ed2k"] = links["ed2k"]
-                        if javdb_client:
+                        if getattr(args, "cnsub_priority", False):
+                            from magnet_select import apply_selection
+
+                            print(f"[info] selecting magnet: {item['title'][:40]}...")
+                            if apply_selection(item, javdb_client):
+                                print(f"[info]   -> {item.get('magnet_source')}")
+                            else:
+                                print("[info]   -> no magnet selected")
+                        elif javdb_client:
                             print(f"[info] javdb lookup: {item['title'][:40]}...")
                             enrich_with_javdb(item, javdb_client, args)
+
+                        if getattr(args, "region_filter", True):
+                            from content_filter import apply_region_filter, is_downloadable
+
+                            apply_region_filter(item, region_filter=True)
+                            if not is_downloadable(item):
+                                print(
+                                    f"[skip] {item.get('content_region')}: "
+                                    f"{item['title'][:50]}"
+                                )
                         all_matched.append(item)
 
                     print(f"[info] page {page_num}: {len(posts)} rows, {new_posts} new, matched total {len(all_matched)}")
@@ -830,6 +869,12 @@ def scrape(args):
                     lines.append(f"javdb: {j.get('number')} | {j.get('release_date')} | {j.get('title', '')[:60]}")
                 if m.get("javdb_error"):
                     lines.append(f"javdb_error: {m['javdb_error']}")
+                if m.get("content_region"):
+                    lines.append(f"content_region: {m['content_region']}")
+                if m.get("skip_reason"):
+                    lines.append(f"skip_reason: {m['skip_reason']}")
+                if m.get("selected_magnet"):
+                    lines.append(f"selected_magnet ({m.get('magnet_source', '?')}): {m['selected_magnet']}")
                 if "magnets" in m:
                     if m["magnets"]:
                         lines.append("magnets:")
@@ -863,6 +908,17 @@ def scrape(args):
             )
             page.screenshot(path=str(screenshot_dir / "last_run.png"))
             print(f"[done] results saved to {out_dir}")
+
+            if getattr(args, "pikpak", False):
+                result_json = out_dir / "last_result.json"
+                try:
+                    from pikpak_download import submit_from_result
+
+                    folder = getattr(args, "pikpak_folder", None) or "My Pack"
+                    ok, total = submit_from_result(result_json, folder=folder, today_only=True)
+                    print(f"[done] pikpak: {ok}/{total} submitted to {folder}")
+                except Exception as exc:
+                    print(f"[err] pikpak download failed: {exc}")
 
         except PlaywrightTimeout:
             print("[err] page timeout")
@@ -910,9 +966,39 @@ def main():
     parser.add_argument("--javdb-cnsub", action="store_true", help="Filter JavDB magnets to those with Chinese subtitles")
     parser.add_argument("--javdb-hd", action="store_true", help="Filter JavDB magnets to HD only")
     parser.add_argument("--javdb-host", default=None, help="JavDB API host (default: https://jdforrepam.com)")
+    parser.add_argument(
+        "--all-posts",
+        action="store_true",
+        help="Match all posts in the date range (skip actor name filter)",
+    )
+    parser.add_argument(
+        "--all-regions",
+        action="store_true",
+        help="Download all content types (default: 日本有码 + 无码 JAV only)",
+    )
+    parser.add_argument(
+        "--cnsub-priority",
+        action="store_true",
+        help="Cnsub-first magnets: forum cnsub -> JavDB cnsub -> forum fallback (implies --fetch-magnets)",
+    )
+    parser.add_argument(
+        "--pikpak",
+        action="store_true",
+        help="After scan, submit selected magnets to PikPak (requires PIKPAK_TOKEN)",
+    )
+    parser.add_argument(
+        "--pikpak-folder",
+        default=os.environ.get("PIKPAK_FOLDER", "My Pack"),
+        help="PikPak target folder name (default: My Pack)",
+    )
     args = parser.parse_args()
     if args.javdb_magnets:
         args.javdb = True
+    if args.cnsub_priority:
+        args.fetch_magnets = True
+    args.region_filter = not args.all_regions
+    if args.region_filter:
+        print("[info] download filter: Japanese censored + uncensored JAV")
     scrape(args)
 
 

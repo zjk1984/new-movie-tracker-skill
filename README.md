@@ -9,6 +9,8 @@
 - **智能翻页**：自动翻页并提前停止，避免无效请求
 - **磁力提取**：进入帖子详情页自动抓取 `magnet:?xt=urn:btih:` 链接
 - **JavDB 补全**：整合 [javdb-cli](https://github.com/zjk1984/javdb-cli) 的 App API，按番号查发行日、标题和磁力（论坛只有 BT 附件时尤其有用）
+- **中字优先采集**：论坛中字帖 → JavDB 中字 → 论坛兜底，并可选推送 PikPak **My Pack**
+- **内容过滤**：默认保留有码 + 无码 JAV 磁力，排除欧美/FC2/素人
 - **Cloudflare 穿透**：复用本地 Chrome 会话，首次验证后自动通行
 
 ## 安装
@@ -100,11 +102,19 @@ python scripts/scan.py --days 3
 # 扫描并提取磁力链接
 python scripts/scan.py --days 3 --fetch-magnets
 
+# 中字优先 + 自动推送 PikPak（推荐）
+export PIKPAK_TOKEN="your-token"
+python scripts/scan.py --days 3 --cnsub-priority --pikpak
+
 # 论坛 + JavDB 双源磁力（推荐 BT 种子帖）
 python scripts/scan.py --keyword 流出 --javdb --javdb-magnets --javdb-best --fetch-magnets
 
 # 仅 JavDB 查番号磁力
 python scripts/javdb_lookup.py SSIS-589 --magnets --best
+
+# JavDB 登录（可选，匿名查磁力通常已够用）
+python scripts/javdb_login.py login
+python scripts/javdb_login.py status --check
 
 # 临时指定演员扫描（不保存到清单）
 python scripts/scan.py --actors 佐々木さき 楪カレン --days 3 --fetch-magnets
@@ -129,6 +139,8 @@ new-movie-tracker/
     ├── scan.py           # 核心扫描脚本
     ├── javdb_client.py   # JavDB App API 客户端
     ├── javdb_lookup.py   # 番号查询 CLI
+    ├── javdb_login.py    # JavDB 账号登录
+    ├── magnet_select.py  # 中字优先磁力策略
     └── pikpak_download.py
 ```
 

@@ -13,7 +13,12 @@ import os
 import re
 import time
 import uuid
+from datetime import datetime
+from pathlib import Path
 from typing import Any
+
+SKILL_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_AUTH_FILE = SKILL_DIR / "javdb_auth.json"
 
 try:
     from curl_cffi import requests as http
@@ -149,6 +154,107 @@ def resolve_number(movies: list[dict[str, Any]], number: str) -> str:
     raise LookupError(f"找不到番号: {number}")
 
 
+def auth_file_path() -> Path:
+    return Path(os.environ.get("JAVDB_AUTH_FILE", DEFAULT_AUTH_FILE))
+
+
+def load_auth_store() -> dict[str, Any]:
+    path = auth_file_path()
+    if not path.exists():
+        return {"default_username": "", "accounts": []}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"default_username": "", "accounts": []}
+    if not isinstance(data, dict):
+        return {"default_username": "", "accounts": []}
+    data.setdefault("default_username", "")
+    data.setdefault("accounts", [])
+    return data
+
+
+def save_auth_store(store: dict[str, Any]) -> None:
+    path = auth_file_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(store, f, ensure_ascii=False, indent=2)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def load_saved_token(username: str | None = None) -> str:
+    store = load_auth_store()
+    accounts = store.get("accounts") or []
+    if not accounts:
+        return ""
+    want = username or store.get("default_username") or ""
+    if want:
+        for account in accounts:
+            if isinstance(account, dict) and account.get("username") == want:
+                return _any_str(account.get("token"))
+    first = accounts[0]
+    if isinstance(first, dict):
+        return _any_str(first.get("token"))
+    return ""
+
+
+def upsert_auth_account(
+    *,
+    username: str,
+    token: str,
+    user_id: int | None = None,
+    password: str | None = None,
+    set_default: bool = True,
+) -> None:
+    store = load_auth_store()
+    accounts = [a for a in store.get("accounts") or [] if isinstance(a, dict)]
+    updated = False
+    for account in accounts:
+        if account.get("username") == username:
+            account["token"] = token
+            account["updated"] = datetime.now().isoformat(timespec="seconds")
+            if user_id is not None:
+                account["user_id"] = user_id
+            if password is not None:
+                account["password"] = password
+            updated = True
+            break
+    if not updated:
+        entry: dict[str, Any] = {
+            "username": username,
+            "token": token,
+            "updated": datetime.now().isoformat(timespec="seconds"),
+        }
+        if user_id is not None:
+            entry["user_id"] = user_id
+        if password is not None:
+            entry["password"] = password
+        accounts.append(entry)
+    store["accounts"] = accounts
+    if set_default:
+        store["default_username"] = username
+    save_auth_store(store)
+
+
+def remove_auth_account(username: str | None = None) -> bool:
+    store = load_auth_store()
+    accounts = [a for a in store.get("accounts") or [] if isinstance(a, dict)]
+    if not accounts:
+        return False
+    target = username or store.get("default_username") or accounts[0].get("username")
+    new_accounts = [a for a in accounts if a.get("username") != target]
+    if len(new_accounts) == len(accounts):
+        return False
+    store["accounts"] = new_accounts
+    if store.get("default_username") == target:
+        store["default_username"] = _any_str(new_accounts[0].get("username")) if new_accounts else ""
+    save_auth_store(store)
+    return True
+
+
 def resolve_number_exact(movies: list[dict[str, Any]], number: str) -> str:
     want = number.strip().upper()
     if not want:
@@ -178,9 +284,12 @@ class JavDBClient:
         lang: str = "en",
         timeout: float = 20.0,
         retries: int = 2,
+        use_saved_token: bool = True,
     ) -> None:
         self.host = (host or os.environ.get("JAVDB_HOST") or HOST_MIRROR).rstrip("/")
         self.token = token or os.environ.get("JAVDB_TOKEN") or ""
+        if not self.token and use_saved_token:
+            self.token = load_saved_token()
         self.device_uuid = device_uuid or os.environ.get("JAVDB_DEVICE_UUID") or str(uuid.uuid4())
         self.lang = lang
         self.timeout = timeout
@@ -221,10 +330,19 @@ class JavDBClient:
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:
-                if method.upper() == "GET":
+                method_upper = method.upper()
+                if method_upper == "GET":
                     resp = http.get(
                         url,
                         params=merged,
+                        headers=self._headers(),
+                        impersonate="chrome120",
+                        timeout=self.timeout,
+                    )
+                elif method_upper == "POST":
+                    resp = http.post(
+                        url,
+                        data=merged,
                         headers=self._headers(),
                         impersonate="chrome120",
                         timeout=self.timeout,
@@ -249,6 +367,30 @@ class JavDBClient:
                     continue
                 break
         raise RuntimeError(str(last_error) if last_error else "request failed")
+
+    def login(self, username: str, password: str) -> str:
+        data = self._request(
+            "POST",
+            "/api/v1/sessions",
+            {"username": username.strip(), "password": password},
+        )
+        token = _any_str(data.get("token") or data.get("access_token"))
+        if not token:
+            raise RuntimeError("login response had no token")
+        self.token = token
+        return token
+
+    def user_profile(self) -> dict[str, Any]:
+        data = self._request("GET", "/api/v1/users")
+        if isinstance(data, dict) and isinstance(data.get("user"), dict):
+            return data["user"]
+        return data if isinstance(data, dict) else {}
+
+    def check_auth(self) -> dict[str, Any]:
+        profile = self.user_profile()
+        if not profile:
+            raise RuntimeError("not logged in or token invalid")
+        return profile
 
     def search(self, query: str, *, page: int = 1, limit: int = 0) -> list[dict[str, Any]]:
         params = {"q": query, "page": str(page)}

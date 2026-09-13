@@ -93,6 +93,47 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `--javdb-cnsub` | `False` | Filter JavDB magnets to Chinese-subtitled entries. |
 | `--javdb-hd` | `False` | Filter JavDB magnets to HD entries. |
 | `--javdb-host` | mirror | JavDB API host (default `https://jdforrepam.com`). |
+| `--cnsub-priority` | `False` | Cnsub-first magnet selection (implies `--fetch-magnets`). |
+| `--pikpak` | `False` | Submit selected magnets to PikPak after scan. |
+| `--pikpak-folder` | `My Pack` | PikPak target folder name. |
+| `--all-regions` | `False` | Include western/FC2/amateur (default: 日本有码 + 无码 JAV). |
+
+## Content filter (default)
+
+**Kept** (`selected_magnet` preserved, submitted to PikPak):
+
+| Region | Examples |
+|--------|----------|
+| `jav_censored` | MIDA-749, SNOS-270, [有码高清] |
+| `uncensored` | ATID-799 无码破解, [无码高清] |
+
+**Excluded** (magnets cleared, `skip_reason: excluded_*`):
+
+| Region | Examples |
+|--------|----------|
+| `western` | Blacked, Brazzers, 欧美 |
+| `fc2` | FC2-PPV-* |
+| `amateur` | MAAN-*, 348NTR-*, 200GANA-*, 229SCUTE-* |
+| `other` | Unrecognized numbering |
+
+## Cnsub-first workflow
+
+Magnet selection order (`scripts/magnet_select.py`):
+
+1. **forum_cnsub** — title contains 中字/字幕/中文… and thread has magnet links
+2. **javdb_cnsub** — JavDB lookup with cnsub filter + best magnet
+3. **forum_fallback** — any magnet from the forum thread
+
+End-to-end:
+
+```bash
+export PIKPAK_TOKEN="your-token"
+python scripts/scan.py --days 3 --cnsub-priority --pikpak
+python scripts/pikpak_download.py
+python scripts/pikpak_download.py --all
+```
+
+With PikPak MCP: scan with `--cnsub-priority` only, then MCP `add_link` each `selected_magnet` into **My Pack**.
 
 ## JavDB API
 
@@ -120,8 +161,21 @@ Forum magnets and JavDB magnets are merged (deduplicated). When forum threads on
 | Variable | Description |
 |----------|-------------|
 | `JAVDB_HOST` | API base URL (default mirror `https://jdforrepam.com`) |
-| `JAVDB_TOKEN` | Optional bearer token for authenticated endpoints |
+| `JAVDB_TOKEN` | Optional bearer token (overrides saved login) |
+| `JAVDB_AUTH_FILE` | Path to saved login JSON (default `<skill-dir>/javdb_auth.json`) |
 | `JAVDB_DEVICE_UUID` | Stable device id for API params |
+
+### Login
+
+```bash
+python scripts/javdb_login.py login
+python scripts/javdb_login.py status --check
+python scripts/javdb_login.py logout
+```
+
+- Token is stored locally in `javdb_auth.json` (mode 600, gitignored).
+- `--save-password` stores password in plaintext for manual re-login only; off by default.
+- Priority: `JAVDB_TOKEN` env → saved token in `javdb_auth.json` → anonymous.
 
 ## First Run (Pass Cloudflare)
 
