@@ -245,6 +245,10 @@ def analyze_scan(
     posts_with = {"magnet": 0, "ed2k": 0, "bt": 0}
     downloadable = 0
 
+    with_link = 0
+    without_link = 0
+    from pikpak_download import pick_item_download
+
     for item in matched:
         forums[_forum_label(item.get("forum", ""))] += 1
         region = item.get("content_region") or "other"
@@ -254,6 +258,10 @@ def analyze_scan(
             subtype_counts[sub] += 1
         if is_downloadable(item):
             downloadable += 1
+            if pick_item_download(item):
+                with_link += 1
+            else:
+                without_link += 1
         counts = _count_links(item)
         for k in link_totals:
             link_totals[k] += counts[k]
@@ -265,6 +273,8 @@ def analyze_scan(
         "forums": dict(forums),
         "matched_total": len(matched),
         "downloadable": downloadable,
+        "with_link": with_link,
+        "without_link": without_link,
         "region_counts": dict(region_counts),
         "subtype_counts": dict(subtype_counts),
         "link_totals": link_totals,
@@ -309,18 +319,8 @@ def build_download_report_from_scans(
             continue
         uri = dl.get("uri") or dl.get("url") or ""
         ltype = _link_type(uri)
+        # ed2k 统一由 refetch 段写入，避免与多文件 refetch 重复
         if ltype == "ed2k":
-            failed.append({
-                "name": dl.get("name") or item_download_name(item),
-                "title": item.get("title", ""),
-                "href": item.get("href", ""),
-                "uri": uri,
-                "url": uri,
-                "link_type": "ed2k",
-                "source": dl.get("source", "forum_ed2k"),
-                "status": "failed",
-                "error": ed2k_error,
-            })
             continue
         if ltype == "magnet" and magnet_added < magnet_ok:
             succeeded.append({
@@ -410,16 +410,23 @@ def build_scan_summary_card(
     fail = download_report.get("failed_count", 0)
     total = download_report.get("total") or (ok + fail)
 
+    dl_posts = scan_stats.get("downloadable", 0)
+    with_link = scan_stats.get("with_link", 0)
+    without_link = scan_stats.get("without_link", 0)
+
     md = (
         f"**扫描时间** {str(scan_stats.get('scan_time', ''))[:19]}\n\n"
         f"**扫描板块**\n{forum_lines or '(无)'}\n\n"
-        f"**帖子统计** 共 **{scan_stats.get('matched_total', 0)}** 帖 | "
-        f"可下载 **{scan_stats.get('downloadable', 0)}**\n\n"
+        f"**帖子统计** 匹配 **{scan_stats.get('matched_total', 0)}** 帖\n"
+        f"• 可下载(过滤保留): **{dl_posts}** 帖\n"
+        f"• 有链接: **{with_link}** 帖 | 无链接: **{without_link}** 帖\n"
+        f"  _(无链接=标题保留 ed2k/国产 但未进帖抓到链接)_\n\n"
         f"**链接采集**\n"
         f"• 磁力: **{lt.get('magnet', 0)}** 条 ({pw.get('magnet', 0)} 帖)\n"
         f"• ed2k: **{lt.get('ed2k', 0)}** 条 ({pw.get('ed2k', 0)} 帖)\n"
         f"• BT种子: **{lt.get('bt', 0)}** 条 ({pw.get('bt', 0)} 帖)\n\n"
-        f"**PikPak 提交** 成功 **{ok}** / 失败 **{fail}** / 共 **{total}**\n\n"
+        f"**PikPak 提交**(按**链接**计) 成功 **{ok}** + 失败 **{fail}** = **{total}** 条\n"
+        f"_(可下载 {dl_posts} 帖 ≠ 提交 {total} 条：{without_link} 帖无链接 + 多文件帖按链接计)_\n\n"
         f"**失败原因汇总**\n{_error_summary(download_report.get('failed') or [])}\n"
     )
     if report_url:

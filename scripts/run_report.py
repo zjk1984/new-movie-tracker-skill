@@ -113,6 +113,10 @@ def write_run_report(
             item.get("phase") or "ok",
         ])
 
+    dl_posts = scan_stats.get("downloadable", 0)
+    with_link = scan_stats.get("with_link", 0)
+    without_link = scan_stats.get("without_link", 0)
+
     body = f"""# 论坛扫描报告
 
 - **生成时间**: {datetime.now().isoformat(timespec="seconds")}
@@ -126,16 +130,20 @@ def write_run_report(
 
 ### 统计
 
-| 项目 | 数量 |
-| --- | --- |
-| 匹配帖 | {scan_stats.get("matched_total", 0)} |
-| 可下载 | {scan_stats.get("downloadable", 0)} |
-| 磁力链接 | {lt.get("magnet", 0)} ({pw.get("magnet", 0)} 帖) |
-| ed2k 链接 | {lt.get("ed2k", 0)} ({pw.get("ed2k", 0)} 帖) |
-| BT 种子 | {lt.get("bt", 0)} ({pw.get("bt", 0)} 帖) |
-| PikPak 成功 | {ok} |
-| PikPak 失败 | {fail} |
-| PikPak 合计 | {total} |
+| 项目 | 数量 | 说明 |
+| --- | --- | --- |
+| 匹配帖 | {scan_stats.get("matched_total", 0)} | 扫描命中的全部帖子 |
+| 可下载(过滤保留) | {dl_posts} | 通过 content_filter 保留的帖 |
+| 有链接 | {with_link} | 帖内提取到 magnet/ed2k 等 |
+| 无链接 | {without_link} | 标题保留但未抓到链接(需进帖/Cloudflare) |
+| 磁力链接 | {lt.get("magnet", 0)} ({pw.get("magnet", 0)} 帖) | 采集到的磁力 URI 数 |
+| ed2k 链接 | {lt.get("ed2k", 0)} ({pw.get("ed2k", 0)} 帖) | 含 refetch 进帖结果 |
+| BT 种子 | {lt.get("bt", 0)} ({pw.get("bt", 0)} 帖) | BT种子帖/特征码 |
+| PikPak 成功 | {ok} | 按**链接**提交成功 |
+| PikPak 失败 | {fail} | 按**链接**提交失败 |
+| PikPak 合计 | {total} | 成功+失败链接数，非帖数 |
+
+> **为何可下载 {dl_posts} ≠ PikPak {total}？** {without_link} 帖无链接未提交；有链接帖中多 ed2k 文件按链接逐条提交。
 
 ## 下载失败
 
