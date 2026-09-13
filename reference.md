@@ -93,6 +93,28 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `--javdb-cnsub` | `False` | Filter JavDB magnets to Chinese-subtitled entries. |
 | `--javdb-hd` | `False` | Filter JavDB magnets to HD entries. |
 | `--javdb-host` | mirror | JavDB API host (default `https://jdforrepam.com`). |
+| `--cnsub-priority` | `False` | Cnsub-first magnet selection (implies `--fetch-magnets`). |
+| `--pikpak` | `False` | Submit selected magnets to PikPak after scan. |
+| `--pikpak-folder` | `My Pack` | PikPak target folder name. |
+
+## Cnsub-first workflow
+
+Magnet selection order (`scripts/magnet_select.py`):
+
+1. **forum_cnsub** — title contains 中字/字幕/中文… and thread has magnet links
+2. **javdb_cnsub** — JavDB lookup with cnsub filter + best magnet
+3. **forum_fallback** — any magnet from the forum thread
+
+End-to-end:
+
+```bash
+export PIKPAK_TOKEN="your-token"
+python scripts/scan.py --days 3 --cnsub-priority --pikpak
+python scripts/pikpak_download.py
+python scripts/pikpak_download.py --all
+```
+
+With PikPak MCP: scan with `--cnsub-priority` only, then MCP `add_link` each `selected_magnet` into **My Pack**.
 
 ## JavDB API
 
