@@ -574,12 +574,16 @@ def match_post(
     until: datetime | None,
     cutoff: datetime,
     today: datetime,
+    all_posts: bool = False,
 ) -> dict | None:
     dt = parse_date(post["date_text"], today)
     if keywords:
         if not any(kw in post["title"] for kw in keywords):
             return None
         if not post_in_range(dt, since, until, cutoff, keyword_only=True):
+            return None
+    elif all_posts:
+        if not post_in_range(dt, since, until, cutoff):
             return None
     else:
         if not post_in_range(dt, since, until, cutoff):
@@ -604,14 +608,24 @@ def match_post(
 
 
 def scrape(args):
-    actors, inline_aliases = load_actors(args)
-    alias_map = load_alias_map(args, inline_aliases)
-    match_index = build_match_index(actors, alias_map)
-    match_names = set(match_index.keys())
+    all_posts = bool(getattr(args, "all_posts", False))
+    if all_posts:
+        actors: set[str] = set()
+        inline_aliases: dict[str, set[str]] = {}
+        alias_map: dict[str, set[str]] = {}
+        match_index: dict[str, set[str]] = {}
+        match_names: set[str] = set()
+        print("[info] matching all posts in date range (no actor filter)")
+    else:
+        actors, inline_aliases = load_actors(args)
+        alias_map = load_alias_map(args, inline_aliases)
+        match_index = build_match_index(actors, alias_map)
+        match_names = set(match_index.keys())
     keywords = [k for k in (getattr(args, "keywords", None) or []) if k]
     if keywords:
         print(f"[info] title keyword filter: {keywords}")
-    print(f"[info] tracking {len(actors)} actors ({len(match_names)} names including aliases)")
+    if not all_posts:
+        print(f"[info] tracking {len(actors)} actors ({len(match_names)} names including aliases)")
 
     javdb_client = None
     if (
@@ -748,6 +762,7 @@ def scrape(args):
                             until=until,
                             cutoff=cutoff,
                             today=today,
+                            all_posts=all_posts,
                         )
                         if not item:
                             continue
@@ -937,6 +952,11 @@ def main():
     parser.add_argument("--javdb-cnsub", action="store_true", help="Filter JavDB magnets to those with Chinese subtitles")
     parser.add_argument("--javdb-hd", action="store_true", help="Filter JavDB magnets to HD only")
     parser.add_argument("--javdb-host", default=None, help="JavDB API host (default: https://jdforrepam.com)")
+    parser.add_argument(
+        "--all-posts",
+        action="store_true",
+        help="Match all posts in the date range (skip actor name filter)",
+    )
     parser.add_argument(
         "--cnsub-priority",
         action="store_true",
