@@ -103,6 +103,8 @@ def select_alternative_from_post(item: dict[str, Any]) -> dict[str, Any] | None:
         uri = (entry.get("uri") or "").strip()
         if not uri:
             continue
+        if entry.get("kind") == "hash_label_btih" or uri.lower().startswith("magnet:"):
+            return {"magnet": uri, "source": entry.get("source", "forum_bt_feature")}
         if entry.get("kind") == "pikpak_sha" or uri.lower().startswith("pikpak://"):
             return {"pikpak_sha": uri, "source": entry.get("source", "forum_pipe_code")}
         if entry.get("kind") == "ed2k" or uri.lower().startswith("ed2k://"):

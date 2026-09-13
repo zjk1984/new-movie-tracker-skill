@@ -367,7 +367,7 @@ python scripts/pikpak_download.py --sha-file feature_codes.txt
 
 - **Instant add** when PikPak cloud already has the GCID (`PHASE_TYPE_COMPLETE`).
 - **Fails** if the hash is not cached (no offline fetch by hash alone).
-- When a post has **no magnet links**, the scanner collects from the thread body: `ed2k://`, `PikPak://`, `filename|size|hash` pipe codes, and labeled 哈希校验/特征码 (`hash_entries`).
+- When a post has **no magnet links** (common for `[BT种子]` attachments), the scanner collects from the thread body: `ed2k://`, `PikPak://`, `filename|size|hash` pipe codes, and BT labels **【特征全码】/【哈希校验】/【特徵全碼】** — 40-char values become `magnet:?xt=urn:btih:HASH` (`hash_label_btih` in `hash_entries`).
 - Selection order with magnets: cnsub forum → JavDB → forum fallback. **Without magnets:** PikPak SHA → ed2k → JavDB (if `--cnsub-priority`).
 - **ed2k** links are submitted as URL offline tasks (different hash algorithm from GCID).
 

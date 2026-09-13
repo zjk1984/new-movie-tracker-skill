@@ -521,6 +521,7 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
         from pikpak_links import collect_alternatives_from_text
 
         alts = collect_alternatives_from_text(text)
+        magnets.update(alts.get("magnets") or [])
         ed2k.update(alts["ed2k"])
         pikpak_sha.update(alts["pikpak_sha"])
         hash_entries = alts["hash_entries"]

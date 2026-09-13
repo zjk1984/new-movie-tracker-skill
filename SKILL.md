@@ -229,7 +229,7 @@ When the user wants **Chinese-subtitled magnets** from forum posts and automatic
 1. Forum title indicates cnsub (中字/字幕/中文…) and thread has magnets → use forum magnet
 2. Else look up the AV number on JavDB for a cnsub magnet
 3. Else fall back to any forum magnet
-4. **If the post has no magnet links:** collect from the thread body — `ed2k://`, `PikPak://` feature codes, `filename|size|hash` pipe codes, and labeled 哈希校验/特征码 values (`hash_entries` in JSON)
+4. **If the post has no magnet links:** collect from the thread body — `ed2k://`, `PikPak://` feature codes, `filename|size|hash` pipe codes, and BT seed labels **【特征全码】/【哈希校验】/【特徵全碼】** (40-char btih → `magnet:?xt=urn:btih:...`, stored in `hash_entries` + `magnets`)
 5. No-magnet fallback order: PikPak SHA → ed2k → JavDB cnsub (when `--cnsub-priority`)
 6. Submit `selected_download` (magnet / ed2k / feature code) to PikPak **My Pack** (有码 + 无码 JAV only)
 

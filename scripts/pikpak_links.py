@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Parse PikPak feature codes (特征码), ed2k, and magnet links."""
+"""Parse PikPak feature codes (特征码), ed2k, magnet links, and BT seed hashes."""
 from __future__ import annotations
 
+import html as html_module
 import re
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 PIKPAK_SHA_TEXT_RE = re.compile(
     r"PikPak://[^|\s<>\"']+\|\d+\|[A-Fa-f0-9]{40}",
@@ -22,9 +23,34 @@ PIPE_CODE_RE = re.compile(
     r"(?![A-Fa-f0-9])",
     re.IGNORECASE,
 )
-HASH_LABEL_RE = re.compile(
-    r"(?:哈希校验|校验码|文件校验|特征码|GCID|文件哈希|hash)"
-    r"[：:\s]*([A-Fa-f0-9]{32}|[A-Fa-f0-9]{40})",
+# BT seed posts: 【特征全码】/哈希校验 → 40-char SHA1 btih (magnet)
+BT_FEATURE_LABEL_RE = re.compile(
+    r"(?:【|\[)?"
+    r"(?:特征全码|特徵全码|特徵全碼|特征全码|哈希校验|校验码|文件校验|哈希值|效验码|"
+    r"文件哈希|磁力哈希|btih|hash)"
+    r"(?:】|\])?"
+    r"[：:\s]*"
+    r"([A-Fa-f0-9]{40})",
+    re.IGNORECASE,
+)
+# PikPak GCID / 秒传 (distinct from BT btih)
+GCID_LABEL_RE = re.compile(
+    r"(?:GCID|秒传码|秒傳碼|PikPak特征码|PikPak特徵碼)"
+    r"[：:\s]*([A-Fa-f0-9]{40})",
+    re.IGNORECASE,
+)
+# Generic 特征码 label — 40 hex treated as btih on BT-style posts
+GENERIC_FEATURE_LABEL_RE = re.compile(
+    r"(?:【|\[)?(?:特征码|特徵码|特徵碼)(?:】|\])?"
+    r"[：:\s]*([A-Fa-f0-9]{40})",
+    re.IGNORECASE,
+)
+NAME_BLOCK_RE = re.compile(
+    r"【(?:影片名称|中文片名|文件名称)】[：:\s]*([^\n【\[]+)",
+    re.IGNORECASE,
+)
+SIZE_BLOCK_RE = re.compile(
+    r"【(?:影片大小|文件大小|文件容量)】[：:\s]*([^\n【\[]+)",
     re.IGNORECASE,
 )
 
@@ -188,44 +214,128 @@ def extract_ed2k_links(text: str) -> list[str]:
     return out
 
 
+def normalize_post_text(text: str) -> str:
+    """Strip HTML and preserve line breaks for BT seed / hash label parsing."""
+    if not text:
+        return ""
+    t = text
+    t = re.sub(r"(?i)<br\s*/?>", "\n", t)
+    t = re.sub(r"(?i)</p>", "\n", t)
+    t = re.sub(r"(?i)</div>", "\n", t)
+    t = re.sub(r"(?i)</tr>", "\n", t)
+    t = re.sub(r"(?i)</li>", "\n", t)
+    t = re.sub(r"<[^>]+>", "", t)
+    t = html_module.unescape(t)
+    t = t.replace("\xa0", " ")
+    t = re.sub(r"[ \t]+\n", "\n", t)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t
+
+
+def btih_magnet(file_hash: str, name: str = "") -> str:
+    h = file_hash.upper()
+    uri = f"magnet:?xt=urn:btih:{h}"
+    if name:
+        uri += f"&dn={quote(name.strip())}"
+    return uri
+
+
+def _nearest_name_before(text: str, pos: int) -> str:
+    """Best-effort title from 【影片名称】 block preceding a hash label."""
+    window = text[max(0, pos - 1200):pos]
+    names = NAME_BLOCK_RE.findall(window)
+    return names[-1].strip() if names else ""
+
+
+def extract_bt_feature_magnets(text: str) -> tuple[list[str], list[dict[str, Any]]]:
+    """
+    Parse BT seed post 【特征全码】/哈希校验 → magnet:?xt=urn:btih:...
+    Returns (magnet_uris, hash_entries).
+    """
+    plain = normalize_post_text(text)
+    seen: set[str] = set()
+    magnets: list[str] = []
+    entries: list[dict[str, Any]] = []
+
+    patterns = (BT_FEATURE_LABEL_RE, GENERIC_FEATURE_LABEL_RE)
+    for pattern in patterns:
+        for match in pattern.finditer(plain):
+            file_hash = match.group(1).upper()
+            if file_hash in seen:
+                continue
+            seen.add(file_hash)
+            name = _nearest_name_before(plain, match.start())
+            uri = btih_magnet(file_hash, name)
+            magnets.append(uri)
+            entries.append({
+                "kind": "hash_label_btih",
+                "hash": file_hash,
+                "algo": "btih",
+                "name": name,
+                "uri": uri,
+                "label": match.group(0).strip()[:120],
+                "source": "forum_bt_feature",
+            })
+
+    return magnets, entries
+
+
 def extract_hash_entries(text: str) -> list[dict[str, Any]]:
     """Collect labeled hash / 特征码 values from post body."""
+    plain = normalize_post_text(text)
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
-    for match in HASH_LABEL_RE.finditer(text or ""):
+
+    _, bt_entries = extract_bt_feature_magnets(plain)
+    for entry in bt_entries:
+        seen.add(entry["hash"])
+        out.append(entry)
+
+    for match in GCID_LABEL_RE.finditer(plain):
         file_hash = match.group(1).upper()
         if file_hash in seen:
             continue
         seen.add(file_hash)
-        if len(file_hash) == 40:
-            algo = "gcid"
-            kind = "hash_label_gcid"
-        elif len(file_hash) == 32:
-            algo = "ed2k"
-            kind = "hash_label_ed2k"
-        else:
-            algo = "unknown"
-            kind = "hash_label"
         out.append({
-            "kind": kind,
+            "kind": "hash_label_gcid",
             "hash": file_hash,
-            "algo": algo,
+            "algo": "gcid",
             "label": match.group(0).strip()[:120],
             "source": "forum_hash_label",
         })
+
+    ed2k_label_re = re.compile(
+        r"(?:哈希校验|校验码|文件校验|文件哈希|hash)[：:\s]*([A-Fa-f0-9]{32})",
+        re.IGNORECASE,
+    )
+    for match in ed2k_label_re.finditer(plain):
+        file_hash = match.group(1).upper()
+        if file_hash in seen:
+            continue
+        seen.add(file_hash)
+        out.append({
+            "kind": "hash_label_ed2k",
+            "hash": file_hash,
+            "algo": "ed2k",
+            "label": match.group(0).strip()[:120],
+            "source": "forum_hash_label",
+        })
+
     return out
 
 
 def collect_alternatives_from_text(text: str) -> dict[str, Any]:
-    """Extract ed2k, PikPak feature codes, and hash labels from HTML/text."""
-    pikpak_sha = extract_pikpak_shas(text)
-    ed2k = extract_ed2k_links(text)
-    hash_entries = extract_hash_entries(text)
+    """Extract ed2k, PikPak feature codes, BT feature magnets, and hash labels."""
+    plain = normalize_post_text(text)
+    pikpak_sha = extract_pikpak_shas(plain)
+    ed2k = extract_ed2k_links(plain)
+    feature_magnets, _ = extract_bt_feature_magnets(plain)
+    hash_entries = extract_hash_entries(plain)
 
     # Enrich hash_entries with full pipe codes found in text
     seen_uri: set[str] = set(pikpak_sha)
     seen_uri.update(ed2k)
-    for match in PIPE_CODE_RE.findall(text or ""):
+    for match in PIPE_CODE_RE.findall(plain):
         name, size, file_hash = match
         line = f"{name}|{size}|{file_hash}"
         parsed = parse_pipe_code(line)
@@ -252,6 +362,7 @@ def collect_alternatives_from_text(text: str) -> dict[str, Any]:
         return out
 
     return {
+        "magnets": _dedupe(feature_magnets),
         "pikpak_sha": _dedupe(pikpak_sha),
         "ed2k": _dedupe(ed2k),
         "hash_entries": hash_entries,
