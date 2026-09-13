@@ -77,10 +77,24 @@ def is_already_submitted(item: dict[str, Any], state: dict[str, Any]) -> bool:
             return True
         if store == "uri" and lookup in state.get("magnets", {}):
             return True
-    thread_key = item_thread_key(item)
-    if thread_key and thread_key in state.get("threads", {}):
-        return True
+    if _thread_dedup_enabled():
+        thread_key = item_thread_key(item)
+        if thread_key and thread_key in state.get("threads", {}):
+            return True
     return False
+
+
+def _thread_dedup_enabled() -> bool:
+    try:
+        from submit_gate import thread_dedup_enabled
+
+        return thread_dedup_enabled()
+    except ImportError:
+        import os
+
+        return os.environ.get("DOWNLOAD_DEDUP_THREADS", "").strip().lower() in {
+            "1", "true", "yes", "on",
+        }
 
 
 def filter_new_items(items: list[dict[str, Any]], state: dict[str, Any]) -> list[dict[str, Any]]:

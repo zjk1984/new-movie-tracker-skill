@@ -19,21 +19,7 @@ from pikpak_auth import (
 from pikpak_download import decode_jwt_payload, list_files
 
 
-def _load_env_local() -> None:
-    import os
-
-    env_path = SKILL_DIR / ".env.local"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        key = key.strip()
-        val = val.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = val
+from env_utils import load_env_local as _load_env_local
 
 
 def cmd_login(args: argparse.Namespace) -> int:

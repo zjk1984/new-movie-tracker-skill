@@ -9,6 +9,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from env_utils import load_env_local
+
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = SKILL_DIR / "scripts"
 
@@ -19,21 +21,6 @@ DEFAULT_FORUMS = [
     "https://www.sehuatang.org/forum-103-1.html",
     "https://www.sehuatang.org/forum-37-1.html",
 ]
-
-
-def load_env_local(skill_dir: Path) -> None:
-    env_path = skill_dir / ".env.local"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        key = key.strip()
-        val = val.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = val
 
 
 def run_scan(args: argparse.Namespace, output_dir: Path) -> int:
@@ -47,6 +34,7 @@ def run_scan(args: argparse.Namespace, output_dir: Path) -> int:
         "--max-pages",
         str(args.max_pages),
         "--all-posts",
+        "--fetch-magnets",
         "--cnsub-priority",
         *sum([["--urls", url] for url in args.urls], []),
     ]
@@ -77,7 +65,13 @@ def run_download(args: argparse.Namespace, output_dir: Path) -> tuple[int, int |
         print(f"[err] pikpak: {exc}", file=sys.stderr)
         return 1, None, None
     print(f"[done] pikpak new-only: {ok}/{total} submitted")
-    rc = 0 if ok == total else 1
+    if ok == total:
+        rc = 0
+    elif ok > 0:
+        rc = 0
+        print(f"[warn] pikpak partial success: {ok}/{total}")
+    else:
+        rc = 1
     return rc, ok, total
 
 
@@ -105,7 +99,6 @@ def maybe_feishu_notify(
         _, md_path, md_url = notify_cards(
             [result_path],
             download_report_path=report_path if report_path.exists() else None,
-            reconstruct_report=not report_path.exists(),
             run_label="daily",
         )
         print(f"[ok] feishu summary sent; report: {md_path}")
