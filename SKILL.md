@@ -208,7 +208,10 @@ If PikPak MCP is configured (see `.cursor/mcp.json` and [reference.md](reference
 If MCP is unavailable, fall back to:
 ```bash
 python scripts/pikpak_download.py --new-only
+python scripts/pikpak_download.py --sha 'PikPak://file.mkv|123456789|GCID40CHARHASH...'
 ```
+
+**Feature code (特征码):** `PikPak://文件名|字节大小|GCID` — instant cloud add when PikPak already has the file. Forum scans also extract `pikpak_sha`; selection order: magnet → JavDB cnsub → PikPak SHA → ed2k.
 
 ### 9. Daily Schedule (7:00 AM, incremental download)
 

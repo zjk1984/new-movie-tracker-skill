@@ -326,7 +326,21 @@ Enable the PikPak MCP toggle when starting an agent run.
 
 After scanning, use the PikPak MCP `add_link` tool for each magnet. Default target folder is **My Pack** — pass its folder ID as `parent` (use `ls` at root to find it).
 
-Fallback without MCP: `python scripts/pikpak_download.py` (uses the same token via `PIKPAK_TOKEN`).
+Fallback without MCP: `python scripts/pikpak_download.py` (uses saved token in `pikpak_auth.json`).
+
+### PikPak feature codes (特征码 / GCID 秒传)
+
+Format: `PikPak://filename|size_bytes|GCID_HASH` (40-char GCID, not btih/ed2k MD4).
+
+```bash
+python scripts/pikpak_download.py --sha 'PikPak://MIDA-749.mp4|6123456789|ABCDEF0123456789ABCDEF0123456789ABCD'
+python scripts/pikpak_download.py --sha-file feature_codes.txt
+```
+
+- **Instant add** when PikPak cloud already has the GCID (`PHASE_TYPE_COMPLETE`).
+- **Fails** if the hash is not cached (no offline fetch by hash alone).
+- Scan extracts `pikpak_sha` from forum posts; cnsub-first policy falls back: magnet → JavDB → **PikPak SHA** → ed2k.
+- **ed2k** links are submitted as URL offline tasks (different hash algorithm from GCID).
 
 ## Troubleshooting
 

@@ -124,13 +124,40 @@ def select_magnet(item: dict[str, Any], javdb_client=None) -> dict[str, Any] | N
             "av_number": number,
         }
 
+    pikpak_shas = list(item.get("pikpak_sha") or [])
+    if pikpak_shas:
+        return {
+            "pikpak_sha": pikpak_shas[0],
+            "source": "forum_pikpak_sha",
+            "av_number": number,
+        }
+
+    ed2k_links = list(item.get("ed2k") or [])
+    if ed2k_links:
+        return {
+            "ed2k": ed2k_links[0],
+            "source": "forum_ed2k",
+            "av_number": number,
+        }
+
     return None
 
 
 def apply_selection(item: dict[str, Any], javdb_client=None) -> bool:
     selection = select_magnet(item, javdb_client)
-    if not selection or not selection.get("magnet"):
+    if not selection:
         return False
-    item["selected_magnet"] = selection["magnet"]
-    item["magnet_source"] = selection["source"]
-    return True
+    if selection.get("magnet"):
+        item["selected_magnet"] = selection["magnet"]
+        item["magnet_source"] = selection["source"]
+        return True
+    if selection.get("pikpak_sha"):
+        item["selected_pikpak_sha"] = selection["pikpak_sha"]
+        item["download_source"] = selection["source"]
+        return True
+    if selection.get("ed2k"):
+        item["selected_ed2k"] = selection["ed2k"]
+        item["selected_download"] = selection["ed2k"]
+        item["download_source"] = selection["source"]
+        return True
+    return False

@@ -83,5 +83,9 @@ def apply_region_filter(item: dict[str, Any], *, region_filter: bool = True) -> 
     item["magnet_source"] = f"skipped_{region}"
     item["magnets"] = []
     item["ed2k"] = []
+    item["pikpak_sha"] = []
+    item.pop("selected_pikpak_sha", None)
+    item.pop("selected_ed2k", None)
+    item.pop("selected_download", None)
     item.pop("javdb_magnets", None)
     return False

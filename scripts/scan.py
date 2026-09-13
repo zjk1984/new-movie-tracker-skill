@@ -485,10 +485,11 @@ def post_in_range(
 
 def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list[str]]:
     if not href:
-        return {"magnets": [], "ed2k": []}
+        return {"magnets": [], "ed2k": [], "pikpak_sha": []}
     full_url = urljoin(forum_url, href)
     magnets: set[str] = set()
     ed2k: set[str] = set()
+    pikpak_sha: set[str] = set()
     try:
         page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
@@ -517,10 +518,20 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list[str]
             magnets.add(m)
         for e in re.findall(r'ed2k://[^"\s<>]+', text):
             ed2k.add(e)
+        for sha in re.findall(
+            r'PikPak://[^|\s<>"\']+\|\d+\|[A-Fa-f0-9]{40}',
+            text,
+            flags=re.IGNORECASE,
+        ):
+            pikpak_sha.add(sha)
 
     except Exception as e:
         print(f"[warn] failed to extract links from {full_url}: {e}")
-    return {"magnets": list(magnets), "ed2k": list(ed2k)}
+    return {
+        "magnets": list(magnets),
+        "ed2k": list(ed2k),
+        "pikpak_sha": list(pikpak_sha),
+    }
 
 
 def extract_magnets(page, href: str, forum_url: str) -> list[str]:
@@ -820,6 +831,7 @@ def scrape(args):
                             links = extract_thread_links(page, post["href"], forum_url)
                             item["magnets"] = links["magnets"]
                             item["ed2k"] = links["ed2k"]
+                            item["pikpak_sha"] = links["pikpak_sha"]
                         if getattr(args, "cnsub_priority", False):
                             from magnet_select import apply_selection
 
@@ -942,6 +954,15 @@ def scrape(args):
                     lines.append(f"skip_reason: {m['skip_reason']}")
                 if m.get("selected_magnet"):
                     lines.append(f"selected_magnet ({m.get('magnet_source', '?')}): {m['selected_magnet']}")
+                if m.get("selected_pikpak_sha"):
+                    lines.append(
+                        f"selected_pikpak_sha ({m.get('download_source', '?')}): "
+                        f"{m['selected_pikpak_sha']}"
+                    )
+                if m.get("selected_ed2k"):
+                    lines.append(
+                        f"selected_ed2k ({m.get('download_source', '?')}): {m['selected_ed2k']}"
+                    )
                 if "magnets" in m:
                     if m["magnets"]:
                         lines.append("magnets:")
@@ -956,6 +977,13 @@ def scrape(args):
                             lines.append(f"  - {link}")
                     else:
                         lines.append("ed2k: (none found)")
+                if "pikpak_sha" in m:
+                    if m["pikpak_sha"]:
+                        lines.append("pikpak_sha:")
+                        for link in m["pikpak_sha"]:
+                            lines.append(f"  - {link}")
+                    else:
+                        lines.append("pikpak_sha: (none found)")
                 lines.append("-" * 40)
 
             result_text = "\n".join(lines)
