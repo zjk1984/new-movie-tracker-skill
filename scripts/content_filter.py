@@ -40,7 +40,7 @@ def is_domestic_uncensored(title: str) -> bool:
 
 
 def domestic_keep_reason(title: str) -> str | None:
-    """Return keep label for domestic posts: 私拍 / 泄密 / 流出."""
+    """Return keep label for domestic posts: 私拍 / 泄密 / 流出 / AI增强."""
     text = title or ""
     if "私拍" in text:
         return "私拍"
@@ -48,6 +48,8 @@ def domestic_keep_reason(title: str) -> str | None:
         return "泄密"
     if DOMESTIC_LEAK_OUT_RE.search(text):
         return "流出"
+    if "AI增强" in text or "AI 增强" in text:
+        return "AI增强"
     return None
 
 

@@ -1136,7 +1136,7 @@ def main():
     args.region_filter = not args.all_regions
     args.javdb_query = not args.no_javdb_query
     if args.region_filter:
-        print("[info] download filter: JAV 有码/无码 + 国产(私拍/泄密/流出)")
+        print("[info] download filter: JAV 有码/无码 + 国产(私拍/泄密/流出/AI增强)")
     if args.javdb_query:
         print("[info] javdb query report: enabled for matched 有码/无码 items")
     scrape(args)

@@ -106,7 +106,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 |--------|----------|
 | `jav_censored` | MIDA-749, SNOS-270, [有码高清] |
 | `uncensored` | ATID-799 无码破解, HEYZO (日本无码) |
-| `domestic_leak` | [国产无码] …**私拍** / **泄密** / **流出** (`domestic_subtype`) |
+| `domestic_leak` | [国产无码] …**私拍** / **泄密** / **流出** / **AI增强** (`domestic_subtype`) |
 
 **Excluded** (magnets cleared, `skip_reason: excluded_*`):
 
