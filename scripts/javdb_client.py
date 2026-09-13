@@ -429,20 +429,131 @@ class JavDBClient:
     ) -> dict[str, Any]:
         movie_id = self.resolve_movie_id(number, exact=exact)
         detail = self.movie_detail(movie_id)
+        resolved_number = _any_str(detail.get("number") or number).upper()
+        content_type = classify_javdb_content(detail, resolved_number)
         result: dict[str, Any] = {
-            "number": _any_str(detail.get("number") or number).upper(),
+            "number": resolved_number,
             "javdb_id": movie_id,
             "title": _any_str(detail.get("title")),
             "release_date": _any_str(detail.get("release_date")),
             "duration": detail.get("duration"),
             "has_cnsub": detail.get("has_cnsub"),
+            "content_type": content_type,
+            "content_type_label": content_type_label(content_type),
+            "query_status": "ok",
         }
         if fetch_magnets:
-            magnets = self.movie_magnets(movie_id)
-            magnets = filter_magnets(magnets, cnsub=cnsub, hd=hd)
+            all_rows = self.movie_magnets(movie_id)
+            result["magnet_total"] = len(all_rows)
+            magnets = filter_magnets(all_rows, cnsub=cnsub, hd=hd)
+            result["magnet_filtered"] = len(magnets)
             if best_only:
                 best = pick_best_magnet(magnets)
                 magnets = [best] if best else []
-            result["magnets"] = [magnet_uri(m) for m in magnets if magnet_uri(m)]
+            uri_list = [magnet_uri(m) for m in magnets if magnet_uri(m)]
+            result["magnets"] = uri_list
             result["magnet_rows"] = magnets
+            result["magnet_status"] = "available" if uri_list else "empty"
+            result["best_magnet"] = uri_list[0] if uri_list else ""
+        else:
+            result["magnet_status"] = "not_requested"
+            result["magnet_total"] = 0
+            result["magnet_filtered"] = 0
+            result["best_magnet"] = ""
+        result["summary"] = format_lookup_summary(result)
         return result
+
+
+def classify_javdb_content(detail: dict[str, Any], number: str) -> str:
+    from content_filter import STUDIO_NUM_RE, classify_region
+
+    title = _any_str(detail.get("title"))
+    region = classify_region({"title": title, "av_number": number})
+    if region in ("jav_censored", "uncensored"):
+        return region
+    if STUDIO_NUM_RE.match(number.upper()):
+        return "jav_censored"
+    return "other"
+
+
+def content_type_label(content_type: str) -> str:
+    return {"jav_censored": "有码", "uncensored": "无码"}.get(content_type, "其他")
+
+
+def format_lookup_summary(info: dict[str, Any], *, error: str | None = None) -> str:
+    if error:
+        return f"JavDB 查询失败: {error}"
+    number = info.get("number", "?")
+    label = info.get("content_type_label") or content_type_label(info.get("content_type", ""))
+    parts = [f"JavDB {number} [{label}]", f"发行 {info.get('release_date') or '-'}"]
+    if info.get("has_cnsub"):
+        parts.append("库内标注含中字")
+    status = info.get("magnet_status")
+    if status == "available":
+        total = info.get("magnet_total", 0)
+        filtered = info.get("magnet_filtered", len(info.get("magnets") or []))
+        parts.append(f"磁力 {filtered}/{total} 条可用")
+    elif status == "empty":
+        parts.append(f"JavDB 暂无磁力 (库内共 {info.get('magnet_total', 0)} 条)")
+    elif status == "not_requested":
+        parts.append("未请求磁力")
+    return " | ".join(parts)
+
+
+def build_query_report(info: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "query_status": info.get("query_status", "ok"),
+        "number": info.get("number"),
+        "content_type": info.get("content_type"),
+        "content_type_label": info.get("content_type_label"),
+        "release_date": info.get("release_date"),
+        "title": info.get("title"),
+        "has_cnsub": info.get("has_cnsub"),
+        "magnet_status": info.get("magnet_status"),
+        "magnet_total": info.get("magnet_total", 0),
+        "magnet_filtered": info.get("magnet_filtered", 0),
+        "best_magnet": info.get("best_magnet") or ((info.get("magnets") or [""])[0]),
+        "summary": info.get("summary") or format_lookup_summary(info),
+    }
+
+
+def build_error_report(number: str, error: str) -> dict[str, Any]:
+    return {
+        "query_status": "error",
+        "number": number,
+        "content_type": "",
+        "content_type_label": "",
+        "release_date": "",
+        "title": "",
+        "has_cnsub": None,
+        "magnet_status": "error",
+        "magnet_total": 0,
+        "magnet_filtered": 0,
+        "best_magnet": "",
+        "summary": format_lookup_summary({}, error=error),
+        "error": error,
+    }
+
+
+def attach_javdb_query(item: dict[str, Any], client: JavDBClient) -> None:
+    """Query JavDB by number and attach javdb_query report to item."""
+    number = item.get("av_number") or extract_av_number(item.get("title", ""))
+    if not number:
+        return
+    item["av_number"] = number
+    try:
+        info = client.lookup(number, fetch_magnets=True, best_only=True)
+        item["javdb_query"] = build_query_report(info)
+        item["javdb"] = {
+            "id": info.get("javdb_id"),
+            "number": info.get("number"),
+            "title": info.get("title"),
+            "release_date": info.get("release_date"),
+            "content_type": info.get("content_type"),
+            "content_type_label": info.get("content_type_label"),
+        }
+        if info.get("release_date") and not item.get("release_date"):
+            item["release_date"] = info["release_date"]
+    except Exception as exc:
+        item["javdb_query"] = build_error_report(number, str(exc))
+        item["javdb_error"] = str(exc)

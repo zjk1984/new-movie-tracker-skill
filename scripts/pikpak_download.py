@@ -213,6 +213,8 @@ def load_magnets_from_result(
             "title": title,
             "magnet": magnet,
             "source": item.get("magnet_source", ""),
+            "href": item.get("href", ""),
+            "av_number": item.get("av_number", ""),
         })
     return items
 
@@ -226,7 +228,7 @@ def submit_magnets(
     *,
     folder: str = DEFAULT_FOLDER,
     access_token: str | None = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, list[dict]]:
     token = (access_token or os.environ.get("PIKPAK_TOKEN", "")).strip()
     if not token:
         raise RuntimeError("set PIKPAK_TOKEN environment variable")
@@ -242,6 +244,7 @@ def submit_magnets(
         print(f"[warn] folder '{folder}' not found, using folder_type=DOWNLOAD fallback")
 
     ok = 0
+    succeeded: list[dict] = []
     for item in items:
         try:
             result = offline_download(
@@ -262,9 +265,10 @@ def submit_magnets(
             print(f"[ok] {item['name']}{suffix} -> task={task_id} phase={phase}")
             print(f"     {item['title'][:80]}")
             ok += 1
+            succeeded.append(item)
         except Exception as exc:
             print(f"[err] {item['name']}: {exc}", file=sys.stderr)
-    return ok, len(items)
+    return ok, len(items), succeeded
 
 
 def submit_from_result(
@@ -273,18 +277,44 @@ def submit_from_result(
     folder: str = DEFAULT_FOLDER,
     today_only: bool = True,
     region_filter: bool = True,
+    new_only: bool = False,
+    state_file: Path | None = None,
     access_token: str | None = None,
 ) -> tuple[int, int]:
+    from download_state import (
+        default_state_path,
+        filter_new_items,
+        load_state,
+        mark_submitted,
+        save_state,
+        touch_run,
+    )
+
     items = load_magnets_from_result(
         result_path,
         today_only=today_only,
         region_filter=region_filter,
     )
+    state_path = state_file or default_state_path(result_path.parent)
+    state = load_state(state_path) if new_only else None
+    if new_only and state is not None:
+        before = len(items)
+        items = filter_new_items(items, state)
+        print(f"[info] new-only: {len(items)}/{before} magnet(s) since last run")
     if not items:
         print("[info] no magnets to submit")
+        if new_only and state is not None:
+            touch_run(state)
+            save_state(state_path, state)
         return 0, 0
     print(f"[info] submitting {len(items)} cloud download task(s)...")
-    return submit_magnets(items, folder=folder, access_token=access_token)
+    ok, total, succeeded = submit_magnets(items, folder=folder, access_token=access_token)
+    if new_only and state is not None:
+        if succeeded:
+            mark_submitted(state, succeeded)
+        touch_run(state)
+        save_state(state_path, state)
+    return ok, total
 
 
 def main() -> int:
@@ -304,6 +334,16 @@ def main() -> int:
         action="store_true",
         help="Include western/FC2/amateur (default: 日本有码 + 无码 JAV only)",
     )
+    parser.add_argument(
+        "--new-only",
+        action="store_true",
+        help="Skip magnets already submitted in download_state.json",
+    )
+    parser.add_argument(
+        "--state-file",
+        default=None,
+        help="Path to download state JSON (default: beside result file)",
+    )
     args = parser.parse_args()
 
     result_path = Path(os.environ.get("RESULT_JSON", "last_result.json"))
@@ -312,11 +352,14 @@ def main() -> int:
         return 1
 
     try:
+        state_file = Path(args.state_file) if args.state_file else None
         ok, total = submit_from_result(
             result_path,
             folder=args.folder,
             today_only=not args.all,
             region_filter=not args.all_regions,
+            new_only=args.new_only,
+            state_file=state_file,
         )
     except RuntimeError as exc:
         print(f"[err] {exc}", file=sys.stderr)

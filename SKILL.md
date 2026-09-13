@@ -108,7 +108,27 @@ If the script reports a Cloudflare challenge:
 - For fully automated scheduled runs, the user should first pass the challenge once manually, then use `--headless`.
 
 ### 5. Report Results
-Read `result.txt` from the output directory (default: current working directory) and present matched results. Include post date, title, matched actors, link, and **magnet links** when available. Present magnet links directly in the chat response so the user can copy them immediately.
+Read `result.txt` and `last_result.json` from the output directory. For each **有码/无码** item kept by the content filter, present:
+
+- Post date, title, `content_region` (forum classification), selected magnet + source
+- **`javdb_query.summary`** — one-line JavDB lookup result, e.g. `JavDB MIDA-749 [有码] | 发行 2026-08-18 | 磁力 1/16 条可用`
+- Copy **selected_magnet** (forum/JavDB policy result), not every raw forum magnet
+
+End with **`javdb_summary`** from JSON when present:
+
+```
+javdb_query_summary:
+  queried: 40
+  with_magnets: 19
+  without_magnets: 21
+  by_type: 有码 38, 无码 2
+```
+
+Explain clearly:
+- **有码** = standard censored JAV (`jav_censored`)
+- **无码** = uncensored / 无码破解 (`uncensored`)
+- **JavDB 无磁力** = number found on JavDB but magnet list empty (forum magnet may still exist)
+- **查询失败** = number not on JavDB or API error
 
 ### 6. JavDB Magnet Lookup (optional)
 
@@ -171,7 +191,9 @@ python scripts/scan.py --keyword 流出 --max-pages 10 --cnsub-priority --pikpak
 
 If MCP is unavailable, use `--pikpak` or `python scripts/pikpak_download.py` after the scan.
 
-Result fields: `selected_magnet`, `magnet_source` (`forum_cnsub` | `javdb_cnsub` | `forum_fallback`).
+Result fields: `selected_magnet`, `magnet_source`, `content_region`, `javdb_query` (with `summary`, `content_type_label`, `magnet_status`).
+
+Disable per-item JavDB reporting with `--no-javdb-query`.
 
 ### 8. PikPak Download (optional)
 If PikPak MCP is configured (see `.cursor/mcp.json` and [reference.md](reference.md)), use the `add_link` tool to submit magnet links. Default target folder is **My Pack** — resolve its folder ID with `ls` at root and pass it as `parent`.
@@ -179,12 +201,34 @@ If PikPak MCP is configured (see `.cursor/mcp.json` and [reference.md](reference
 If MCP is unavailable, fall back to:
 ```bash
 export PIKPAK_TOKEN="your-token"
-python scripts/pikpak_download.py
+python scripts/pikpak_download.py --new-only
 ```
+
+### 9. Daily Schedule (7:00 AM, incremental download)
+
+Run every morning at **07:00** to scan recent forum posts and submit **only new magnets** since the last run (tracked in `download_state.json`).
+
+**One-time setup**
+1. Put `PIKPAK_TOKEN` in `.env.local` (or system env).
+2. Pass Cloudflare once: `python scripts/daily_run.py --no-headless` (uses `data/chrome_profile/`).
+3. Register the scheduled task (see [reference.md](reference.md)).
+
+**Daily command**
+```bash
+python scripts/daily_run.py --headless
+```
+
+Defaults: scan **forum-37 + forum-103**, `--all-posts`, `--cnsub-priority`, last **2 days**, content filter (有码 + 无码), PikPak **My Pack**, **new-only** dedup.
+
+Explain results to the user:
+- **本次新增** — magnets submitted this run (not in previous `download_state.json`)
+- **已跳过** — same thread or same btih already downloaded before
+- **无新增** — scan ran but nothing new to submit
 
 ## Output Files
 - `result.txt` — Human-readable report (overwritten each run)
 - `last_result.json` — Structured data for downstream use
+- `download_state.json` — Submitted magnet/thread history (for incremental runs)
 - `screenshots/` — Debug screenshots if errors occur
 - `chrome_profile/` — Persistent browser session (do not delete)
 
