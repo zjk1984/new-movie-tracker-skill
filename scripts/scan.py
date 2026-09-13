@@ -483,52 +483,167 @@ def post_in_range(
     return bool(dt and dt >= cutoff)
 
 
-def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list[str]]:
+POST_BODY_SELECTORS = (
+    "td.t_f",
+    "div.pcb",
+    '[id^="postmessage_"]',
+    ".t_msgfont",
+    "div.blockcode",
+    "pre",
+    "textarea",
+)
+
+
+def extract_thread_post_html(page) -> str:
+    """Collect first-post body HTML (where ed2k / feature codes usually live)."""
+    chunks: list[str] = []
+    seen: set[str] = set()
+    for selector in POST_BODY_SELECTORS:
+        loc = page.locator(selector)
+        try:
+            count = loc.count()
+        except Exception:
+            continue
+        for i in range(min(count, 8)):
+            try:
+                if selector == "textarea":
+                    piece = loc.nth(i).input_value() or loc.nth(i).inner_text()
+                else:
+                    piece = loc.nth(i).inner_html()
+                piece = (piece or "").strip()
+                if piece and piece not in seen:
+                    seen.add(piece)
+                    chunks.append(piece)
+            except Exception:
+                continue
+    return "\n".join(chunks)
+
+
+def _merge_link_hrefs(page, prefix: str, target: set[str]) -> None:
+    for selector in (f'a[href^{prefix}]', f'[data-clipboard-text^="{prefix}"]'):
+        loc = page.locator(selector)
+        try:
+            count = loc.count()
+        except Exception:
+            continue
+        for i in range(count):
+            for attr in ("href", "data-clipboard-text", "data-url"):
+                try:
+                    val = loc.nth(i).get_attribute(attr)
+                    if val and val.startswith(prefix):
+                        target.add(val)
+                except Exception:
+                    continue
+
+
+def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
     if not href:
-        return {"magnets": [], "ed2k": []}
+        return {"magnets": [], "ed2k": [], "pikpak_sha": [], "hash_entries": []}
     full_url = urljoin(forum_url, href)
     magnets: set[str] = set()
     ed2k: set[str] = set()
+    pikpak_sha: set[str] = set()
+    hash_entries: list[dict] = []
     try:
         page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
         pass_age_gate(page)
+        page.wait_for_timeout(1000)
 
-        magnet_anchors = page.locator('a[href^="magnet:"]')
-        for i in range(magnet_anchors.count()):
-            try:
-                href_val = magnet_anchors.nth(i).get_attribute("href")
-                if href_val:
-                    magnets.add(href_val)
-            except Exception:
-                continue
+        _merge_link_hrefs(page, "magnet:", magnets)
+        _merge_link_hrefs(page, "ed2k://", ed2k)
+        _merge_link_hrefs(page, "PikPak://", pikpak_sha)
 
-        ed2k_anchors = page.locator('a[href^="ed2k://"]')
-        for i in range(ed2k_anchors.count()):
-            try:
-                href_val = ed2k_anchors.nth(i).get_attribute("href")
-                if href_val:
-                    ed2k.add(href_val)
-            except Exception:
-                continue
+        post_html = extract_thread_post_html(page)
+        full_html = page.content()
+        search_html = f"{post_html}\n{full_html}" if post_html else full_html
 
-        text = page.content()
-        for m in re.findall(r'magnet:\?xt=urn:btih:[a-fA-F0-9]+(?:&[^"\s<>]+)?', text):
+        for m in re.findall(r'magnet:\?xt=urn:btih:[a-fA-F0-9]+(?:&[^"\s<>]+)?', search_html):
             magnets.add(m)
-        for e in re.findall(r'ed2k://[^"\s<>]+', text):
-            ed2k.add(e)
+
+        from pikpak_links import collect_alternatives_from_text, extract_ed2k_links
+
+        for html in filter(None, [post_html, full_html]):
+            alts = collect_alternatives_from_text(html)
+            magnets.update(alts.get("magnets") or [])
+            ed2k.update(alts["ed2k"])
+            pikpak_sha.update(alts["pikpak_sha"])
+            if not hash_entries:
+                hash_entries = alts["hash_entries"]
+            else:
+                hash_entries.extend(alts["hash_entries"])
+
+        # Plain text fallback from visible post body
+        if post_html:
+            try:
+                plain = page.locator("td.t_f, div.pcb, [id^='postmessage_']").first.inner_text()
+                ed2k.update(extract_ed2k_links(plain))
+            except Exception:
+                pass
+
+        if ed2k:
+            print(f"[info]   ed2k from post body: {len(ed2k)}")
 
     except Exception as e:
         print(f"[warn] failed to extract links from {full_url}: {e}")
-    return {"magnets": list(magnets), "ed2k": list(ed2k)}
+    return {
+        "magnets": list(magnets),
+        "ed2k": list(ed2k),
+        "pikpak_sha": list(pikpak_sha),
+        "hash_entries": hash_entries,
+    }
 
 
 def extract_magnets(page, href: str, forum_url: str) -> list[str]:
     return extract_thread_links(page, href, forum_url)["magnets"]
 
 
+def build_javdb_summary(matched: list[dict]) -> dict:
+    from collections import Counter
+
+    queried = [m for m in matched if m.get("javdb_query")]
+    errors = [m for m in queried if m["javdb_query"].get("query_status") == "error"]
+    with_mag = [
+        m for m in queried
+        if m["javdb_query"].get("magnet_status") == "available"
+    ]
+    empty = [
+        m for m in queried
+        if m["javdb_query"].get("magnet_status") == "empty"
+    ]
+    by_type = Counter(
+        m["javdb_query"].get("content_type_label") or "?"
+        for m in queried
+        if m["javdb_query"].get("query_status") == "ok"
+    )
+    return {
+        "queried": len(queried),
+        "errors": len(errors),
+        "with_magnets": len(with_mag),
+        "without_magnets": len(empty),
+        "by_content_type": dict(by_type),
+    }
+
+
+def format_javdb_summary_text(summary: dict) -> str:
+    if not summary.get("queried"):
+        return ""
+    lines = [
+        "",
+        "javdb_query_summary:",
+        f"  queried: {summary['queried']}",
+        f"  with_magnets: {summary['with_magnets']}",
+        f"  without_magnets: {summary['without_magnets']}",
+        f"  errors: {summary['errors']}",
+    ]
+    if summary.get("by_content_type"):
+        parts = ", ".join(f"{k} {v}" for k, v in summary["by_content_type"].items())
+        lines.append(f"  by_type: {parts}")
+    return "\n".join(lines)
+
+
 def enrich_with_javdb(item: dict, client, args) -> None:
-    from javdb_client import extract_av_number
+    from javdb_client import build_query_report, extract_av_number
 
     number = extract_av_number(item.get("title", ""))
     if not number:
@@ -537,7 +652,7 @@ def enrich_with_javdb(item: dict, client, args) -> None:
     try:
         info = client.lookup(
             number,
-            fetch_magnets=bool(getattr(args, "javdb_magnets", False)),
+            fetch_magnets=True,
             cnsub=bool(getattr(args, "javdb_cnsub", False)),
             hd=bool(getattr(args, "javdb_hd", False)),
             best_only=bool(getattr(args, "javdb_best", False)),
@@ -547,11 +662,14 @@ def enrich_with_javdb(item: dict, client, args) -> None:
         print(f"[warn] javdb lookup failed for {number}: {exc}")
         return
 
+    item["javdb_query"] = build_query_report(info)
     item["javdb"] = {
         "id": info.get("javdb_id"),
         "number": info.get("number"),
         "title": info.get("title"),
         "release_date": info.get("release_date"),
+        "content_type": info.get("content_type"),
+        "content_type_label": info.get("content_type_label"),
     }
     if info.get("release_date") and not item.get("release_date"):
         item["release_date"] = info["release_date"]
@@ -632,6 +750,7 @@ def scrape(args):
         getattr(args, "javdb", False)
         or getattr(args, "javdb_magnets", False)
         or getattr(args, "cnsub_priority", False)
+        or getattr(args, "javdb_query", True)
     ):
         try:
             from javdb_client import JavDBClient
@@ -772,14 +891,24 @@ def scrape(args):
                             links = extract_thread_links(page, post["href"], forum_url)
                             item["magnets"] = links["magnets"]
                             item["ed2k"] = links["ed2k"]
-                        if getattr(args, "cnsub_priority", False):
+                            item["pikpak_sha"] = links["pikpak_sha"]
+                            item["hash_entries"] = links.get("hash_entries", [])
                             from magnet_select import apply_selection
 
-                            print(f"[info] selecting magnet: {item['title'][:40]}...")
-                            if apply_selection(item, javdb_client):
-                                print(f"[info]   -> {item.get('magnet_source')}")
+                            jd = javdb_client if getattr(args, "cnsub_priority", False) else None
+                            print(f"[info] selecting download: {item['title'][:40]}...")
+                            if apply_selection(item, jd):
+                                src = item.get("magnet_source") or item.get("download_source", "?")
+                                print(f"[info]   -> {src}")
+                            elif not item.get("magnets"):
+                                n_alt = (
+                                    len(item.get("ed2k") or [])
+                                    + len(item.get("pikpak_sha") or [])
+                                    + len(item.get("hash_entries") or [])
+                                )
+                                print(f"[info]   -> no magnet; collected {n_alt} alternative(s)")
                             else:
-                                print("[info]   -> no magnet selected")
+                                print("[info]   -> no download selected")
                         elif javdb_client:
                             print(f"[info] javdb lookup: {item['title'][:40]}...")
                             enrich_with_javdb(item, javdb_client, args)
@@ -793,6 +922,14 @@ def scrape(args):
                                     f"[skip] {item.get('content_region')}: "
                                     f"{item['title'][:50]}"
                                 )
+                            elif javdb_client and getattr(args, "javdb_query", True):
+                                from content_filter import is_downloadable as _is_dl
+                                from javdb_client import attach_javdb_query
+
+                                if _is_dl(item) and not item.get("javdb_query"):
+                                    attach_javdb_query(item, javdb_client)
+                                    q = item.get("javdb_query") or {}
+                                    print(f"[info]   javdb: {q.get('summary', '')}")
                         all_matched.append(item)
 
                     print(f"[info] page {page_num}: {len(posts)} rows, {new_posts} new, matched total {len(all_matched)}")
@@ -849,6 +986,11 @@ def scrape(args):
             lines.append(f"range: {range_label}")
             lines.append("=" * 60)
             lines.append(f"\nmatched {len(all_matched)} posts\n")
+            javdb_summary = build_javdb_summary(all_matched)
+            summary_text = format_javdb_summary_text(javdb_summary)
+            if summary_text:
+                lines.append(summary_text.strip())
+                lines.append("")
 
             for m in all_matched:
                 lines.append(f"date: {m['date']} ({m['date_raw']})")
@@ -866,15 +1008,33 @@ def scrape(args):
                     lines.append(f"release_date: {m['release_date']}")
                 if m.get("javdb"):
                     j = m["javdb"]
-                    lines.append(f"javdb: {j.get('number')} | {j.get('release_date')} | {j.get('title', '')[:60]}")
+                    label = j.get("content_type_label") or ""
+                    lines.append(
+                        f"javdb: {j.get('number')} [{label}] | {j.get('release_date')} | "
+                        f"{j.get('title', '')[:50]}"
+                    )
+                if m.get("javdb_query"):
+                    lines.append(f"javdb_query: {m['javdb_query'].get('summary', '')}")
                 if m.get("javdb_error"):
                     lines.append(f"javdb_error: {m['javdb_error']}")
                 if m.get("content_region"):
-                    lines.append(f"content_region: {m['content_region']}")
+                    region_line = f"content_region: {m['content_region']}"
+                    if m.get("domestic_subtype"):
+                        region_line += f" ({m['domestic_subtype']})"
+                    lines.append(region_line)
                 if m.get("skip_reason"):
                     lines.append(f"skip_reason: {m['skip_reason']}")
                 if m.get("selected_magnet"):
                     lines.append(f"selected_magnet ({m.get('magnet_source', '?')}): {m['selected_magnet']}")
+                if m.get("selected_pikpak_sha"):
+                    lines.append(
+                        f"selected_pikpak_sha ({m.get('download_source', '?')}): "
+                        f"{m['selected_pikpak_sha']}"
+                    )
+                if m.get("selected_ed2k"):
+                    lines.append(
+                        f"selected_ed2k ({m.get('download_source', '?')}): {m['selected_ed2k']}"
+                    )
                 if "magnets" in m:
                     if m["magnets"]:
                         lines.append("magnets:")
@@ -889,6 +1049,23 @@ def scrape(args):
                             lines.append(f"  - {link}")
                     else:
                         lines.append("ed2k: (none found)")
+                if "pikpak_sha" in m:
+                    if m["pikpak_sha"]:
+                        lines.append("pikpak_sha:")
+                        for link in m["pikpak_sha"]:
+                            lines.append(f"  - {link}")
+                    else:
+                        lines.append("pikpak_sha: (none found)")
+                if "hash_entries" in m and m["hash_entries"]:
+                    lines.append("hash_entries:")
+                    for entry in m["hash_entries"]:
+                        label = entry.get("label") or entry.get("uri") or entry.get("hash", "")
+                        lines.append(f"  - [{entry.get('kind', '?')}] {label}")
+                if m.get("selected_download") and not m.get("selected_magnet"):
+                    lines.append(
+                        f"selected_download ({m.get('download_source', '?')}): "
+                        f"{m['selected_download']}"
+                    )
                 lines.append("-" * 40)
 
             result_text = "\n".join(lines)
@@ -901,6 +1078,7 @@ def scrape(args):
                     "cutoff": cutoff.strftime("%Y-%m-%d"),
                     "today": today.strftime("%Y-%m-%d"),
                     "matched": all_matched,
+                    "javdb_summary": javdb_summary,
                     "total_posts": total_posts,
                     "pages_scanned": total_pages_scanned,
                 }, ensure_ascii=False, indent=2),
@@ -914,8 +1092,15 @@ def scrape(args):
                 try:
                     from pikpak_download import submit_from_result
 
-                    folder = getattr(args, "pikpak_folder", None) or "My Pack"
-                    ok, total = submit_from_result(result_json, folder=folder, today_only=True)
+                    from pikpak_auth import resolve_folder
+
+                    folder = resolve_folder(getattr(args, "pikpak_folder", None))
+                    ok, total = submit_from_result(
+                        result_json,
+                        folder=folder,
+                        today_only=not getattr(args, "pikpak_new_only", False),
+                        new_only=getattr(args, "pikpak_new_only", False),
+                    )
                     print(f"[done] pikpak: {ok}/{total} submitted to {folder}")
                 except Exception as exc:
                     print(f"[err] pikpak download failed: {exc}")
@@ -948,8 +1133,11 @@ def main():
     parser.add_argument("--actors-dir", default=r"E:\sakana", help="Local actor directory (fallback)")
     parser.add_argument("--save-actors", action="store_true", help="Save loaded actors to --actors-file")
     parser.add_argument("--urls", nargs="+", default=[
+        "https://www.sehuatang.org/forum-2-1.html",
+        "https://www.sehuatang.org/forum-95-1.html",
+        "https://www.sehuatang.org/forum-142-1.html",
         "https://www.sehuatang.org/forum-103-1.html",
-        "https://www.sehuatang.org/forum-36-1.html",
+        "https://www.sehuatang.org/forum-37-1.html",
     ], help="Target forum URLs to scan")
     parser.add_argument("--days", type=int, default=3, help="How many recent days to check (ignored if --since is set)")
     parser.add_argument("--since", default=None, help="Start date YYYY-MM-DD or YYYY-MM (inclusive)")
@@ -977,6 +1165,11 @@ def main():
         help="Download all content types (default: 日本有码 + 无码 JAV only)",
     )
     parser.add_argument(
+        "--no-javdb-query",
+        action="store_true",
+        help="Skip JavDB metadata/magnet report per matched item",
+    )
+    parser.add_argument(
         "--cnsub-priority",
         action="store_true",
         help="Cnsub-first magnets: forum cnsub -> JavDB cnsub -> forum fallback (implies --fetch-magnets)",
@@ -984,12 +1177,17 @@ def main():
     parser.add_argument(
         "--pikpak",
         action="store_true",
-        help="After scan, submit selected magnets to PikPak (requires PIKPAK_TOKEN)",
+        help="After scan, submit selected magnets to PikPak (uses saved token or PIKPAK_TOKEN)",
     )
     parser.add_argument(
         "--pikpak-folder",
         default=os.environ.get("PIKPAK_FOLDER", "My Pack"),
         help="PikPak target folder name (default: My Pack)",
+    )
+    parser.add_argument(
+        "--pikpak-new-only",
+        action="store_true",
+        help="With --pikpak, skip magnets already in download_state.json",
     )
     args = parser.parse_args()
     if args.javdb_magnets:
@@ -997,8 +1195,11 @@ def main():
     if args.cnsub_priority:
         args.fetch_magnets = True
     args.region_filter = not args.all_regions
+    args.javdb_query = not args.no_javdb_query
     if args.region_filter:
-        print("[info] download filter: Japanese censored + uncensored JAV")
+        print("[info] download filter: JAV 有码/无码 + 国产/ed2k(泄密/流出/AI增强/AI短剧/熟女/酒店偷拍/ed2k; 排除私拍/伪番号/OnlyFans)")
+    if args.javdb_query:
+        print("[info] javdb query report: enabled for matched 有码/无码 items")
     scrape(args)
 
 

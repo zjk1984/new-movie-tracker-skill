@@ -78,7 +78,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `--aliases-file` | `<skill-dir>/aliases.json` | Path to Japanese / Chinese alias mapping. |
 | `--actors-dir` | `E:\sakana` | Folder to read actor names from (fallback). |
 | `--save-actors` | `False` | Save loaded actors back to `--actors-file`. |
-| `--urls` | forum-103 + forum-36 | Target forum URLs to scan. |
+| `--urls` | forum-2/95/142 + forum-103 + forum-37 | Target forum URLs to scan. |
 | `--days` | `3` | Number of recent days to include. |
 | `--max-pages` | `5` | Max pages to scan per forum. |
 | `--headless` | `False` | Run without visible browser window. |
@@ -100,21 +100,51 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 
 ## Content filter (default)
 
-**Kept** (`selected_magnet` preserved, submitted to PikPak):
+### 日本 JAV
+
+**Kept:**
 
 | Region | Examples |
 |--------|----------|
 | `jav_censored` | MIDA-749, SNOS-270, [有码高清] |
-| `uncensored` | ATID-799 无码破解, [无码高清] |
+| `uncensored` | ATID-799 无码破解, HEYZO (日本无码) |
 
-**Excluded** (magnets cleared, `skip_reason: excluded_*`):
+### 国产无码（forum-2 / forum-95 / forum-142 等）
+
+识别：标题含 `[国产无码]` / `国产无码` / `[国产]`（优先于普通无码关键字）。
+
+**保留** `domestic_leak` — 满足任一且未命中排除项：
+
+| `domestic_subtype` | 条件 |
+|--------------------|------|
+| 泄密 | 泄密 / 泄露 |
+| 流出 | 流出（不含「未流出」） |
+| AI增强 | AI增强 / AI 增强 |
+| AI短剧 | AI短剧 / AI真人短剧 |
+| 熟女自拍 | 熟女 |
+| 酒店偷拍 | 酒店偷拍 |
+| ed2k | 标题 ed2k/115Ed2k/115eD2k 或帖内 `ed2k://` 链接 |
+
+**排除** `domestic_other` — 命中即排除（优先级高于保留标签）：
+
+| 原因 | 条件 |
+|------|------|
+| 私拍 | 私拍 |
+| 伪番号 | XJX, JDSY, MDSY, MDSR, JDSC, CNXX, RXAJ, TMW, TMG, YCM + 数字 |
+| OnlyFans | OnlyFans, HongKongDoll, 玩偶姐姐 |
+
+其他国产（探花、推特、剧情、福利姬等）→ `domestic_other`（仍保留原始 `magnets[]` / `hash_entries[]`，仅跳过 PikPak 提交）。
+
+### 其他排除
 
 | Region | Examples |
 |--------|----------|
 | `western` | Blacked, Brazzers, 欧美 |
 | `fc2` | FC2-PPV-* |
 | `amateur` | MAAN-*, 348NTR-*, 200GANA-*, 229SCUTE-* |
-| `other` | Unrecognized numbering |
+| `other` | [主播录制] 等 |
+
+Implementation: `scripts/content_filter.py`. Disable all filters: `--all-regions`.
 
 ## Cnsub-first workflow
 
@@ -127,10 +157,10 @@ Magnet selection order (`scripts/magnet_select.py`):
 End-to-end:
 
 ```bash
-export PIKPAK_TOKEN="your-token"
+python scripts/pikpak_login.py login
 python scripts/scan.py --days 3 --cnsub-priority --pikpak
-python scripts/pikpak_download.py
-python scripts/pikpak_download.py --all
+python scripts/pikpak_download.py --new-only
+python scripts/pikpak_download.py --all --new-only
 ```
 
 With PikPak MCP: scan with `--cnsub-priority` only, then MCP `add_link` each `selected_magnet` into **My Pack**.
@@ -155,6 +185,23 @@ python scripts/scan.py --keyword 流出 --javdb --javdb-magnets --javdb-best --f
 ```
 
 Forum magnets and JavDB magnets are merged (deduplicated). When forum threads only have `.torrent` attachments, JavDB often still provides usable magnet links.
+
+### JavDB query report (default on)
+
+Each kept 有码/无码 item gets `javdb_query`:
+
+| Field | Meaning |
+|-------|---------|
+| `content_type_label` | `有码` or `无码` (from JavDB title/number) |
+| `magnet_status` | `available` / `empty` / `error` |
+| `magnet_total` | Total magnets on JavDB |
+| `magnet_filtered` | After `--cnsub`/`--hd` filter |
+| `best_magnet` | Best magnet URI |
+| `summary` | One-line Chinese explanation for chat |
+
+`last_result.json` includes `javdb_summary` aggregate counts.
+
+Disable with `--no-javdb-query`.
 
 ### Environment variables
 
@@ -187,21 +234,82 @@ python scripts/scan.py --days 3 --fetch-magnets
 
 If a Cloudflare challenge appears, complete it manually in the opened window. The script waits up to 90s. After success, cookies are saved in `chrome_profile/` inside the output directory.
 
-## Scheduled Automation (Windows Task Scheduler)
+## Daily Schedule (07:00, incremental download)
 
-After the first manual pass, you can enable `--headless` for background runs.
+`scripts/daily_run.py` scans **forum-2 / forum-95 / forum-142** (今日下载链接) + forum-103 + forum-37, applies cnsub-first + content filter, then submits **only new downloads** to PikPak (dedup via `download_state.json` in the output directory).
 
-1. Search and open **Task Scheduler**.
-2. Click **Create Basic Task**.
-3. Name: `NewMovieTracker`
-4. Trigger: **Daily** — set your preferred time.
-5. Action: **Start a program**
-   - Program/script: `python` (or full path to your python.exe)
-   - Add arguments: `C:\Users\sakana\.qoderwork\skills\new-movie-tracker\scripts\scan.py --headless --days 3 --fetch-magnets --output-dir "C:\githubapp\project\new-movie-found"`
-   - Start in: `C:\githubapp\project\new-movie-found`
-6. Finish and open **Properties**.
-7. Check **Run whether user is logged on or not**.
-8. Uncheck **Start the task only if the computer is on AC power** (if on a laptop).
+### Prepare once
+
+1. Save PikPak token (persisted in skill directory, like JavDB):
+
+```bash
+python scripts/pikpak_login.py login
+python scripts/pikpak_login.py login --from-env   # import from .env.local / PIKPAK_TOKEN
+python scripts/pikpak_login.py status --check
+```
+
+Stored in `pikpak_auth.json` (gitignored, mode 600). Priority: `PIKPAK_TOKEN` env → saved file.
+
+2. First Cloudflare pass (headed browser):
+
+```bash
+python scripts/daily_run.py --no-headless
+```
+
+3. Verify output under `data/` (`last_result.json`, `download_state.json` after first download).
+
+### Manual daily command
+
+```bash
+python scripts/daily_run.py --headless
+python scripts/daily_run.py --download-only   # re-submit from existing scan
+python scripts/pikpak_download.py --new-only --all
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output-dir` | `<skill>/data` | Results + state + chrome profile |
+| `--days` | `2` | Recent days to scan (dedup handles overlap) |
+| `--scan-only` | off | Scan without PikPak |
+| `--download-only` | off | PikPak new-only from last scan |
+| `--pikpak-folder` | `My Pack` | Target folder |
+
+Incremental logic (`download_state.json`):
+- Skip if **btih** hash already submitted
+- Skip if **thread href** already submitted (same post)
+
+### Windows Task Scheduler (07:00)
+
+1. Open **Task Scheduler** → **Create Basic Task**
+2. Name: `NewMovieTracker-Daily`
+3. Trigger: **Daily** → **07:00:00** (local time)
+4. Action: **Start a program**
+   - Program: `C:\path\to\new-movie-tracker-skill\scripts\daily_run.bat`
+   - Start in: `C:\path\to\new-movie-tracker-skill`
+5. Properties → **Run whether user is logged on or not**; disable “AC power only” on laptops
+6. Logs append to `data/daily_run.log`
+
+Or use `python` directly:
+
+```
+Program: C:\Python311\python.exe
+Arguments: scripts\daily_run.py --headless
+Start in: C:\path\to\new-movie-tracker-skill
+```
+
+### Linux cron (07:00)
+
+```cron
+0 7 * * * /path/to/new-movie-tracker-skill/scripts/daily_run.sh
+```
+
+## Scheduled Automation (legacy scan-only)
+
+For actor-list scans without PikPak dedup, you can still schedule `scan.py` directly:
+
+```bash
+python scripts/scan.py --headless --days 3 --fetch-magnets --output-dir ./data
+```
 
 ## PikPak MCP
 
@@ -227,13 +335,35 @@ This repo includes `.cursor/mcp.json`:
 ### Token setup
 
 1. In PikPak, go to **Account & Security → Connected Apps → Personal Access Tokens** and create a token with `cloud_download` permission.
-2. Set the token as an environment variable (do not commit it):
+2. Save it in the skill directory:
 
 ```bash
-export PIKPAK_TOKEN="your-token-here"
+python scripts/pikpak_login.py login
 ```
 
-For Cursor IDE, you can also set `PIKPAK_TOKEN` in **Settings → Secrets** so `${env:PIKPAK_TOKEN}` resolves automatically.
+For **Cursor MCP**, also set `PIKPAK_TOKEN` in **Settings → Secrets** (MCP reads env only). Scripts and `daily_run.py` use `pikpak_auth.json` automatically.
+
+### Feishu (Lark) notifications
+
+Add to `.env.local` (gitignored):
+
+| Variable | Description |
+|----------|-------------|
+| `FEISHU_APP_ID` | App ID from Feishu open platform (`cli_…`) |
+| `FEISHU_APP_SECRET` | App secret |
+| `FEISHU_RECEIVE_ID` | Target `chat_id` (group) or `open_id` / `user_id` |
+| `FEISHU_RECEIVE_ID_TYPE` | Default `chat_id` |
+
+App needs **im:message** or **im:message:send_as_bot** permission. Add the bot to the target group before sending.
+
+```bash
+python scripts/feishu_notify.py ping
+python scripts/feishu_notify.py cards --reconstruct
+python scripts/feishu_notify.py cards --input data/last_result.json --download-report data/download_report.json
+python scripts/daily_run.py --headless   # report + Feishu when FEISHU_RECEIVE_ID is set
+```
+
+Each run saves `reports/{label}_{timestamp}.md` to GitHub (full fail/success link tables). Feishu card: scan summary + link to the MD file.
 
 ### Cloud Agent
 
@@ -248,7 +378,22 @@ Enable the PikPak MCP toggle when starting an agent run.
 
 After scanning, use the PikPak MCP `add_link` tool for each magnet. Default target folder is **My Pack** — pass its folder ID as `parent` (use `ls` at root to find it).
 
-Fallback without MCP: `python scripts/pikpak_download.py` (uses the same token via `PIKPAK_TOKEN`).
+Fallback without MCP: `python scripts/pikpak_download.py` (uses saved token in `pikpak_auth.json`).
+
+### PikPak feature codes (特征码 / GCID 秒传)
+
+Format: `PikPak://filename|size_bytes|GCID_HASH` (40-char GCID, not btih/ed2k MD4).
+
+```bash
+python scripts/pikpak_download.py --sha 'PikPak://MIDA-749.mp4|6123456789|ABCDEF0123456789ABCDEF0123456789ABCD'
+python scripts/pikpak_download.py --sha-file feature_codes.txt
+```
+
+- **Instant add** when PikPak cloud already has the GCID (`PHASE_TYPE_COMPLETE`).
+- **Fails** if the hash is not cached (no offline fetch by hash alone).
+- When a post has **no magnet links** (common for `[BT种子]` attachments), the scanner collects from the thread body: `ed2k://`, `PikPak://`, `filename|size|hash` pipe codes, and BT labels **【特征全码】/【哈希校验】/【特徵全碼】** — 40-char values become `magnet:?xt=urn:btih:HASH` (`hash_label_btih` in `hash_entries`).
+- Selection order with magnets: cnsub forum → JavDB → forum fallback. **Without magnets:** PikPak SHA → ed2k → JavDB (if `--cnsub-priority`).
+- **ed2k** links are submitted as URL offline tasks (different hash algorithm from GCID).
 
 ## Troubleshooting
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Pick the best magnet for a forum post (cnsub-first policy)."""
+"""Pick the best download link for a forum post (cnsub-first policy)."""
 from __future__ import annotations
 
 import re
@@ -80,12 +80,44 @@ def lookup_javdb_cnsub(javdb_client, number: str) -> dict[str, Any] | None:
     }
 
 
+def select_alternative_from_post(item: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    When the post has no magnet links, pick from collected ed2k / feature codes.
+    Priority: PikPak SHA > ed2k > pipe hash entry with uri.
+    """
+    pikpak_shas = list(item.get("pikpak_sha") or [])
+    if pikpak_shas:
+        return {
+            "pikpak_sha": pikpak_shas[0],
+            "source": "forum_pikpak_sha",
+        }
+
+    ed2k_links = list(item.get("ed2k") or [])
+    if ed2k_links:
+        return {
+            "ed2k": ed2k_links[0],
+            "source": "forum_ed2k",
+        }
+
+    for entry in item.get("hash_entries") or []:
+        uri = (entry.get("uri") or "").strip()
+        if not uri:
+            continue
+        if entry.get("kind") == "hash_label_btih" or uri.lower().startswith("magnet:"):
+            return {"magnet": uri, "source": entry.get("source", "forum_bt_feature")}
+        if entry.get("kind") == "pikpak_sha" or uri.lower().startswith("pikpak://"):
+            return {"pikpak_sha": uri, "source": entry.get("source", "forum_pipe_code")}
+        if entry.get("kind") == "ed2k" or uri.lower().startswith("ed2k://"):
+            return {"ed2k": uri, "source": entry.get("source", "forum_pipe_code")}
+
+    return None
+
+
 def select_magnet(item: dict[str, Any], javdb_client=None) -> dict[str, Any] | None:
     """
-    Cnsub-first magnet policy:
-    1. Forum post marked cnsub -> forum magnet (prefer cnsub-labeled link)
-    2. Else JavDB cnsub magnet
-    3. Else any forum magnet
+    Download selection policy:
+    - Post has magnets: cnsub forum magnet -> JavDB cnsub -> any forum magnet
+    - Post has NO magnets: collect PikPak SHA / ed2k / hash from post -> JavDB cnsub
     """
     from javdb_client import extract_av_number
 
@@ -95,12 +127,38 @@ def select_magnet(item: dict[str, Any], javdb_client=None) -> dict[str, Any] | N
     if number:
         item["av_number"] = number
 
-    if title_has_cnsub(title) and forum_magnets:
+    if forum_magnets:
+        if title_has_cnsub(title):
+            return {
+                "magnet": pick_forum_magnet(forum_magnets, prefer_cnsub=True),
+                "source": "forum_cnsub",
+                "av_number": number,
+            }
+        if javdb_client and number:
+            try:
+                javdb_hit = lookup_javdb_cnsub(javdb_client, number)
+                if javdb_hit:
+                    item["javdb"] = javdb_hit.get("javdb")
+                    if javdb_hit["javdb"].get("release_date"):
+                        item["release_date"] = javdb_hit["javdb"]["release_date"]
+                    return {
+                        "magnet": javdb_hit["magnet"],
+                        "source": "javdb_cnsub",
+                        "av_number": number,
+                    }
+            except Exception as exc:
+                item["javdb_error"] = str(exc)
         return {
-            "magnet": pick_forum_magnet(forum_magnets, prefer_cnsub=True),
-            "source": "forum_cnsub",
+            "magnet": forum_magnets[0],
+            "source": "forum_fallback",
             "av_number": number,
         }
+
+    # No magnet in post — use ed2k / feature codes / hash values from the post first
+    alt = select_alternative_from_post(item)
+    if alt:
+        alt["av_number"] = number
+        return alt
 
     if javdb_client and number:
         try:
@@ -117,20 +175,27 @@ def select_magnet(item: dict[str, Any], javdb_client=None) -> dict[str, Any] | N
         except Exception as exc:
             item["javdb_error"] = str(exc)
 
-    if forum_magnets:
-        return {
-            "magnet": forum_magnets[0],
-            "source": "forum_fallback",
-            "av_number": number,
-        }
-
     return None
 
 
 def apply_selection(item: dict[str, Any], javdb_client=None) -> bool:
     selection = select_magnet(item, javdb_client)
-    if not selection or not selection.get("magnet"):
+    if not selection:
         return False
-    item["selected_magnet"] = selection["magnet"]
-    item["magnet_source"] = selection["source"]
-    return True
+    if selection.get("magnet"):
+        item["selected_magnet"] = selection["magnet"]
+        item["magnet_source"] = selection["source"]
+        item["selected_download"] = selection["magnet"]
+        item["download_source"] = selection["source"]
+        return True
+    if selection.get("pikpak_sha"):
+        item["selected_pikpak_sha"] = selection["pikpak_sha"]
+        item["selected_download"] = selection["pikpak_sha"]
+        item["download_source"] = selection["source"]
+        return True
+    if selection.get("ed2k"):
+        item["selected_ed2k"] = selection["ed2k"]
+        item["selected_download"] = selection["ed2k"]
+        item["download_source"] = selection["source"]
+        return True
+    return False

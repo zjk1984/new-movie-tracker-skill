@@ -7,7 +7,29 @@ import argparse
 import json
 import sys
 
-from javdb_client import JavDBClient, extract_av_number
+from javdb_client import JavDBClient, build_query_report, extract_av_number
+
+
+def print_lookup_result(item: dict) -> None:
+    if item.get("error"):
+        print(f"{item['number']}: ERROR {item['error']}")
+        return
+    q = item.get("query") or {}
+    label = q.get("content_type_label") or "?"
+    print(f"{item['number']} [{label}] ({q.get('release_date', '?')})")
+    if q.get("title"):
+        print(f"  title: {q['title']}")
+    if q.get("score") is not None:
+        print(f"  score: {q['score']:.2f}")
+    if q.get("cnsub_label"):
+        print(f"  cnsub: {q['cnsub_label']}")
+    print(f"  query: {q.get('summary', '')}")
+    magnets = item.get("magnets") or []
+    if magnets:
+        for mg in magnets:
+            print(f"  magnet: {mg}")
+    elif q.get("magnet_status") == "empty":
+        print("  magnet: (none on JavDB)")
 
 
 def main() -> None:
@@ -29,15 +51,20 @@ def main() -> None:
     for raw in args.numbers:
         number = extract_av_number(raw) or raw.strip().upper()
         try:
-            item = client.lookup(
+            info = client.lookup(
                 number,
-                fetch_magnets=args.magnets,
+                fetch_magnets=args.magnets or True,
                 cnsub=args.cnsub,
                 hd=args.hd,
                 best_only=args.best,
             )
-            item.pop("magnet_rows", None)
-            results.append(item)
+            query = build_query_report(info)
+            entry = {
+                "number": query.get("number"),
+                "query": query,
+                "magnets": info.get("magnets") or [],
+            }
+            results.append(entry)
         except Exception as exc:
             results.append({"number": number, "error": str(exc)})
 
@@ -46,19 +73,8 @@ def main() -> None:
         return
 
     for item in results:
-        if item.get("error"):
-            print(f"{item['number']}: ERROR {item['error']}")
-            continue
-        print(f"{item['number']} ({item.get('release_date', '?')})")
-        if item.get("title"):
-            print(f"  title: {item['title']}")
-        if args.magnets:
-            magnets = item.get("magnets") or []
-            if magnets:
-                for mg in magnets:
-                    print(f"  magnet: {mg}")
-            else:
-                print("  magnet: (none)")
+        print_lookup_result(item)
+        print()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,398 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Write per-run Markdown reports under reports/ and optionally push to GitHub."""
+from __future__ import annotations
+
+import html
+import re
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pikpak_links import normalize_ed2k_uri
+
+SKILL_DIR = Path(__file__).resolve().parent.parent
+REPORTS_DIR = SKILL_DIR / "reports"
+
+
+def _github_repo_slug() -> str | None:
+    try:
+        remote = subprocess.check_output(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(SKILL_DIR),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    if remote.startswith("git@"):
+        # git@github.com:owner/repo.git
+        match = re.search(r"[:/]([^/]+/[^/.]+?)(?:\.git)?$", remote)
+        return match.group(1) if match else None
+    path = urlparse(remote).path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    parts = path.split("/")
+    if len(parts) >= 2:
+        return f"{parts[0]}/{parts[1]}"
+    return None
+
+
+def current_git_branch() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(SKILL_DIR),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def github_blob_url(rel_path: str, *, branch: str | None = None) -> str | None:
+    slug = _github_repo_slug()
+    if not slug:
+        return None
+    branch = branch or current_git_branch() or "main"
+    posix = rel_path.replace("\\", "/")
+    return f"https://github.com/{slug}/blob/{branch}/{posix}"
+
+
+def _md_table(headers: list[str], rows: list[list[str]]) -> str:
+    if not rows:
+        return "_（无）_\n"
+    esc = lambda s: (s or "").replace("|", "\\|").replace("\n", " ")
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(esc(c) for c in row) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def _infer_link_type(item: dict[str, Any]) -> str:
+    link_type = (item.get("link_type") or item.get("type") or "").strip()
+    if link_type and link_type != "url":
+        return link_type
+    uri = (item.get("uri") or item.get("url") or "").lower()
+    if uri.startswith("ed2k:"):
+        return "ed2k"
+    if uri.startswith("magnet:"):
+        return "magnet"
+    if uri.startswith("pikpak:"):
+        return "pikpak_sha"
+    return link_type or "url"
+
+
+def _canonical_uri(uri: str) -> str:
+    text = (uri or "").strip()
+    if text.lower().startswith("ed2k://"):
+        return normalize_ed2k_uri(text) or text
+    return text
+
+
+def _collect_fail_uris(failed: list[dict[str, Any]]) -> list[str]:
+    seen: set[str] = set()
+    uris: list[str] = []
+    for item in failed:
+        uri = _canonical_uri(item.get("uri") or item.get("url") or "")
+        if not uri or uri in seen:
+            continue
+        seen.add(uri)
+        uris.append(uri)
+    return uris
+
+
+def _md_fail_links(failed: list[dict[str, Any]]) -> str:
+    """Render all failed URIs in one HTML pre block (avoids @ → mailto autolink)."""
+    if not failed:
+        return "_（无）_\n"
+
+    all_uris = _collect_fail_uris(failed)
+    lines = [
+        "> 选中下方代码区域复制，或使用 GitHub **Copy**（每行一条，含 `|file|` 标准 ed2k 格式）。\n",
+        f"### 全部失败链接（{len(all_uris)} 条）\n",
+    ]
+    if all_uris:
+        lines.append("<pre><code>")
+        lines.extend(html.escape(u) for u in all_uris)
+        lines.append("</code></pre>\n")
+    else:
+        lines.append("_（无链接）_\n")
+    return "\n".join(lines)
+
+
+def _item_uri(item: dict[str, Any]) -> str:
+    return (item.get("uri") or item.get("url") or "").strip()
+
+
+def merge_download_reports(*reports: dict[str, Any]) -> dict[str, Any]:
+    """Merge multiple PikPak download_report payloads, dedupe by URI."""
+    succeeded: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    seen_ok: set[str] = set()
+    seen_fail: set[str] = set()
+    sources: list[str] = []
+
+    for report in reports:
+        if not report:
+            continue
+        src = report.get("source")
+        if src:
+            sources.append(str(src))
+        for item in report.get("succeeded") or []:
+            uri = _item_uri(item)
+            if not uri or uri in seen_ok:
+                continue
+            seen_ok.add(uri)
+            succeeded.append(item)
+        for item in report.get("failed") or []:
+            uri = _item_uri(item)
+            key = uri or f"{item.get('name')}:{item.get('error')}"
+            if key in seen_fail:
+                continue
+            seen_fail.add(key)
+            failed.append(item)
+
+    merged: dict[str, Any] = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "ok": len(succeeded),
+        "failed_count": len(failed),
+        "total": len(succeeded) + len(failed),
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+    if sources:
+        merged["source"] = "; ".join(sources)
+    return merged
+
+
+def _format_success_type(item: dict[str, Any]) -> str:
+    base = _infer_link_type(item)
+    src = (item.get("source") or "").lower()
+    if src in {"bt_refetch", "forum_bt_feature", "forum_bt_seed_code"} or "bt" in src:
+        return f"{base} (BT)"
+    title = item.get("title") or ""
+    if base == "magnet" and ("BT种子" in title or "【BT" in title or "[BT" in title):
+        return f"{base} (BT)"
+    return base
+
+
+def _truncate(text: str, limit: int = 60) -> str:
+    text = (text or "").replace("\n", " ").strip()
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _jav_report_rows(matched: list[dict[str, Any]]) -> list[list[str]]:
+    from content_filter import is_downloadable
+
+    rows: list[list[str]] = []
+    for item in matched:
+        region = item.get("content_region") or ""
+        if region not in {"jav_censored", "uncensored", "fc2"}:
+            continue
+        if not is_downloadable(item):
+            continue
+        number = item.get("av_number") or item.get("title", "")[:20]
+        q = item.get("javdb_query") or {}
+        if q.get("query_status") == "error":
+            rows.append([
+                number,
+                q.get("content_type_label") or "-",
+                "-",
+                "-",
+                "-",
+                q.get("error") or "查询失败",
+            ])
+            continue
+        if not q:
+            rows.append([number, "-", "-", "-", "-", "未查询 JavDB"])
+            continue
+        score = q.get("score")
+        rows.append([
+            q.get("number") or number,
+            q.get("content_type_label") or "-",
+            q.get("cnsub_label") or "-",
+            f"{score:.2f}" if score is not None else "-",
+            q.get("release_date") or "-",
+            _truncate(q.get("title") or item.get("title", "")),
+        ])
+    rows.sort(key=lambda r: (r[4], r[0]), reverse=True)
+    return rows
+
+
+def _domestic_report_sections(matched: list[dict[str, Any]]) -> str:
+    from collections import Counter
+
+    from content_filter import is_downloadable
+
+    items = [
+        m for m in matched
+        if m.get("content_region") == "domestic_leak" and is_downloadable(m)
+    ]
+    if not items:
+        return "## 国产分类\n\n_（无）_\n"
+
+    subtype_counts = Counter(m.get("domestic_subtype") or "其他" for m in items)
+    count_lines = "\n".join(
+        f"- {name}: **{count}** 帖"
+        for name, count in subtype_counts.most_common()
+    )
+
+    sections: list[str] = [
+        "## 国产分类\n",
+        "### 子类统计\n",
+        count_lines + "\n",
+    ]
+    for subtype, _ in subtype_counts.most_common():
+        group = [m for m in items if (m.get("domestic_subtype") or "其他") == subtype]
+        rows = [
+            [
+                _truncate(m.get("title", ""), 70),
+                "有" if m.get("magnets") or m.get("ed2k") or m.get("selected_download") else "无",
+            ]
+            for m in group
+        ]
+        sections.append(f"### {subtype}（{len(group)} 帖）\n")
+        sections.append(_md_table(["标题", "链接"], rows))
+    return "\n".join(sections)
+
+
+def _jav_report_section(matched: list[dict[str, Any]], summary: dict[str, Any] | None) -> str:
+    summary = summary or {}
+    avg = summary.get("avg_score")
+    avg_text = f"{avg:.2f}" if avg is not None else "-"
+    lines = [
+        "## 日本片 JavDB\n",
+        "### 汇总\n",
+        f"- 可下载日本片: **{summary.get('total', 0)}** 帖\n",
+        f"- 已查 JavDB: **{summary.get('queried', 0)}** 帖"
+        f"（成功 {summary.get('ok', 0)} / 失败 {summary.get('errors', 0)}）\n",
+        f"- 含中字: **{summary.get('with_cnsub', 0)}** 帖"
+        f" | 无中字: **{summary.get('without_cnsub', 0)}** 帖\n",
+        f"- 平均评分: **{avg_text}**\n",
+    ]
+    by_type = summary.get("by_content_type") or {}
+    if by_type:
+        type_line = " | ".join(f"{k} {v}" for k, v in sorted(by_type.items()))
+        lines.append(f"- 类型: {type_line}\n")
+    lines.append("\n### 明细\n")
+    rows = _jav_report_rows(matched)
+    lines.append(_md_table(["番号", "类型", "中字", "评分", "发行", "JavDB 标题"], rows))
+    return "\n".join(lines)
+
+
+def _success_rows(succeeded: list[dict[str, Any]]) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for item in succeeded:
+        rows.append([
+            item.get("name") or "?",
+            _format_success_type(item),
+            _item_uri(item),
+            item.get("phase") or item.get("status") or "ok",
+        ])
+    return rows
+
+
+def write_run_report(
+    scan_stats: dict[str, Any],
+    download_report: dict[str, Any],
+    *,
+    reports_dir: Path | None = None,
+    run_label: str = "run",
+) -> Path:
+    out_dir = reports_dir or REPORTS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    path = out_dir / f"{run_label}_{ts}.md"
+
+    forums = scan_stats.get("forums") or {}
+    lt = scan_stats.get("link_totals") or {}
+    pw = scan_stats.get("posts_with") or {}
+    ok = download_report.get("ok", 0)
+    fail = download_report.get("failed_count", 0)
+    total = download_report.get("total") or (ok + fail)
+
+    forum_lines = "\n".join(f"- {name}: {count} 帖" for name, count in sorted(forums.items()))
+
+    failed_items = list(download_report.get("failed") or [])
+
+    ok_rows = _success_rows(list(download_report.get("succeeded") or []))
+
+    dl_posts = scan_stats.get("downloadable", 0)
+    with_link = scan_stats.get("with_link", 0)
+    without_link = scan_stats.get("without_link", 0)
+
+    jav_summary = scan_stats.get("javdb_summary") or {}
+    jav_section = _jav_report_section(scan_stats.get("matched") or [], jav_summary)
+    domestic_section = _domestic_report_sections(scan_stats.get("matched") or [])
+
+    body = f"""# 论坛扫描报告
+
+- **生成时间**: {datetime.now().isoformat(timespec="seconds")}
+- **扫描时间**: {str(scan_stats.get("scan_time", ""))[:19]}
+
+## 扫描总结
+
+### 扫描板块
+
+{forum_lines or "（无）"}
+
+### 统计
+
+| 项目 | 数量 | 说明 |
+| --- | --- | --- |
+| 匹配帖 | {scan_stats.get("matched_total", 0)} | 扫描命中的全部帖子 |
+| 可下载(过滤保留) | {dl_posts} | 通过 content_filter 保留的帖 |
+| 有链接 | {with_link} | 帖内提取到 magnet/ed2k 等 |
+| 无链接 | {without_link} | 标题保留但未抓到链接(需进帖/Cloudflare) |
+| 磁力链接 | {lt.get("magnet", 0)} ({pw.get("magnet", 0)} 帖) | 采集到的磁力 URI 数 |
+| ed2k 链接 | {lt.get("ed2k", 0)} ({pw.get("ed2k", 0)} 帖) | 含 refetch 进帖结果 |
+| BT 种子 | {lt.get("bt", 0)} ({pw.get("bt", 0)} 帖) | BT种子帖/特征码 |
+| PikPak 成功 | {ok} | 按**链接**提交成功 |
+| PikPak 失败 | {fail} | 按**链接**提交失败 |
+| PikPak 合计 | {total} | 成功+失败链接数，非帖数 |
+
+> **为何可下载 {dl_posts} ≠ PikPak {total}？** {without_link} 帖无链接未提交；有链接帖中多 ed2k 文件按链接逐条提交。
+
+{jav_section}
+
+{domestic_section}
+
+## 下载失败
+
+{_md_fail_links(failed_items)}
+
+## 下载成功
+
+{_md_table(["名称", "类型", "下载链接", "状态"], ok_rows)}
+"""
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def commit_and_push_report(report_path: Path, *, message: str | None = None) -> bool:
+    rel = report_path.relative_to(SKILL_DIR)
+    branch = current_git_branch()
+    if not branch:
+        return False
+    msg = message or f"docs: add run report {rel.name}"
+    try:
+        subprocess.run(["git", "add", str(rel)], cwd=str(SKILL_DIR), check=True)
+        status = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            cwd=str(SKILL_DIR),
+        )
+        if status.returncode == 0:
+            return True
+        subprocess.run(["git", "commit", "-m", msg], cwd=str(SKILL_DIR), check=True)
+        subprocess.run(["git", "push", "-u", "origin", branch], cwd=str(SKILL_DIR), check=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
