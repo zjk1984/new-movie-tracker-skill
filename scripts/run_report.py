@@ -574,10 +574,6 @@ def write_run_report(
 
 > **为何可下载 {dl_posts} ≠ PikPak {total}？** {without_link} 帖无链接未提交；有链接帖中多 ed2k 文件按链接逐条提交。日本片 JavDB 评分&lt;4 或无评分不提交 PikPak。
 
-{jav_section}
-
-{domestic_section}
-
 ## 下载失败
 
 {_md_fail_links(failed_items)}
@@ -587,6 +583,10 @@ def write_run_report(
 ## 下载成功
 
 {_md_table(["名称", "类型", "下载链接", "状态"], ok_rows)}
+
+{jav_section}
+
+{domestic_section}
 """
     path.write_text(body, encoding="utf-8")
     return path
