@@ -110,6 +110,15 @@ If the script reports a Cloudflare challenge:
 ### 5. Report Results
 Read `result.txt` from the output directory (default: current working directory) and present matched results. Include post date, title, matched actors, link, and **magnet links** when available. Present magnet links directly in the chat response so the user can copy them immediately.
 
+### 6. PikPak Download (optional)
+If PikPak MCP is configured (see `.cursor/mcp.json` and [reference.md](reference.md)), use the `add_link` tool to submit magnet links. Default target folder is **My Pack** — resolve its folder ID with `ls` at root and pass it as `parent`.
+
+If MCP is unavailable, fall back to:
+```bash
+export PIKPAK_TOKEN="your-token"
+python scripts/pikpak_download.py
+```
+
 ## Output Files
 - `result.txt` — Human-readable report (overwritten each run)
 - `last_result.json` — Structured data for downstream use

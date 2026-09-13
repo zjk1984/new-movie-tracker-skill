@@ -111,6 +111,53 @@ After the first manual pass, you can enable `--headless` for background runs.
 7. Check **Run whether user is logged on or not**.
 8. Uncheck **Start the task only if the computer is on AC power** (if on a laptop).
 
+## PikPak MCP
+
+Connect PikPak cloud download to Cursor via the official MCP server.
+
+### Project config
+
+This repo includes `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "pikpak": {
+      "url": "https://api-open.mypikpak.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:PIKPAK_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+### Token setup
+
+1. In PikPak, go to **Account & Security → Connected Apps → Personal Access Tokens** and create a token with `cloud_download` permission.
+2. Set the token as an environment variable (do not commit it):
+
+```bash
+export PIKPAK_TOKEN="your-token-here"
+```
+
+For Cursor IDE, you can also set `PIKPAK_TOKEN` in **Settings → Secrets** so `${env:PIKPAK_TOKEN}` resolves automatically.
+
+### Cloud Agent
+
+Cloud Agents do not read local `~/.cursor/mcp.json`. Add the same server in [cursor.com/agents](https://cursor.com/agents) → **MCP**:
+
+- **URL**: `https://api-open.mypikpak.com/mcp`
+- **Header**: `Authorization: Bearer <your-token>`
+
+Enable the PikPak MCP toggle when starting an agent run.
+
+### Download workflow
+
+After scanning, use the PikPak MCP `add_link` tool for each magnet. Default target folder is **My Pack** — pass its folder ID as `parent` (use `ls` at root to find it).
+
+Fallback without MCP: `python scripts/pikpak_download.py` (uses the same token via `PIKPAK_TOKEN`).
+
 ## Troubleshooting
 
 **Chrome not found**
