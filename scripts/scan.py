@@ -337,6 +337,11 @@ def find_chrome():
         os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Google\Chrome\Application\chrome.exe"),
         os.path.join(os.environ.get("PROGRAMFILES", ""), r"Google\Chrome\Application\chrome.exe"),
         os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), r"Google\Chrome\Application\chrome.exe"),
+        "/usr/local/bin/google-chrome",
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
     ]
     for path in candidates:
         if path and os.path.exists(path):
@@ -404,6 +409,34 @@ def parse_posts_from_page(page):
     return posts
 
 
+def pass_age_gate(page) -> bool:
+    """Click through the 18+ age verification landing page if present."""
+    try:
+        content = page.content()
+    except Exception:
+        return False
+    if "满18岁" not in content and "If you are over 18" not in content:
+        return False
+    print("[info] age gate detected, clicking through...")
+    for selector in [
+        'text="满18岁，请点此进入"',
+        'text="If you are over 18, please click here"',
+        'a:has-text("满18岁")',
+        'a:has-text("over 18")',
+    ]:
+        try:
+            el = page.locator(selector).first
+            if el.count() > 0:
+                el.click(timeout=5000)
+                page.wait_for_load_state("domcontentloaded", timeout=15000)
+                page.wait_for_timeout(2000)
+                print("[info] age gate passed")
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def extract_magnets(page, href: str, forum_url: str) -> list[str]:
     if not href:
         return []
@@ -412,6 +445,7 @@ def extract_magnets(page, href: str, forum_url: str) -> list[str]:
     try:
         page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
+        pass_age_gate(page)
 
         magnet_anchors = page.locator('a[href^="magnet:"]')
         for i in range(magnet_anchors.count()):
@@ -489,6 +523,7 @@ def scrape(args):
                     print(f"[info] opening page {page_num}: {url}")
                     page.goto(url, wait_until="domcontentloaded", timeout=30000)
                     page.wait_for_timeout(3000)
+                    pass_age_gate(page)
 
                     title = page.title()
                     content = page.content()
