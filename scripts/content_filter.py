@@ -136,7 +136,11 @@ def is_downloadable(item: dict[str, Any]) -> bool:
 
 
 def apply_region_filter(item: dict[str, Any], *, region_filter: bool = True) -> bool:
-    """Tag item with content_region; strip magnets when not in DOWNLOADABLE_REGIONS."""
+    """Tag item with content_region; clear selected download when excluded.
+
+    Raw forum links (magnets, ed2k, pikpak_sha, hash_entries) are preserved
+    even when excluded so they remain recoverable in last_result.json.
+    """
     region = classify_region(item)
     item["content_region"] = region
     number = extract_av_number(item.get("title", ""))
@@ -155,15 +159,11 @@ def apply_region_filter(item: dict[str, Any], *, region_filter: bool = True) -> 
 
     item["skip_reason"] = f"excluded_{region}"
     item.pop("selected_magnet", None)
-    item["magnet_source"] = f"skipped_{region}"
-    item["magnets"] = []
-    item["ed2k"] = []
-    item["pikpak_sha"] = []
-    item["hash_entries"] = []
     item.pop("selected_pikpak_sha", None)
     item.pop("selected_ed2k", None)
     item.pop("selected_download", None)
     item.pop("download_source", None)
+    item["magnet_source"] = f"skipped_{region}"
     item.pop("domestic_subtype", None)
     item.pop("javdb_magnets", None)
     return False

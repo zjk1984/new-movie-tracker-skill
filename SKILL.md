@@ -188,7 +188,7 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
   excluded_domestic_other: 19  (私拍 1, 伪番号 4, OnlyFans 1, 探花/推特/剧情 13)
 ```
 
-引用 `selected_download` + `domestic_subtype`，不要粘贴全部原始磁力列表。
+引用 `selected_download` + `domestic_subtype`，不要粘贴全部原始磁力列表。被排除的帖子仍保留 `magnets[]` / `hash_entries[]` 供恢复，但不会提交 PikPak。
 
 ### 7. JavDB Magnet Lookup (optional)
 

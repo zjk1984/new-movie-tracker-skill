@@ -132,7 +132,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | 伪番号 | XJX, JDSY, MDSY, MDSR, JDSC, CNXX, RXAJ, TMW, TMG, YCM + 数字 |
 | OnlyFans | OnlyFans, HongKongDoll, 玩偶姐姐 |
 
-其他国产（探花、推特、剧情、福利姬等）→ `domestic_other`。
+其他国产（探花、推特、剧情、福利姬等）→ `domestic_other`（仍保留原始 `magnets[]` / `hash_entries[]`，仅跳过 PikPak 提交）。
 
 ### 其他排除
 
