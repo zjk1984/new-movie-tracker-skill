@@ -378,6 +378,10 @@ def parse_posts_from_page(page):
                 title_el = row.locator("a.s.xst, a.xst, th a[href*='thread']").first
                 title = title_el.inner_text(timeout=2000).strip() if title_el.count() > 0 else ""
                 href = title_el.get_attribute("href") if title_el.count() > 0 else ""
+                cat_el = row.locator("th em a").first
+                category = cat_el.inner_text(timeout=1000).strip() if cat_el.count() > 0 else ""
+                if category:
+                    title = f"[{category}] {title}"
                 date_el = row.locator("td.by em, td.by span, .by em, .by span").first
                 date_text = date_el.inner_text(timeout=2000).strip() if date_el.count() > 0 else ""
                 if title:
@@ -471,6 +475,9 @@ def scrape(args):
     alias_map = load_alias_map(args, inline_aliases)
     match_index = build_match_index(actors, alias_map)
     match_names = set(match_index.keys())
+    keywords = [k for k in (getattr(args, "keywords", None) or []) if k]
+    if keywords:
+        print(f"[info] title keyword filter: {keywords}")
     print(f"[info] tracking {len(actors)} actors ({len(match_names)} names including aliases)")
 
     chrome = find_chrome()
@@ -582,25 +589,39 @@ def scrape(args):
                     if page_num < args.max_pages:
                         page.wait_for_timeout(2000)
 
+                keywords = [k for k in (getattr(args, "keywords", None) or []) if k]
+
                 for post in forum_posts:
                     dt = parse_date(post["date_text"], today)
-                    if dt and dt >= cutoff:
+                    if keywords:
+                        if not any(kw in post["title"] for kw in keywords):
+                            continue
+                        if dt and dt < cutoff:
+                            continue
+                    else:
+                        if not (dt and dt >= cutoff):
+                            continue
                         matched_names = sorted(name for name in match_names if name in post["title"])
                         found = sorted({actor for name in matched_names for actor in match_index.get(name, {name})})
-                        if found:
-                            item = {
-                                "date": dt.strftime("%Y-%m-%d"),
-                                "date_raw": post["date_text"],
-                                "title": post["title"],
-                                "href": post["href"],
-                                "actors": found,
-                                "matched_names": matched_names,
-                                "forum": forum_url,
-                            }
-                            if args.fetch_magnets and post.get("href"):
-                                print(f"[info] fetching magnets for: {post['title'][:40]}...")
-                                item["magnets"] = extract_magnets(page, post["href"], forum_url)
-                            all_matched.append(item)
+                        if not found:
+                            continue
+                    matched_names = sorted(name for name in match_names if name in post["title"])
+                    found = sorted({actor for name in matched_names for actor in match_index.get(name, {name})})
+                    item = {
+                        "date": (dt or today).strftime("%Y-%m-%d"),
+                        "date_raw": post["date_text"],
+                        "title": post["title"],
+                        "href": post["href"],
+                        "actors": found,
+                        "matched_names": matched_names,
+                        "forum": forum_url,
+                    }
+                    if keywords:
+                        item["keywords"] = [kw for kw in keywords if kw in post["title"]]
+                    if args.fetch_magnets and post.get("href"):
+                        print(f"[info] fetching magnets for: {post['title'][:40]}...")
+                        item["magnets"] = extract_magnets(page, post["href"], forum_url)
+                    all_matched.append(item)
 
             if not all_matched:
                 lines = []
@@ -636,7 +657,10 @@ def scrape(args):
             for m in all_matched:
                 lines.append(f"date: {m['date']} ({m['date_raw']})")
                 lines.append(f"title: {m['title']}")
-                lines.append(f"actors: {', '.join(m['actors'])}")
+                if m.get("keywords"):
+                    lines.append(f"keywords: {', '.join(m['keywords'])}")
+                if m.get("actors"):
+                    lines.append(f"actors: {', '.join(m['actors'])}")
                 if m.get("matched_names") and sorted(m["actors"]) != sorted(m["matched_names"]):
                     lines.append(f"matched_names: {', '.join(m['matched_names'])}")
                 lines.append(f"href: {m['href']}")
@@ -703,6 +727,7 @@ def main():
     parser.add_argument("--headless", action="store_true", help="Run browser headless")
     parser.add_argument("--output-dir", default=".", help="Directory for results")
     parser.add_argument("--fetch-magnets", action="store_true", help="Open matched threads and extract magnet links")
+    parser.add_argument("--keyword", "--keywords", dest="keywords", nargs="+", default=None, help="Match posts whose title contains any of these keywords")
     args = parser.parse_args()
     scrape(args)
 
