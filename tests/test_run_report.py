@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -12,8 +13,11 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from run_report import (  # noqa: E402
     _md_success_sections,
     _md_table_cell_link,
+    _previous_report_line,
     _success_full_title,
     _success_name_cell,
+    archive_reports_to_backup,
+    write_run_report,
 )
 
 
@@ -107,6 +111,67 @@ class SuccessNameCellTests(unittest.TestCase):
         self.assertIn("测试标题", section)
         self.assertIn("thread-1.html", section)
         self.assertNotRegex(section, r"\| HMN-900 \| magnet")
+
+
+class ReportArchiveTests(unittest.TestCase):
+    def test_archive_moves_root_reports_to_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp)
+            old = reports_dir / "daily_2026-09-13_120000.md"
+            old.write_text("# old", encoding="utf-8")
+            previous, archived = archive_reports_to_backup(reports_dir)
+            self.assertFalse(old.exists())
+            self.assertEqual(len(archived), 1)
+            self.assertEqual(archived[0].parent.name, "backup")
+            self.assertEqual(previous, archived[0])
+
+    def test_previous_report_from_backup_when_root_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp)
+            backup = reports_dir / "backup"
+            backup.mkdir()
+            backed = backup / "daily_2026-09-13_120000.md"
+            backed.write_text("# old", encoding="utf-8")
+            previous, archived = archive_reports_to_backup(reports_dir)
+            self.assertEqual(previous, backed)
+            self.assertEqual(archived, [])
+
+    def test_write_run_report_includes_previous_link(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp)
+            old = reports_dir / "daily_2026-09-13_120000.md"
+            old.write_text("# old", encoding="utf-8")
+            scan_stats = {
+                "scan_time": "2026-09-13T12:00:00",
+                "forums": {},
+                "link_totals": {},
+                "posts_with": {},
+                "matched": [],
+            }
+            download_report = {"ok": 0, "failed_count": 0, "total": 0, "succeeded": [], "failed": []}
+            result = write_run_report(
+                scan_stats,
+                download_report,
+                reports_dir=reports_dir,
+                run_label="daily",
+            )
+            body = result.path.read_text(encoding="utf-8")
+            self.assertIn("上一份报告", body)
+            self.assertIn("daily_2026-09-13_120000.md", body)
+            self.assertFalse(old.exists())
+            self.assertTrue((reports_dir / "backup" / "daily_2026-09-13_120000.md").exists())
+
+
+class PreviousReportLineTests(unittest.TestCase):
+    def test_relative_link_when_no_github(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp)
+            previous = reports_dir / "backup" / "daily_2026-09-13_120000.md"
+            previous.parent.mkdir(parents=True)
+            previous.write_text("x", encoding="utf-8")
+            with patch("run_report.github_blob_url", return_value=None):
+                line = _previous_report_line(previous, reports_dir=reports_dir)
+            self.assertIn("[daily_2026-09-13_120000.md](backup/daily_2026-09-13_120000.md)", line)
 
 
 class MdTableCellLinkTests(unittest.TestCase):

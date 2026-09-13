@@ -4,7 +4,9 @@ last_result.json
 download_state.json
 data/
 reports/*.md
+reports/backup/*.md
 !reports/.gitkeep
+!reports/backup/.gitkeep
 
 # Local scan artifacts
 scan-*/

@@ -9,7 +9,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urljoin, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -17,6 +17,17 @@ from pikpak_links import normalize_ed2k_uri
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 REPORTS_DIR = SKILL_DIR / "reports"
+REPORTS_BACKUP_DIR = REPORTS_DIR / "backup"
+REPORT_NAME_RE = re.compile(
+    r"^(?:run|scan|daily)_(\d{4}-\d{2}-\d{2}_\d{6})\.md$",
+    re.IGNORECASE,
+)
+
+
+class RunReportResult(NamedTuple):
+    path: Path
+    archived_paths: list[Path]
+    previous_report: Path | None
 
 
 def _github_repo_slug() -> str | None:
@@ -61,6 +72,74 @@ def github_blob_url(rel_path: str, *, branch: str | None = None) -> str | None:
     branch = branch or current_git_branch() or "main"
     posix = rel_path.replace("\\", "/")
     return f"https://github.com/{slug}/blob/{branch}/{posix}"
+
+
+def _report_sort_key(path: Path) -> tuple[str, str]:
+    match = REPORT_NAME_RE.match(path.name)
+    if match:
+        return match.group(1), path.name
+    return str(path.stat().st_mtime), path.name
+
+
+def _list_report_md_files(directory: Path) -> list[Path]:
+    if not directory.is_dir():
+        return []
+    return sorted(
+        (p for p in directory.glob("*.md") if p.is_file()),
+        key=_report_sort_key,
+        reverse=True,
+    )
+
+
+def _unique_backup_dest(backup_dir: Path, name: str) -> Path:
+    dest = backup_dir / name
+    if not dest.exists():
+        return dest
+    stem = Path(name).stem
+    suffix = Path(name).suffix
+    n = 1
+    while dest.exists():
+        dest = backup_dir / f"{stem}_{n}{suffix}"
+        n += 1
+    return dest
+
+
+def archive_reports_to_backup(
+    reports_dir: Path,
+) -> tuple[Path | None, list[Path]]:
+    """Move reports/*.md into reports/backup/; return previous report path."""
+    backup_dir = reports_dir / "backup"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    root_reports = _list_report_md_files(reports_dir)
+    archived: list[Path] = []
+    if root_reports:
+        for path in root_reports:
+            dest = _unique_backup_dest(backup_dir, path.name)
+            path.rename(dest)
+            archived.append(dest)
+        return archived[0], archived
+    backup_reports = _list_report_md_files(backup_dir)
+    return (backup_reports[0] if backup_reports else None), archived
+
+
+def _previous_report_line(
+    previous: Path | None,
+    *,
+    reports_dir: Path,
+) -> str:
+    if not previous:
+        return ""
+    rel_to_reports = previous.relative_to(reports_dir)
+    link_path = rel_to_reports.as_posix()
+    label = previous.name
+    url: str | None = None
+    try:
+        url = github_blob_url(str(previous.relative_to(SKILL_DIR)))
+    except ValueError:
+        pass
+    if url:
+        return f"- **上一份报告**: [{label}]({url})\n"
+    return f"- **上一份报告**: [{label}]({link_path})\n"
 
 
 def _md_table(headers: list[str], rows: list[list[str]]) -> str:
@@ -713,11 +792,13 @@ def write_run_report(
     *,
     reports_dir: Path | None = None,
     run_label: str = "run",
-) -> Path:
+) -> RunReportResult:
     out_dir = reports_dir or REPORTS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
+    previous_report, archived_paths = archive_reports_to_backup(out_dir)
     ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     path = out_dir / f"{run_label}_{ts}.md"
+    previous_line = _previous_report_line(previous_report, reports_dir=out_dir)
 
     forums = scan_stats.get("forums") or {}
     lt = scan_stats.get("link_totals") or {}
@@ -751,6 +832,7 @@ def write_run_report(
 
 ## 扫描总结
 
+{previous_line}
 ### 扫描板块
 
 {forum_lines or "（无）"}
@@ -788,10 +870,15 @@ def write_run_report(
 {domestic_section}
 """
     path.write_text(body, encoding="utf-8")
-    return path
+    return RunReportResult(path=path, archived_paths=archived_paths, previous_report=previous_report)
 
 
-def commit_and_push_report(report_path: Path, *, message: str | None = None) -> bool:
+def commit_and_push_report(
+    report_path: Path,
+    *,
+    archived_paths: list[Path] | None = None,
+    message: str | None = None,
+) -> bool:
     rel = report_path.relative_to(SKILL_DIR)
     branch = current_git_branch()
     if not branch:
@@ -800,6 +887,10 @@ def commit_and_push_report(report_path: Path, *, message: str | None = None) -> 
     try:
         # reports/*.md is gitignored locally; -f is required for Feishu GitHub links.
         subprocess.run(["git", "add", "-f", str(rel)], cwd=str(SKILL_DIR), check=True)
+        for archived in archived_paths or []:
+            arch_rel = archived.relative_to(SKILL_DIR)
+            subprocess.run(["git", "add", "-f", str(arch_rel)], cwd=str(SKILL_DIR), check=True)
+        subprocess.run(["git", "add", "-u", "reports"], cwd=str(SKILL_DIR), check=False)
         status = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
             cwd=str(SKILL_DIR),
