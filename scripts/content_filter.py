@@ -41,6 +41,10 @@ ONLYFANS_RE = re.compile(
     r"OnlyFans|HongKongDoll|Hong Kong Doll|玩偶姐姐",
     re.IGNORECASE,
 )
+ED2K_TITLE_RE = re.compile(
+    r"ed2k://|115\s*[eE]?\s*[dD]2[kK]|[eE][dD]2[kK]",
+    re.IGNORECASE,
+)
 
 DOWNLOADABLE_REGIONS = frozenset({"jav_censored", "uncensored", "domestic_leak"})
 
@@ -69,8 +73,12 @@ def is_domestic_excluded(title: str, number: str = "") -> bool:
     return False
 
 
-def domestic_keep_reason(title: str, number: str = "") -> str | None:
-    """Return keep label: 泄密/流出/AI增强/AI短剧/熟女自拍/酒店偷拍 (excludes 私拍/伪番号/OnlyFans)."""
+def title_has_ed2k(title: str) -> bool:
+    return bool(ED2K_TITLE_RE.search(title or ""))
+
+
+def domestic_keep_reason(title: str, number: str = "", *, has_ed2k: bool = False) -> str | None:
+    """Return keep label for domestic/ed2k posts (excludes 私拍/伪番号/OnlyFans)."""
     text = title or ""
     num = (number or extract_av_number(text) or "").upper()
     if is_domestic_excluded(text, num):
@@ -87,7 +95,16 @@ def domestic_keep_reason(title: str, number: str = "") -> str | None:
         return "流出"
     if "AI增强" in text or "AI 增强" in text:
         return "AI增强"
+    if title_has_ed2k(text) or has_ed2k:
+        return "ed2k"
     return None
+
+
+def resolve_domestic_subtype(item: dict[str, Any], number: str = "") -> str | None:
+    title = item.get("title", "")
+    num = number or item.get("av_number") or extract_av_number(title) or ""
+    has_ed2k = bool(item.get("ed2k"))
+    return domestic_keep_reason(title, num, has_ed2k=has_ed2k)
 
 
 def classify_region(item: dict[str, Any]) -> str:
@@ -101,8 +118,8 @@ def classify_region(item: dict[str, Any]) -> str:
     if HEYZO_RE.search(title) or number.startswith("HEYZO"):
         return "uncensored"
 
-    # Domestic — must be checked before generic 无码 markers
-    keep = domestic_keep_reason(title, number)
+    # Domestic / ed2k — must be checked before generic 无码 markers
+    keep = domestic_keep_reason(title, number, has_ed2k=bool(item.get("ed2k")))
     if keep:
         return "domestic_leak"
     if is_domestic_uncensored(title):
@@ -148,10 +165,7 @@ def apply_region_filter(item: dict[str, Any], *, region_filter: bool = True) -> 
         item["av_number"] = number
 
     if region == "domestic_leak":
-        item["domestic_subtype"] = domestic_keep_reason(
-            item.get("title", ""),
-            item.get("av_number") or number or "",
-        )
+        item["domestic_subtype"] = resolve_domestic_subtype(item, number)
 
     downloadable = region in DOWNLOADABLE_REGIONS
     if not region_filter or downloadable:

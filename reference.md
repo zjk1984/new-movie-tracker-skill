@@ -123,6 +123,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | AI短剧 | AI短剧 / AI真人短剧 |
 | 熟女自拍 | 熟女 |
 | 酒店偷拍 | 酒店偷拍 |
+| ed2k | 标题 ed2k/115Ed2k/115eD2k 或帖内 `ed2k://` 链接 |
 
 **排除** `domestic_other` — 命中即排除（优先级高于保留标签）：
 
