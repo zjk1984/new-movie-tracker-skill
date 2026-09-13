@@ -126,11 +126,68 @@ javdb_query_summary:
 
 Explain clearly:
 - **有码** = standard censored JAV (`jav_censored`)
-- **无码** = uncensored / 无码破解 (`uncensored`)
+- **无码** = Japanese uncensored / 无码破解 (`uncensored`)
+- **国产保留** = `[国产无码]` kept as `domestic_leak` — show `domestic_subtype` (泄密 / 流出 / AI增强)
+- **国产排除** = `domestic_other` — 私拍、伪番号、OnlyFans、探花、推特、剧情等（见下方规则）
 - **JavDB 无磁力** = number found on JavDB but magnet list empty (forum magnet may still exist)
 - **查询失败** = number not on JavDB or API error
 
-### 6. JavDB Magnet Lookup (optional)
+When reporting forum-2 or other domestic-heavy scans, group kept items by `domestic_subtype` and list excluded counts by `skip_reason: excluded_domestic_other`.
+
+### 6. Content Filter — 国产无码规则
+
+Implemented in `scripts/content_filter.py`. Applied by default; disable with `--all-regions`.
+
+#### 识别
+
+标题含 **`[国产无码]`**、`国产无码`、`[国产]` 等标记 → 按**国产无码**处理（优先于普通「无码」关键字，避免误保留）。
+
+主要来源：**forum-2**（今日下载链接聚合）。
+
+#### 保留（`content_region: domestic_leak`）
+
+标题满足以下**任一**保留条件，且**未命中**下方排除项：
+
+| `domestic_subtype` | 匹配 |
+|--------------------|------|
+| **泄密** | 含「泄密」或「泄露」 |
+| **流出** | 含「流出」（**不含**「未流出」） |
+| **AI增强** | 含「AI增强」或「AI 增强」 |
+
+保留帖子的 `selected_download` / 磁力会提交 PikPak；JSON 字段 `domestic_subtype` 标明子类。
+
+#### 排除（`content_region: domestic_other`）
+
+以下**一律排除**，即使同时带有 AI增强 / 泄密 等标签：
+
+| 排除原因 | 匹配 |
+|----------|------|
+| **私拍** | 标题含「私拍」 |
+| **伪JAV番号** | 番号前缀 XJX、JDSY、MDSY、MDSR、JDSC、CNXX、RXAJ、TMW、TMG、YCM 等（如 `XJX-380`、`MDSR-0009-1`） |
+| **OnlyFans** | OnlyFans、HongKongDoll、Hong Kong Doll、玩偶姐姐 |
+
+此外默认排除的国产内容（无上述保留标签）：探花、推特、OnlyFans 以外网红、剧情工作室、福利姬、Cos、BBC 等 → `domestic_other`。
+
+#### 与日本片的区别
+
+| 类型 | `content_region` | 说明 |
+|------|------------------|------|
+| 日本有码 | `jav_censored` | MIDA-749、SNOS-270 等标准番号 |
+| 日本无码 | `uncensored` | 无码破解、HEYZO 等 |
+| 国产保留 | `domestic_leak` | 仅泄密 / 流出 / AI增强（且非排除项） |
+| 国产排除 | `domestic_other` | 有磁力但不下载 |
+
+#### 汇报示例
+
+```
+国产无码 filter (forum-2 today):
+  kept: 8  (AI增强 6, 泄密 2)
+  excluded_domestic_other: 19  (私拍 1, 伪番号 4, OnlyFans 1, 探花/推特/剧情 13)
+```
+
+引用 `selected_download` + `domestic_subtype`，不要粘贴全部原始磁力列表。
+
+### 7. JavDB Magnet Lookup (optional)
 
 When forum threads lack inline magnets (common for `[BT种子]` torrent attachments), use JavDB to resolve magnets by AV number extracted from the post title:
 
@@ -160,11 +217,11 @@ Token is saved to `javdb_auth.json` in the skill directory (gitignored). After l
 
 Optional env: `JAVDB_HOST`, `JAVDB_TOKEN`, `JAVDB_AUTH_FILE`, `JAVDB_DEVICE_UUID`.
 
-### 7. Cnsub-First Collect + PikPak (recommended workflow)
+### 8. Cnsub-First Collect + PikPak (recommended workflow)
 
 When the user wants **Chinese-subtitled magnets** from forum posts and automatic PikPak download:
 
-**Content filter (default):** keep **Japanese censored JAV** (日本有码), **uncensored JAV** (无码破解), and **国产无码** with **泄密/泄露**, **流出**, or **AI增强**. Excluded domestic: **私拍**, **伪JAV番号** (XJX/JDSY/MDSR…), **OnlyFans**, 探花/推特/剧情等. Western, FC2, and amateur JAV are excluded. Use `--all-regions` to disable.
+**Content filter (default):** Japanese **有码** + **无码破解** + **国产无码**（仅泄密/流出/AI增强；排除私拍/伪番号/OnlyFans）。详见 **§6 国产无码规则**。Western、FC2、素人 JAV 排除。`--all-regions` 关闭全部过滤。
 
 **Download policy (in order):**
 1. Forum title indicates cnsub (中字/字幕/中文…) and thread has magnets → use forum magnet
@@ -204,7 +261,7 @@ Result fields: `selected_magnet`, `magnet_source`, `content_region`, `javdb_quer
 
 Disable per-item JavDB reporting with `--no-javdb-query`.
 
-### 8. PikPak Download (optional)
+### 9. PikPak Download (optional)
 If PikPak MCP is configured (see `.cursor/mcp.json` and [reference.md](reference.md)), use the `add_link` tool to submit magnet links. Default target folder is **My Pack** — resolve its folder ID with `ls` at root and pass it as `parent`.
 
 If MCP is unavailable, fall back to:
@@ -215,7 +272,7 @@ python scripts/pikpak_download.py --sha 'PikPak://file.mkv|123456789|GCID40CHARH
 
 **Feature code (特征码):** `PikPak://文件名|字节大小|GCID` — instant cloud add when PikPak already has the file. Forum scans also extract `pikpak_sha`; selection order: magnet → JavDB cnsub → PikPak SHA → ed2k.
 
-### 9. Daily Schedule (7:00 AM, incremental download)
+### 10. Daily Schedule (7:00 AM, incremental download)
 
 Run every morning at **07:00** to scan recent forum posts and submit **only new magnets** since the last run (tracked in `download_state.json`).
 
@@ -229,7 +286,7 @@ Run every morning at **07:00** to scan recent forum posts and submit **only new 
 python scripts/daily_run.py --headless
 ```
 
-Defaults: scan **forum-2 + forum-103 + forum-37**, `--all-posts`, `--cnsub-priority`, last **2 days**, content filter (有码 + 无码), PikPak **My Pack**, **new-only** dedup.
+Defaults: scan **forum-2 + forum-103 + forum-37**, `--all-posts`, `--cnsub-priority`, last **2 days**, content filter (日本有码/无码 + 国产泄密/流出/AI增强), PikPak **My Pack**, **new-only** dedup.
 
 Explain results to the user:
 - **本次新增** — magnets submitted this run (not in previous `download_state.json`)
