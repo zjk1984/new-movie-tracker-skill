@@ -258,6 +258,9 @@ def _build_undownloaded_entries(
         if region in JAV_REGIONS:
             jav_entries.append(entry)
         else:
+            # 已在「下载失败」中列出的国产 ed2k 不再重复展示
+            if pending and all(uri in failed_by_uri for _, uri in pending):
+                continue
             entry["subtype"] = item.get("domestic_subtype") or "其他"
             domestic_entries.append(entry)
 
@@ -300,9 +303,8 @@ def _md_undownloaded_posts(
         lines.append(f"### 日本片（{len(jav_entries)} 帖）\n")
         for entry in jav_entries:
             lines.append(f"#### {entry['label']} · {entry['reason']}\n")
-            lines.append(_md_title_line(entry["title"], entry.get("thread_url", "")))
-            if entry.get("title_zh"):
-                lines.append(f"**中文**: {entry['title_zh']}\n")
+            display_title = entry.get("title_zh") or entry["title"]
+            lines.append(_md_title_line(display_title, entry.get("thread_url", "")))
             lines.append(_md_copyable_links(entry["links"]))
 
     if domestic_entries:
