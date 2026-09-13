@@ -46,6 +46,16 @@ BT_FEATURE_LABEL_RE = re.compile(
     r"([A-Fa-f0-9]{40})",
     re.IGNORECASE,
 )
+# Domestic BT posts: 【种子特码】：哈希校验; <40hex>; ;
+BT_SEED_SPECIAL_RE = re.compile(
+    r"【种子特码】[：:\s]*哈希校验\s*;\s*([A-Fa-f0-9]{40})\s*;",
+    re.IGNORECASE,
+)
+# Same semicolon format without the 【种子特码】 wrapper
+BT_HASH_SEMICOLON_RE = re.compile(
+    r"哈希校验\s*;\s*([A-Fa-f0-9]{40})\s*;",
+    re.IGNORECASE,
+)
 # PikPak GCID / 秒传 (distinct from BT btih)
 GCID_LABEL_RE = re.compile(
     r"(?:GCID|秒传码|秒傳碼|PikPak特征码|PikPak特徵碼)"
@@ -297,7 +307,12 @@ def extract_bt_feature_magnets(text: str) -> tuple[list[str], list[dict[str, Any
     magnets: list[str] = []
     entries: list[dict[str, Any]] = []
 
-    patterns = (BT_FEATURE_LABEL_RE, GENERIC_FEATURE_LABEL_RE)
+    patterns = (
+        BT_FEATURE_LABEL_RE,
+        GENERIC_FEATURE_LABEL_RE,
+        BT_SEED_SPECIAL_RE,
+        BT_HASH_SEMICOLON_RE,
+    )
     for pattern in patterns:
         for match in pattern.finditer(plain):
             file_hash = match.group(1).upper()
@@ -306,6 +321,11 @@ def extract_bt_feature_magnets(text: str) -> tuple[list[str], list[dict[str, Any
             seen.add(file_hash)
             name = _nearest_name_before(plain, match.start())
             uri = btih_magnet(file_hash, name)
+            source = (
+                "forum_bt_seed_code"
+                if pattern in (BT_SEED_SPECIAL_RE, BT_HASH_SEMICOLON_RE)
+                else "forum_bt_feature"
+            )
             magnets.append(uri)
             entries.append({
                 "kind": "hash_label_btih",
@@ -314,7 +334,7 @@ def extract_bt_feature_magnets(text: str) -> tuple[list[str], list[dict[str, Any
                 "name": name,
                 "uri": uri,
                 "label": match.group(0).strip()[:120],
-                "source": "forum_bt_feature",
+                "source": source,
             })
 
     return magnets, entries
