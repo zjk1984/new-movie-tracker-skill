@@ -109,6 +109,190 @@ def _collect_fail_uris(failed: list[dict[str, Any]]) -> list[str]:
     return uris
 
 
+JAV_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
+
+
+def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
+    reason = item.get("skip_reason") or ""
+    if reason.startswith("javdb_score_low_"):
+        score = reason.replace("javdb_score_low_", "")
+        return f"JavDB 评分 {score} < 4"
+    labels = {
+        "javdb_no_score": "JavDB 无评分",
+        "javdb_query_error": "JavDB 查询失败",
+        "javdb_no_number": "无番号，未提交",
+    }
+    if reason in labels:
+        return labels[reason]
+    if failed_error:
+        if "task_url_resolve_error" in failed_error:
+            return "PikPak 无法解析链接"
+        return _truncate(failed_error, 80)
+    if reason:
+        return reason
+    return "未成功下载"
+
+
+def _collect_post_uris(item: dict[str, Any]) -> list[tuple[str, str]]:
+    from pikpak_links import normalize_ed2k_uri, parse_download_link
+
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+
+    def add(uri: str, kind: str) -> None:
+        canonical = _canonical_uri(uri)
+        if not canonical or canonical in seen:
+            return
+        seen.add(canonical)
+        out.append((kind, canonical))
+
+    try:
+        from pikpak_download import iter_item_downloads
+
+        for dl in iter_item_downloads(item):
+            uri = dl.get("uri") or dl.get("url") or ""
+            kind = dl.get("type") or "url"
+            if uri.lower().startswith("ed2k:"):
+                kind = "ed2k"
+            elif uri.lower().startswith("magnet:"):
+                kind = "magnet"
+            elif kind == "sha":
+                kind = "pikpak_sha"
+            add(uri, kind)
+    except Exception:
+        pass
+
+    if out:
+        return out
+
+    for ed2k in item.get("ed2k") or []:
+        uri = normalize_ed2k_uri(ed2k) or ed2k
+        add(uri, "ed2k")
+    for magnet in item.get("magnets") or []:
+        add(magnet, "magnet")
+    selected = item.get("selected_download") or item.get("selected_magnet") or ""
+    if selected:
+        kind = "ed2k" if selected.lower().startswith("ed2k:") else "magnet"
+        add(selected, kind)
+    return out
+
+
+def _index_failed(failed: list[dict[str, Any]]) -> tuple[dict[str, str], dict[str, str]]:
+    by_uri: dict[str, str] = {}
+    by_href: dict[str, str] = {}
+    for row in failed:
+        uri = _canonical_uri(row.get("uri") or row.get("url") or "")
+        err = row.get("error") or ""
+        if uri and uri not in by_uri:
+            by_uri[uri] = err
+        href = row.get("href") or ""
+        if href and href not in by_href:
+            by_href[href] = err
+    return by_uri, by_href
+
+
+def _build_undownloaded_entries(
+    matched: list[dict[str, Any]],
+    download_report: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    from content_filter import is_downloadable
+
+    succeeded_uris = {
+        _canonical_uri(_item_uri(x))
+        for x in (download_report.get("succeeded") or [])
+        if _item_uri(x)
+    }
+    failed_by_uri, failed_by_href = _index_failed(download_report.get("failed") or [])
+
+    jav_entries: list[dict[str, Any]] = []
+    domestic_entries: list[dict[str, Any]] = []
+
+    for item in matched:
+        region = item.get("content_region") or ""
+        if region not in JAV_REGIONS and region != "domestic_leak":
+            continue
+        if not is_downloadable(item):
+            continue
+
+        links = _collect_post_uris(item)
+        if not links:
+            continue
+
+        pending = [(kind, uri) for kind, uri in links if uri not in succeeded_uris]
+        if not pending:
+            continue
+
+        href = item.get("href") or ""
+        errors = [failed_by_uri.get(uri, "") for _, uri in pending if failed_by_uri.get(uri)]
+        failed_error = errors[0] if errors else failed_by_href.get(href, "")
+        entry = {
+            "title": (item.get("title") or "").replace("\n", " ").strip(),
+            "label": item.get("av_number") or _truncate(item.get("title", ""), 40),
+            "reason": _skip_reason_label(item, failed_error=failed_error),
+            "links": pending,
+            "href": href,
+        }
+        if region in JAV_REGIONS:
+            jav_entries.append(entry)
+        else:
+            entry["subtype"] = item.get("domestic_subtype") or "其他"
+            domestic_entries.append(entry)
+
+    jav_entries.sort(key=lambda x: x.get("label", ""))
+    domestic_entries.sort(key=lambda x: (x.get("subtype", ""), x.get("title", "")))
+    return jav_entries, domestic_entries
+
+
+def _md_copyable_links(links: list[tuple[str, str]]) -> str:
+    if not links:
+        return "_（无链接）_\n"
+    if len(links) == 1:
+        kind, uri = links[0]
+        return f"<pre><code>{html.escape(uri)}</code></pre>\n"
+    lines = ["<pre><code>"]
+    for i, (kind, uri) in enumerate(links, 1):
+        lines.append(html.escape(f"# {i} [{kind}]"))
+        lines.append(html.escape(uri))
+        if i < len(links):
+            lines.append("")
+    lines.append("</code></pre>\n")
+    return "\n".join(lines)
+
+
+def _md_undownloaded_posts(
+    matched: list[dict[str, Any]],
+    download_report: dict[str, Any],
+) -> str:
+    jav_entries, domestic_entries = _build_undownloaded_entries(matched, download_report)
+    total = len(jav_entries) + len(domestic_entries)
+    if total == 0:
+        return "## 未下载帖子\n\n_（无）_\n"
+
+    lines = [
+        "## 未下载帖子\n",
+        "> 每条帖子单独列出；选中下方代码块复制链接（多链接时每行一条，`#` 开头为注释可忽略）。\n",
+    ]
+
+    if jav_entries:
+        lines.append(f"### 日本片（{len(jav_entries)} 帖）\n")
+        for entry in jav_entries:
+            lines.append(f"#### {entry['label']} · {entry['reason']}\n")
+            lines.append(f"**标题**: `{entry['title']}`\n")
+            lines.append(_md_copyable_links(entry["links"]))
+
+    if domestic_entries:
+        lines.append(f"### 国产（{len(domestic_entries)} 帖）\n")
+        for entry in domestic_entries:
+            sub = entry.get("subtype") or "其他"
+            lines.append(
+                f"#### [{sub}] {_truncate(entry['label'], 36)} · {entry['reason']}\n"
+            )
+            lines.append(f"**标题**: `{entry['title']}`\n")
+            lines.append(_md_copyable_links(entry["links"]))
+
+    return "\n".join(lines)
+
+
 def _md_fail_links(failed: list[dict[str, Any]]) -> str:
     """Render all failed URIs in one HTML pre block (avoids @ → mailto autolink)."""
     if not failed:
@@ -370,6 +554,8 @@ def write_run_report(
 ## 下载失败
 
 {_md_fail_links(failed_items)}
+
+{_md_undownloaded_posts(scan_stats.get("matched") or [], download_report)}
 
 ## 下载成功
 
