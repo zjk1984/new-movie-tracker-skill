@@ -70,11 +70,15 @@ def is_domestic_excluded(title: str, number: str = "") -> bool:
 
 
 def domestic_keep_reason(title: str, number: str = "") -> str | None:
-    """Return keep label for domestic posts: 泄密 / 流出 / AI增强 (excludes 私拍/伪番号/OnlyFans)."""
+    """Return keep label: 泄密/流出/AI增强/AI短剧/熟女自拍 (excludes 私拍/伪番号/OnlyFans)."""
     text = title or ""
     num = (number or extract_av_number(text) or "").upper()
     if is_domestic_excluded(text, num):
         return None
+    if "AI短剧" in text or "AI真人短剧" in text:
+        return "AI短剧"
+    if "熟女" in text:
+        return "熟女自拍"
     if "泄密" in text or "泄露" in text:
         return "泄密"
     if DOMESTIC_LEAK_OUT_RE.search(text):
@@ -95,10 +99,11 @@ def classify_region(item: dict[str, Any]) -> str:
     if HEYZO_RE.search(title) or number.startswith("HEYZO"):
         return "uncensored"
 
-    # Domestic uncensored — must be checked before generic 无码 markers
+    # Domestic — must be checked before generic 无码 markers
+    keep = domestic_keep_reason(title, number)
+    if keep:
+        return "domestic_leak"
     if is_domestic_uncensored(title):
-        if domestic_keep_reason(title, number):
-            return "domestic_leak"
         return "domestic_other"
 
     if any(m in title for m in UNCENSORED_MARKERS):
