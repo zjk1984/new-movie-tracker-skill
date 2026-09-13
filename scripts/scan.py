@@ -784,11 +784,11 @@ def scrape(args):
                             print(f"[info] javdb lookup: {item['title'][:40]}...")
                             enrich_with_javdb(item, javdb_client, args)
 
-                        if getattr(args, "jav_censored_only", True):
-                            from content_filter import apply_region_filter, is_jav_censored
+                        if getattr(args, "region_filter", True):
+                            from content_filter import apply_region_filter, is_downloadable
 
-                            apply_region_filter(item, jav_censored_only=True)
-                            if not is_jav_censored(item):
+                            apply_region_filter(item, region_filter=True)
+                            if not is_downloadable(item):
                                 print(
                                     f"[skip] {item.get('content_region')}: "
                                     f"{item['title'][:50]}"
@@ -974,7 +974,7 @@ def main():
     parser.add_argument(
         "--all-regions",
         action="store_true",
-        help="Download all content types (default: Japanese censored JAV only)",
+        help="Download all content types (default: 日本有码 + 无码 JAV only)",
     )
     parser.add_argument(
         "--cnsub-priority",
@@ -996,9 +996,9 @@ def main():
         args.javdb = True
     if args.cnsub_priority:
         args.fetch_magnets = True
-    args.jav_censored_only = not args.all_regions
-    if args.jav_censored_only:
-        print("[info] download filter: Japanese censored JAV only")
+    args.region_filter = not args.all_regions
+    if args.region_filter:
+        print("[info] download filter: Japanese censored + uncensored JAV")
     scrape(args)
 
 

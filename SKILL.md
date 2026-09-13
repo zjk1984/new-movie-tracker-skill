@@ -144,13 +144,13 @@ Optional env: `JAVDB_HOST`, `JAVDB_TOKEN`, `JAVDB_AUTH_FILE`, `JAVDB_DEVICE_UUID
 
 When the user wants **Chinese-subtitled magnets** from forum posts and automatic PikPak download:
 
-**Content filter (default):** only **Japanese censored JAV** (日本有码) is kept for download. Western, FC2, uncensored (无码), and amateur (素人/探花) posts are tagged and their magnet links removed. Use `--all-regions` to disable.
+**Content filter (default):** keep **Japanese censored JAV** (日本有码) and **uncensored JAV** (无码/无码破解). Western, FC2, and amateur (素人/探花) posts are tagged and their magnet links removed. Use `--all-regions` to disable.
 
 **Magnet policy (in order):**
 1. Forum title indicates cnsub (中字/字幕/中文…) and thread has magnets → use forum magnet
 2. Else look up the AV number on JavDB for a cnsub magnet
 3. Else fall back to any forum magnet
-4. Submit selected magnets to PikPak folder **My Pack** (jav_censored only)
+4. Submit selected magnets to PikPak folder **My Pack** (有码 + 无码 JAV only)
 
 **One command (API fallback):**
 ```bash

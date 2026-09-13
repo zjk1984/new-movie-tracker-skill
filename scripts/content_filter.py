@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Classify forum posts and keep only Japanese censored JAV for download."""
+"""Classify forum posts; default download filter keeps Japanese censored + uncensored JAV."""
 from __future__ import annotations
 
 import re
@@ -28,6 +28,8 @@ AMATEUR_NUM_RE = re.compile(
 STUDIO_NUM_RE = re.compile(r"^[A-Z]{2,6}-\d{2,5}$", re.IGNORECASE)
 
 UNCENSORED_MARKERS = ("无码", "無碼", "无码破解", "無碼破解", "uncensored", "無修正")
+
+DOWNLOADABLE_REGIONS = frozenset({"jav_censored", "uncensored"})
 
 
 def classify_region(item: dict[str, Any]) -> str:
@@ -60,16 +62,21 @@ def is_jav_censored(item: dict[str, Any]) -> bool:
     return classify_region(item) == "jav_censored"
 
 
-def apply_region_filter(item: dict[str, Any], *, jav_censored_only: bool = True) -> bool:
-    """Tag item with content_region; strip magnets when not jav_censored."""
+def is_downloadable(item: dict[str, Any]) -> bool:
+    region = item.get("content_region") or classify_region(item)
+    return region in DOWNLOADABLE_REGIONS
+
+
+def apply_region_filter(item: dict[str, Any], *, region_filter: bool = True) -> bool:
+    """Tag item with content_region; strip magnets when not in DOWNLOADABLE_REGIONS."""
     region = classify_region(item)
     item["content_region"] = region
     number = extract_av_number(item.get("title", ""))
     if number:
         item["av_number"] = number
 
-    if not jav_censored_only or region == "jav_censored":
-        return region == "jav_censored"
+    if not region_filter or region in DOWNLOADABLE_REGIONS:
+        return region in DOWNLOADABLE_REGIONS
 
     item["skip_reason"] = f"excluded_{region}"
     item.pop("selected_magnet", None)

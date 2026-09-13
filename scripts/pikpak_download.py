@@ -189,12 +189,12 @@ def load_magnets_from_result(
     result_path: Path,
     *,
     today_only: bool = True,
-    jav_censored_only: bool = True,
+    region_filter: bool = True,
 ) -> list[dict]:
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent))
-    from content_filter import is_jav_censored
+    from content_filter import is_downloadable
 
     data = json.loads(result_path.read_text(encoding="utf-8"))
     today = data.get("today") or data.get("scan_time", "")[:10]
@@ -202,7 +202,7 @@ def load_magnets_from_result(
     for item in data.get("matched", []):
         if today_only and item.get("date") != today:
             continue
-        if jav_censored_only and not is_jav_censored(item):
+        if region_filter and not is_downloadable(item):
             continue
         magnet = pick_item_magnet(item)
         if not magnet:
@@ -272,13 +272,13 @@ def submit_from_result(
     *,
     folder: str = DEFAULT_FOLDER,
     today_only: bool = True,
-    jav_censored_only: bool = True,
+    region_filter: bool = True,
     access_token: str | None = None,
 ) -> tuple[int, int]:
     items = load_magnets_from_result(
         result_path,
         today_only=today_only,
-        jav_censored_only=jav_censored_only,
+        region_filter=region_filter,
     )
     if not items:
         print("[info] no magnets to submit")
@@ -302,7 +302,7 @@ def main() -> int:
     parser.add_argument(
         "--all-regions",
         action="store_true",
-        help="Include non-JAV-censored content (default: Japanese censored JAV only)",
+        help="Include western/FC2/amateur (default: 日本有码 + 无码 JAV only)",
     )
     args = parser.parse_args()
 
@@ -316,7 +316,7 @@ def main() -> int:
             result_path,
             folder=args.folder,
             today_only=not args.all,
-            jav_censored_only=not args.all_regions,
+            region_filter=not args.all_regions,
         )
     except RuntimeError as exc:
         print(f"[err] {exc}", file=sys.stderr)

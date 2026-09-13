@@ -10,7 +10,7 @@
 - **磁力提取**：进入帖子详情页自动抓取 `magnet:?xt=urn:btih:` 链接
 - **JavDB 补全**：整合 [javdb-cli](https://github.com/zjk1984/javdb-cli) 的 App API，按番号查发行日、标题和磁力（论坛只有 BT 附件时尤其有用）
 - **中字优先采集**：论坛中字帖 → JavDB 中字 → 论坛兜底，并可选推送 PikPak **My Pack**
-- **日本有码过滤**：默认只保留有码 JAV 磁力，自动排除欧美/FC2/无码/素人
+- **内容过滤**：默认保留有码 + 无码 JAV 磁力，排除欧美/FC2/素人
 - **Cloudflare 穿透**：复用本地 Chrome 会话，首次验证后自动通行
 
 ## 安装
