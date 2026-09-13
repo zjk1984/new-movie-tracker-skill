@@ -125,7 +125,20 @@ Flags:
 - `--javdb-best` — keep only the best magnet (prefers cnsub, then HD, then size)
 - `--javdb-cnsub` / `--javdb-hd` — filter JavDB magnets
 
-Optional env: `JAVDB_HOST`, `JAVDB_TOKEN`, `JAVDB_DEVICE_UUID`.
+### JavDB login (optional)
+
+Most lookups work anonymously. To use a personal account (collections, VIP content):
+
+```bash
+python scripts/javdb_login.py login              # interactive
+python scripts/javdb_login.py login -u USER -p PASS
+python scripts/javdb_login.py status --check
+python scripts/javdb_login.py logout
+```
+
+Token is saved to `javdb_auth.json` in the skill directory (gitignored). After login, `javdb_lookup.py` and `scan.py --javdb*` pick up the saved token automatically.
+
+Optional env: `JAVDB_HOST`, `JAVDB_TOKEN`, `JAVDB_AUTH_FILE`, `JAVDB_DEVICE_UUID`.
 
 ### 7. PikPak Download (optional)
 If PikPak MCP is configured (see `.cursor/mcp.json` and [reference.md](reference.md)), use the `add_link` tool to submit magnet links. Default target folder is **My Pack** — resolve its folder ID with `ls` at root and pass it as `parent`.

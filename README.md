@@ -106,6 +106,10 @@ python scripts/scan.py --keyword 流出 --javdb --javdb-magnets --javdb-best --f
 # 仅 JavDB 查番号磁力
 python scripts/javdb_lookup.py SSIS-589 --magnets --best
 
+# JavDB 登录（可选，匿名查磁力通常已够用）
+python scripts/javdb_login.py login
+python scripts/javdb_login.py status --check
+
 # 临时指定演员扫描（不保存到清单）
 python scripts/scan.py --actors 佐々木さき 楪カレン --days 3 --fetch-magnets
 
@@ -129,6 +133,7 @@ new-movie-tracker/
     ├── scan.py           # 核心扫描脚本
     ├── javdb_client.py   # JavDB App API 客户端
     ├── javdb_lookup.py   # 番号查询 CLI
+    ├── javdb_login.py    # JavDB 账号登录
     └── pikpak_download.py
 ```
 

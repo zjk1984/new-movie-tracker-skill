@@ -120,8 +120,21 @@ Forum magnets and JavDB magnets are merged (deduplicated). When forum threads on
 | Variable | Description |
 |----------|-------------|
 | `JAVDB_HOST` | API base URL (default mirror `https://jdforrepam.com`) |
-| `JAVDB_TOKEN` | Optional bearer token for authenticated endpoints |
+| `JAVDB_TOKEN` | Optional bearer token (overrides saved login) |
+| `JAVDB_AUTH_FILE` | Path to saved login JSON (default `<skill-dir>/javdb_auth.json`) |
 | `JAVDB_DEVICE_UUID` | Stable device id for API params |
+
+### Login
+
+```bash
+python scripts/javdb_login.py login
+python scripts/javdb_login.py status --check
+python scripts/javdb_login.py logout
+```
+
+- Token is stored locally in `javdb_auth.json` (mode 600, gitignored).
+- `--save-password` stores password in plaintext for manual re-login only; off by default.
+- Priority: `JAVDB_TOKEN` env → saved token in `javdb_auth.json` → anonymous.
 
 ## First Run (Pass Cloudflare)
 
