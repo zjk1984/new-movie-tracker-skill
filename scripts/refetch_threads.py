@@ -58,9 +58,10 @@ def refetch_threads(
             item.update(links)
             apply_selection(item, javdb_client=None)
             m = len(item.get("magnets") or [])
+            e = len(item.get("ed2k") or [])
             h = len(item.get("hash_entries") or [])
             dl = item.get("selected_download") or item.get("selected_magnet") or ""
-            print(f"  -> magnets={m} hash_entries={h} selected={'yes' if dl else 'no'}")
+            print(f"  -> magnets={m} ed2k={e} hash_entries={h} selected={'yes' if dl else 'no'}")
             if dl:
                 print(f"     {str(dl)[:80]}")
             results.append(item)

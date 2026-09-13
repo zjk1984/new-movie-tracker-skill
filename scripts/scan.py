@@ -483,6 +483,59 @@ def post_in_range(
     return bool(dt and dt >= cutoff)
 
 
+POST_BODY_SELECTORS = (
+    "td.t_f",
+    "div.pcb",
+    '[id^="postmessage_"]',
+    ".t_msgfont",
+    "div.blockcode",
+    "pre",
+    "textarea",
+)
+
+
+def extract_thread_post_html(page) -> str:
+    """Collect first-post body HTML (where ed2k / feature codes usually live)."""
+    chunks: list[str] = []
+    seen: set[str] = set()
+    for selector in POST_BODY_SELECTORS:
+        loc = page.locator(selector)
+        try:
+            count = loc.count()
+        except Exception:
+            continue
+        for i in range(min(count, 8)):
+            try:
+                if selector == "textarea":
+                    piece = loc.nth(i).input_value() or loc.nth(i).inner_text()
+                else:
+                    piece = loc.nth(i).inner_html()
+                piece = (piece or "").strip()
+                if piece and piece not in seen:
+                    seen.add(piece)
+                    chunks.append(piece)
+            except Exception:
+                continue
+    return "\n".join(chunks)
+
+
+def _merge_link_hrefs(page, prefix: str, target: set[str]) -> None:
+    for selector in (f'a[href^{prefix}]', f'[data-clipboard-text^="{prefix}"]'):
+        loc = page.locator(selector)
+        try:
+            count = loc.count()
+        except Exception:
+            continue
+        for i in range(count):
+            for attr in ("href", "data-clipboard-text", "data-url"):
+                try:
+                    val = loc.nth(i).get_attribute(attr)
+                    if val and val.startswith(prefix):
+                        target.add(val)
+                except Exception:
+                    continue
+
+
 def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
     if not href:
         return {"magnets": [], "ed2k": [], "pikpak_sha": [], "hash_entries": []}
@@ -495,36 +548,41 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
         page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
         pass_age_gate(page)
+        page.wait_for_timeout(1000)
 
-        magnet_anchors = page.locator('a[href^="magnet:"]')
-        for i in range(magnet_anchors.count()):
-            try:
-                href_val = magnet_anchors.nth(i).get_attribute("href")
-                if href_val:
-                    magnets.add(href_val)
-            except Exception:
-                continue
+        _merge_link_hrefs(page, "magnet:", magnets)
+        _merge_link_hrefs(page, "ed2k://", ed2k)
+        _merge_link_hrefs(page, "PikPak://", pikpak_sha)
 
-        ed2k_anchors = page.locator('a[href^="ed2k://"]')
-        for i in range(ed2k_anchors.count()):
-            try:
-                href_val = ed2k_anchors.nth(i).get_attribute("href")
-                if href_val:
-                    ed2k.add(href_val)
-            except Exception:
-                continue
+        post_html = extract_thread_post_html(page)
+        full_html = page.content()
+        search_html = f"{post_html}\n{full_html}" if post_html else full_html
 
-        text = page.content()
-        for m in re.findall(r'magnet:\?xt=urn:btih:[a-fA-F0-9]+(?:&[^"\s<>]+)?', text):
+        for m in re.findall(r'magnet:\?xt=urn:btih:[a-fA-F0-9]+(?:&[^"\s<>]+)?', search_html):
             magnets.add(m)
 
-        from pikpak_links import collect_alternatives_from_text
+        from pikpak_links import collect_alternatives_from_text, extract_ed2k_links
 
-        alts = collect_alternatives_from_text(text)
-        magnets.update(alts.get("magnets") or [])
-        ed2k.update(alts["ed2k"])
-        pikpak_sha.update(alts["pikpak_sha"])
-        hash_entries = alts["hash_entries"]
+        for html in filter(None, [post_html, full_html]):
+            alts = collect_alternatives_from_text(html)
+            magnets.update(alts.get("magnets") or [])
+            ed2k.update(alts["ed2k"])
+            pikpak_sha.update(alts["pikpak_sha"])
+            if not hash_entries:
+                hash_entries = alts["hash_entries"]
+            else:
+                hash_entries.extend(alts["hash_entries"])
+
+        # Plain text fallback from visible post body
+        if post_html:
+            try:
+                plain = page.locator("td.t_f, div.pcb, [id^='postmessage_']").first.inner_text()
+                ed2k.update(extract_ed2k_links(plain))
+            except Exception:
+                pass
+
+        if ed2k:
+            print(f"[info]   ed2k from post body: {len(ed2k)}")
 
     except Exception as e:
         print(f"[warn] failed to extract links from {full_url}: {e}")

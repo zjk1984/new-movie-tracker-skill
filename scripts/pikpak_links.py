@@ -15,6 +15,19 @@ ED2K_TEXT_RE = re.compile(
     r"ed2k://\|[^|\s<>\"']+\|\d+\|[A-Fa-f0-9]{32}\|/?",
     re.IGNORECASE,
 )
+ED2K_LOOSE_RE = re.compile(
+    r"ed2k://(?:\|[^|\s<>\"'\\]+){3}\|/?",
+    re.IGNORECASE,
+)
+ED2K_IN_ATTR_RE = re.compile(
+    r"(?:href|data-clipboard-text|data-url|onclick)=([\"'])(.*?ed2k://.*?)\1",
+    re.IGNORECASE | re.DOTALL,
+)
+ED2K_LABEL_RE = re.compile(
+    r"(?:ed2k链接|ED2K链接|ed2k地址|下载链接|迅雷链接|115e?d2k链接)"
+    r"[：:\s]*\n?\s*(ed2k://[^\s<\"']+)",
+    re.IGNORECASE,
+)
 # filename.ext|bytes|40hex (PikPak GCID) or 32hex (ed2k hash)
 PIPE_CODE_RE = re.compile(
     r"(?<![A-Za-z0-9])"
@@ -187,23 +200,50 @@ def extract_pikpak_shas(text: str) -> list[str]:
     return out
 
 
+def preprocess_link_text(text: str) -> str:
+    """Decode HTML entities / URL encoding before link extraction."""
+    if not text:
+        return ""
+    t = html_module.unescape(text)
+    t = unquote(t)
+    t = re.sub(r"ed2k\s*:\s*//", "ed2k://", t, flags=re.IGNORECASE)
+    return t
+
+
+def _add_ed2k_candidate(raw: str, seen: set[str], out: list[str]) -> None:
+    text = preprocess_link_text(raw).strip().strip("'\"")
+    if not text.lower().startswith("ed2k://"):
+        return
+    # Trim trailing HTML junk
+    text = re.split(r'[<"\s]', text, maxsplit=1)[0]
+    parsed = parse_ed2k(text)
+    if not parsed:
+        return
+    uri = parsed["uri"]
+    if uri not in seen:
+        seen.add(uri)
+        out.append(uri)
+
+
 def extract_ed2k_links(text: str) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
-    for match in ED2K_TEXT_RE.findall(text or ""):
-        parsed = parse_ed2k(match)
-        if not parsed:
-            continue
-        uri = parsed["uri"]
-        if uri not in seen:
-            seen.add(uri)
-            out.append(uri)
-    for match in re.findall(r'ed2k://[^"\s<>]+', text or "", flags=re.IGNORECASE):
-        parsed = parse_ed2k(match)
-        if parsed and parsed["uri"] not in seen:
-            seen.add(parsed["uri"])
-            out.append(parsed["uri"])
-    for match in PIPE_CODE_RE.findall(text or ""):
+    raw = preprocess_link_text(text or "")
+
+    for pattern in (ED2K_TEXT_RE, ED2K_LOOSE_RE):
+        for match in pattern.findall(raw):
+            _add_ed2k_candidate(match, seen, out)
+
+    for match in re.findall(r"ed2k://[^\"'\s<>]+", raw, flags=re.IGNORECASE):
+        _add_ed2k_candidate(match, seen, out)
+
+    for match in ED2K_IN_ATTR_RE.finditer(text or ""):
+        _add_ed2k_candidate(match.group(2), seen, out)
+
+    for match in ED2K_LABEL_RE.finditer(raw):
+        _add_ed2k_candidate(match.group(1), seen, out)
+
+    for match in PIPE_CODE_RE.findall(raw):
         name, size, file_hash = match
         if len(file_hash) != 32:
             continue
