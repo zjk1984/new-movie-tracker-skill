@@ -1075,6 +1075,8 @@ def main():
     parser.add_argument("--save-actors", action="store_true", help="Save loaded actors to --actors-file")
     parser.add_argument("--urls", nargs="+", default=[
         "https://www.sehuatang.org/forum-2-1.html",
+        "https://www.sehuatang.org/forum-95-1.html",
+        "https://www.sehuatang.org/forum-142-1.html",
         "https://www.sehuatang.org/forum-103-1.html",
         "https://www.sehuatang.org/forum-37-1.html",
     ], help="Target forum URLs to scan")

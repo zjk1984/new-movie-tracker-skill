@@ -91,7 +91,7 @@ Check `actors.json` in the skill directory. If it is missing or empty, ask the u
 If the user provides Japanese-only or Chinese-only names, add the known cross-language aliases to `aliases.json` when available. Do not delete the original name just because an alias was added.
 
 ### 3. Run Scan
-Execute the utility script from the skill directory. Default invocation scans **forum-2** (今日下载链接), **forum-103** (有码), and **forum-37**:
+Execute the utility script from the skill directory. Default invocation scans **forum-2 / forum-95 / forum-142** (今日下载链接), **forum-103** (有码), and **forum-37**:
 ```bash
 python scripts/scan.py --days 3 --fetch-magnets
 ```
@@ -142,7 +142,7 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 
 标题含 **`[国产无码]`**、`国产无码`、`[国产]` 等标记 → 按**国产无码**处理（优先于普通「无码」关键字，避免误保留）。
 
-主要来源：**forum-2**（今日下载链接聚合）。
+主要来源：**forum-2、forum-95、forum-142**（今日下载链接聚合）。
 
 #### 保留（`content_region: domestic_leak`）
 
@@ -286,7 +286,7 @@ Run every morning at **07:00** to scan recent forum posts and submit **only new 
 python scripts/daily_run.py --headless
 ```
 
-Defaults: scan **forum-2 + forum-103 + forum-37**, `--all-posts`, `--cnsub-priority`, last **2 days**, content filter (日本有码/无码 + 国产泄密/流出/AI增强), PikPak **My Pack**, **new-only** dedup.
+Defaults: scan **forum-2 + forum-95 + forum-142 + forum-103 + forum-37**, `--all-posts`, `--cnsub-priority`, last **2 days**, content filter (日本有码/无码 + 国产泄密/流出/AI增强), PikPak **My Pack**, **new-only** dedup.
 
 Explain results to the user:
 - **本次新增** — magnets submitted this run (not in previous `download_state.json`)

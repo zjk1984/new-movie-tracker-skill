@@ -78,7 +78,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `--aliases-file` | `<skill-dir>/aliases.json` | Path to Japanese / Chinese alias mapping. |
 | `--actors-dir` | `E:\sakana` | Folder to read actor names from (fallback). |
 | `--save-actors` | `False` | Save loaded actors back to `--actors-file`. |
-| `--urls` | forum-2 + forum-103 + forum-37 | Target forum URLs to scan. |
+| `--urls` | forum-2/95/142 + forum-103 + forum-37 | Target forum URLs to scan. |
 | `--days` | `3` | Number of recent days to include. |
 | `--max-pages` | `5` | Max pages to scan per forum. |
 | `--headless` | `False` | Run without visible browser window. |
@@ -100,23 +100,47 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 
 ## Content filter (default)
 
-**Kept** (`selected_download` preserved, submitted to PikPak):
+### 日本 JAV
+
+**Kept:**
 
 | Region | Examples |
 |--------|----------|
 | `jav_censored` | MIDA-749, SNOS-270, [有码高清] |
 | `uncensored` | ATID-799 无码破解, HEYZO (日本无码) |
-| `domestic_leak` | [国产无码] …**泄密** / **流出** / **AI增强** (`domestic_subtype`) |
 
-**Excluded** (magnets cleared, `skip_reason: excluded_*`):
+### 国产无码（forum-2 / forum-95 / forum-142 等）
+
+识别：标题含 `[国产无码]` / `国产无码` / `[国产]`（优先于普通无码关键字）。
+
+**保留** `domestic_leak` — 满足任一且未命中排除项：
+
+| `domestic_subtype` | 条件 |
+|--------------------|------|
+| 泄密 | 泄密 / 泄露 |
+| 流出 | 流出（不含「未流出」） |
+| AI增强 | AI增强 / AI 增强 |
+
+**排除** `domestic_other` — 命中即排除（优先级高于保留标签）：
+
+| 原因 | 条件 |
+|------|------|
+| 私拍 | 私拍 |
+| 伪番号 | XJX, JDSY, MDSY, MDSR, JDSC, CNXX, RXAJ, TMW, TMG, YCM + 数字 |
+| OnlyFans | OnlyFans, HongKongDoll, 玩偶姐姐 |
+
+其他国产（探花、推特、剧情、福利姬等）→ `domestic_other`。
+
+### 其他排除
 
 | Region | Examples |
 |--------|----------|
-| `domestic_other` | 私拍、伪番号(XJX/JDSY/MDSR)、OnlyFans、探花、推特、剧情 |
 | `western` | Blacked, Brazzers, 欧美 |
 | `fc2` | FC2-PPV-* |
 | `amateur` | MAAN-*, 348NTR-*, 200GANA-*, 229SCUTE-* |
 | `other` | [主播录制] 等 |
+
+Implementation: `scripts/content_filter.py`. Disable all filters: `--all-regions`.
 
 ## Cnsub-first workflow
 
@@ -208,7 +232,7 @@ If a Cloudflare challenge appears, complete it manually in the opened window. Th
 
 ## Daily Schedule (07:00, incremental download)
 
-`scripts/daily_run.py` scans **forum-2** (今日下载链接) + forum-103 + forum-37, applies cnsub-first + content filter, then submits **only new downloads** to PikPak (dedup via `download_state.json` in the output directory).
+`scripts/daily_run.py` scans **forum-2 / forum-95 / forum-142** (今日下载链接) + forum-103 + forum-37, applies cnsub-first + content filter, then submits **only new downloads** to PikPak (dedup via `download_state.json` in the output directory).
 
 ### Prepare once
 
