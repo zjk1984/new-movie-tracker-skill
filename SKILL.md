@@ -310,16 +310,14 @@ FEISHU_RECEIVE_ID_TYPE=chat_id    # or open_id / user_id
 
 Verify token: `python scripts/feishu_notify.py ping`
 
-Send interactive cards (scan summary + download-fail link table):
+Each run writes a Markdown report under `reports/` (committed to GitHub) with full download fail/success tables. Feishu receives a **scan summary card** with a link to the report.
 
 ```bash
 python scripts/feishu_notify.py cards --reconstruct
 python scripts/feishu_notify.py cards --input data/last_result.json --download-report data/download_report.json
 ```
 
-Fail card uses a **Tab-separated table** inside a code block (copy → Excel / 115 / 迅雷).
-
-`daily_run.py` auto-sends when `FEISHU_RECEIVE_ID` is set (use `--no-feishu` to disable).
+`daily_run.py` auto-generates report + Feishu notify when `FEISHU_RECEIVE_ID` is set (use `--no-feishu` to disable).
 
 ## Output Files
 - `result.txt` — Human-readable report (overwritten each run)

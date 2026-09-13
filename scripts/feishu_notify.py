@@ -27,36 +27,6 @@ FORUM_LABELS = {
     "forum-37": "forum-37 无码",
 }
 
-REGION_LABELS = {
-    "jav_censored": "日本有码",
-    "uncensored": "无码破解",
-    "domestic_leak": "国产保留",
-    "domestic_other": "国产其他(排除)",
-    "western": "欧美(排除)",
-    "fc2": "FC2(排除)",
-    "amateur": "素人(排除)",
-    "other": "其他(排除)",
-}
-
-DOMESTIC_SUBTYPE_LABELS = {
-    "泄密": "泄密",
-    "流出": "流出",
-    "AI增强": "AI增强",
-    "AI短剧": "AI短剧",
-    "熟女自拍": "熟女自拍",
-    "酒店偷拍": "酒店偷拍",
-    "ed2k": "ed2k",
-}
-
-CATEGORY_HELP = (
-    "**分类说明**\n"
-    "• **日本有码**：带番号有码 JAV，默认下载\n"
-    "• **无码破解**：无码/破解 JAV\n"
-    "• **国产保留**：泄密/流出/AI增强/AI短剧/熟女/酒店偷拍/ed2k\n"
-    "• **已排除**：欧美、FC2、素人、私拍、伪番号、OnlyFans 等"
-)
-
-
 def load_env_local(skill_dir: Path | None = None) -> None:
     env_path = (skill_dir or SKILL_DIR) / ".env.local"
     if not env_path.exists():
@@ -425,49 +395,16 @@ def _error_summary(failed: list[dict]) -> str:
     return "\n".join(f"• {reason}: **{count}**" for reason, count in buckets.most_common(6))
 
 
-def _md_item_lines(items: list[dict], *, max_items: int = 8) -> list[str]:
-    lines: list[str] = []
-    for item in items[:max_items]:
-        name = _truncate(item.get("name") or item.get("av_number") or "?", 50)
-        ltype = item.get("link_type") or _link_type(item.get("uri") or item.get("url") or "")
-        uri = item.get("uri") or item.get("url") or ""
-        title = _truncate(item.get("title") or "", 55)
-        lines.append(f"**{name}** `[{ltype}]`")
-        if title:
-            lines.append(f"  {title}")
-        if uri:
-            lines.append(f"  `{_truncate(uri, 100)}`")
-        if item.get("error"):
-            lines.append(f"  ❌ {_truncate(item['error'], 90)}")
-        elif item.get("phase"):
-            lines.append(f"  ✅ {item.get('phase')}")
-    if len(items) > max_items:
-        lines.append(f"\n… 另有 **{len(items) - max_items}** 条")
-    return lines
-
-
 def build_scan_summary_card(
     scan_stats: dict[str, Any],
     download_report: dict[str, Any],
+    *,
+    report_url: str | None = None,
 ) -> dict[str, Any]:
     forums = scan_stats.get("forums") or {}
     forum_lines = "\n".join(f"• {name}: **{count}** 帖" for name, count in sorted(forums.items()))
     lt = scan_stats.get("link_totals") or {}
     pw = scan_stats.get("posts_with") or {}
-    rc = scan_stats.get("region_counts") or {}
-    sc = scan_stats.get("subtype_counts") or {}
-
-    region_lines = "\n".join(
-        f"• {REGION_LABELS.get(k, k)}: **{v}**"
-        for k, v in sorted(rc.items(), key=lambda x: -x[1])
-        if v > 0
-    )
-    subtype_lines = ""
-    if sc:
-        subtype_lines = "\n**国产子类**\n" + "\n".join(
-            f"• {DOMESTIC_SUBTYPE_LABELS.get(k, k)}: **{v}**"
-            for k, v in sorted(sc.items(), key=lambda x: -x[1])
-        )
 
     ok = download_report.get("ok", 0)
     fail = download_report.get("failed_count", 0)
@@ -483,11 +420,10 @@ def build_scan_summary_card(
         f"• ed2k: **{lt.get('ed2k', 0)}** 条 ({pw.get('ed2k', 0)} 帖)\n"
         f"• BT种子: **{lt.get('bt', 0)}** 条 ({pw.get('bt', 0)} 帖)\n\n"
         f"**PikPak 提交** 成功 **{ok}** / 失败 **{fail}** / 共 **{total}**\n\n"
-        f"**失败原因汇总**\n{_error_summary(download_report.get('failed') or [])}\n\n"
-        f"**帖子分类**\n{region_lines or '(无)'}"
-        f"{subtype_lines}\n\n"
-        f"{CATEGORY_HELP}"
+        f"**失败原因汇总**\n{_error_summary(download_report.get('failed') or [])}\n"
     )
+    if report_url:
+        md += f"\n**完整报告**: [查看 Markdown 报告]({report_url})"
 
     return {
         "config": {"wide_screen_mode": True},
@@ -501,57 +437,21 @@ def build_scan_summary_card(
     }
 
 
-def _cell(text: str) -> str:
-    """Sanitize for tab-separated copy-paste rows."""
-    return (text or "").replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
-
-
-def _build_fail_link_table(items: list[dict]) -> str:
-    """Tab-separated table for copy → Excel / 115 / 迅雷."""
-    rows = ["名称\t类型\t下载链接\t失败原因"]
-    for item in items:
-        name = _cell(item.get("name") or item.get("av_number") or "?")
-        ltype = item.get("link_type") or _link_type(item.get("uri") or item.get("url") or "")
-        uri = _cell(item.get("uri") or item.get("url") or "")
-        err = _cell(item.get("error") or "")
-        if "task_url_resolve_error" in err:
-            err = "URL解析失败"
-        rows.append(f"{name}\t{ltype}\t{uri}\t{err}")
-    return "\n".join(rows)
-
-
-def build_download_fail_card(download_report: dict[str, Any]) -> dict[str, Any]:
-    items = download_report.get("failed") or []
-    if not items:
-        md = "暂无失败记录"
-    else:
-        table = _build_fail_link_table(items)
-        md = (
-            f"共 **{len(items)}** 条提交失败\n\n"
-            f"**失败原因汇总**\n{_error_summary(items)}\n\n"
-            f"**链接表格**（Tab 分隔，选中代码块可复制到 Excel / 115 / 迅雷）\n"
-            f"```\n{table}\n```"
-        )
-
-    return {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "template": "red",
-            "title": {"tag": "plain_text", "content": "❌ 下载失败"},
-        },
-        "elements": [
-            {"tag": "div", "text": {"tag": "lark_md", "content": md}},
-        ],
-    }
-
-
 def notify_cards(
     result_paths: list[Path],
     *,
     download_report_path: Path | None = None,
     ed2k_refetch_path: Path | None = None,
     reconstruct_report: bool = False,
-) -> list[dict[str, Any]]:
+    push_report: bool = True,
+    run_label: str = "scan",
+) -> tuple[list[dict[str, Any]], Path, str | None]:
+    from run_report import (
+        commit_and_push_report,
+        github_blob_url,
+        write_run_report,
+    )
+
     scan_stats = analyze_scan(result_paths, ed2k_refetch_path=ed2k_refetch_path)
     if reconstruct_report or not (download_report_path and download_report_path.exists()):
         download_report = build_download_report_from_scans(
@@ -560,40 +460,27 @@ def notify_cards(
     else:
         download_report = load_download_report(download_report_path)
 
-    cards = [
-        build_scan_summary_card(scan_stats, download_report),
-        build_download_fail_card(download_report),
-    ]
-    if not (download_report.get("failed") or []):
-        cards = cards[:1]
-    results = []
-    for card in cards:
-        results.append(send_interactive_card(card))
-        time.sleep(0.3)
-    return results
+    report_path = write_run_report(scan_stats, download_report, run_label=run_label)
+    rel = report_path.relative_to(SKILL_DIR)
+    if push_report:
+        if commit_and_push_report(report_path):
+            print(f"[ok] report pushed: {rel}")
+        else:
+            print(f"[warn] report saved locally but not pushed: {rel}")
+    report_url = github_blob_url(str(rel))
 
-
-def format_scan_summary(
-    result_path: Path,
-    *,
-    pikpak_ok: int | None = None,
-    pikpak_total: int | None = None,
-    extra_lines: list[str] | None = None,
-) -> str:
-    stats = analyze_scan([result_path])
-    dl = {"ok": pikpak_ok or 0, "failed_count": (pikpak_total or 0) - (pikpak_ok or 0), "total": pikpak_total or 0, "failed": []}
-    card = build_scan_summary_card(stats, dl)
-    return card["elements"][0]["text"]["content"]
+    card = build_scan_summary_card(scan_stats, download_report, report_url=report_url)
+    result = send_interactive_card(card)
+    return [result], report_path, report_url
 
 
 def notify_scan_result(
     result_path: Path,
     *,
-    pikpak_ok: int | None = None,
-    pikpak_total: int | None = None,
-    extra_lines: list[str] | None = None,
+    push_report: bool = True,
 ) -> dict[str, Any]:
-    return notify_cards([result_path], reconstruct_report=True)[0]
+    results, _, _ = notify_cards([result_path], reconstruct_report=True, push_report=push_report)
+    return results[0]
 
 
 def is_configured() -> bool:
@@ -620,13 +507,12 @@ def main() -> int:
     send.add_argument("text", help="Message body")
     send.set_defaults(func="send")
 
-    summary = sub.add_parser("summary", help="Send text summary from last_result.json")
+    summary = sub.add_parser("summary", help="Send Feishu summary card (+ MD report)")
     summary.add_argument("--input", default=str(SKILL_DIR / "last_result.json"))
-    summary.add_argument("--pikpak-ok", type=int, default=None)
-    summary.add_argument("--pikpak-total", type=int, default=None)
+    summary.add_argument("--no-push", action="store_true")
     summary.set_defaults(func="summary")
 
-    cards = sub.add_parser("cards", help="Send cards: scan summary + download fail table")
+    cards = sub.add_parser("cards", help="Write MD report, push to GitHub, send Feishu summary")
     cards.add_argument(
         "--input",
         action="append",
@@ -648,6 +534,12 @@ def main() -> int:
         action="store_true",
         help="Rebuild download report from scan + submit_summary",
     )
+    cards.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Save report locally without git commit/push",
+    )
+    cards.add_argument("--run-label", default="scan", help="Report filename prefix")
     cards.set_defaults(func="cards")
 
     args = parser.parse_args()
@@ -669,12 +561,14 @@ def main() -> int:
             return 0
 
         if args.func == "summary":
-            notify_scan_result(
-                Path(args.input),
-                pikpak_ok=args.pikpak_ok,
-                pikpak_total=args.pikpak_total,
+            _, report_path, report_url = notify_cards(
+                [Path(args.input)],
+                reconstruct_report=True,
+                push_report=not args.no_push,
             )
-            print("[ok] summary sent")
+            print(f"[ok] summary sent; report: {report_path}")
+            if report_url:
+                print(f"[ok] github: {report_url}")
             return 0
 
         if args.func == "cards":
@@ -682,13 +576,17 @@ def main() -> int:
                 str(SKILL_DIR / "scan-forum-95-142-today/last_result.json"),
                 str(SKILL_DIR / "scan-today-f37-f103/last_result.json"),
             ]
-            notify_cards(
+            _, report_path, report_url = notify_cards(
                 [Path(p) for p in inputs],
                 download_report_path=Path(args.download_report),
                 ed2k_refetch_path=Path(args.ed2k_refetch) if args.ed2k_refetch else None,
                 reconstruct_report=args.reconstruct or not Path(args.download_report).exists(),
+                push_report=not args.no_push,
+                run_label=args.run_label,
             )
-            print("[ok] cards sent (scan summary + download fail table)")
+            print(f"[ok] summary sent; report: {report_path}")
+            if report_url:
+                print(f"[ok] github: {report_url}")
             return 0
     except Exception as exc:
         print(f"[err] {exc}", file=sys.stderr)

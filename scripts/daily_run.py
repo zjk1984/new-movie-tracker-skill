@@ -102,12 +102,15 @@ def maybe_feishu_notify(
         return
     try:
         report_path = output_dir / "download_report.json"
-        notify_cards(
+        _, md_path, md_url = notify_cards(
             [result_path],
             download_report_path=report_path if report_path.exists() else None,
             reconstruct_report=not report_path.exists(),
+            run_label="daily",
         )
-        print("[ok] feishu cards sent (scan summary + download fail table)")
+        print(f"[ok] feishu summary sent; report: {md_path}")
+        if md_url:
+            print(f"[ok] github: {md_url}")
     except Exception as exc:
         print(f"[warn] feishu notify failed: {exc}")
 
