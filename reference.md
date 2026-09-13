@@ -122,6 +122,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | AI增强 | AI增强 / AI 增强 |
 | AI短剧 | AI短剧 / AI真人短剧 |
 | 熟女自拍 | 熟女 |
+| 酒店偷拍 | 酒店偷拍 |
 
 **排除** `domestic_other` — 命中即排除（优先级高于保留标签）：
 
@@ -131,7 +132,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | 伪番号 | XJX, JDSY, MDSY, MDSR, JDSC, CNXX, RXAJ, TMW, TMG, YCM + 数字 |
 | OnlyFans | OnlyFans, HongKongDoll, 玩偶姐姐 |
 
-其他国产（探花、酒店偷拍、推特、剧情、福利姬等）→ `domestic_other`。
+其他国产（探花、推特、剧情、福利姬等）→ `domestic_other`。
 
 ### 其他排除
 

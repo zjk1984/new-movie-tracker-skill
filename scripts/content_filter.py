@@ -70,7 +70,7 @@ def is_domestic_excluded(title: str, number: str = "") -> bool:
 
 
 def domestic_keep_reason(title: str, number: str = "") -> str | None:
-    """Return keep label: 泄密/流出/AI增强/AI短剧/熟女自拍 (excludes 私拍/伪番号/OnlyFans)."""
+    """Return keep label: 泄密/流出/AI增强/AI短剧/熟女自拍/酒店偷拍 (excludes 私拍/伪番号/OnlyFans)."""
     text = title or ""
     num = (number or extract_av_number(text) or "").upper()
     if is_domestic_excluded(text, num):
@@ -79,6 +79,8 @@ def domestic_keep_reason(title: str, number: str = "") -> str | None:
         return "AI短剧"
     if "熟女" in text:
         return "熟女自拍"
+    if "酒店偷拍" in text:
+        return "酒店偷拍"
     if "泄密" in text or "泄露" in text:
         return "泄密"
     if DOMESTIC_LEAK_OUT_RE.search(text):

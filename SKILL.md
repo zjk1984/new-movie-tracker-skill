@@ -127,7 +127,7 @@ javdb_query_summary:
 Explain clearly:
 - **有码** = standard censored JAV (`jav_censored`)
 - **无码** = Japanese uncensored / 无码破解 (`uncensored`)
-- **国产保留** = `[国产无码]` kept as `domestic_leak` — show `domestic_subtype` (泄密 / 流出 / AI增强 / AI短剧 / 熟女自拍)
+- **国产保留** = `[国产无码]` kept as `domestic_leak` — show `domestic_subtype` (泄密 / 流出 / AI增强 / AI短剧 / 熟女自拍 / 酒店偷拍)
 - **国产排除** = `domestic_other` — 私拍、伪番号、OnlyFans、探花、推特、剧情等（见下方规则）
 - **JavDB 无磁力** = number found on JavDB but magnet list empty (forum magnet may still exist)
 - **查询失败** = number not on JavDB or API error
@@ -155,6 +155,7 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 | **AI增强** | 含「AI增强」或「AI 增强」 |
 | **AI短剧** | 含「AI短剧」或「AI真人短剧」 |
 | **熟女自拍** | 含「熟女」 |
+| **酒店偷拍** | 含「酒店偷拍」（含乐橙酒店偷拍等） |
 
 保留帖子的 `selected_download` / 磁力会提交 PikPak；JSON 字段 `domestic_subtype` 标明子类。
 
@@ -168,7 +169,7 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 | **伪JAV番号** | 番号前缀 XJX、JDSY、MDSY、MDSR、JDSC、CNXX、RXAJ、TMW、TMG、YCM 等（如 `XJX-380`、`MDSR-0009-1`） |
 | **OnlyFans** | OnlyFans、HongKongDoll、Hong Kong Doll、玩偶姐姐 |
 
-此外默认排除的国产内容（无上述保留标签）：探花、酒店偷拍、推特、OnlyFans 以外网红、剧情工作室、福利姬、Cos、BBC 等 → `domestic_other`。
+此外默认排除的国产内容（无上述保留标签）：探花、推特、OnlyFans 以外网红、剧情工作室、福利姬、Cos、BBC 等 → `domestic_other`。
 
 #### 与日本片的区别
 
@@ -176,7 +177,7 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 |------|------------------|------|
 | 日本有码 | `jav_censored` | MIDA-749、SNOS-270 等标准番号 |
 | 日本无码 | `uncensored` | 无码破解、HEYZO 等 |
-| 国产保留 | `domestic_leak` | 泄密 / 流出 / AI增强 / AI短剧 / 熟女自拍（且非排除项） |
+| 国产保留 | `domestic_leak` | 泄密 / 流出 / AI增强 / AI短剧 / 熟女自拍 / 酒店偷拍（且非排除项） |
 | 国产排除 | `domestic_other` | 有磁力但不下载 |
 
 #### 汇报示例
@@ -223,7 +224,7 @@ Optional env: `JAVDB_HOST`, `JAVDB_TOKEN`, `JAVDB_AUTH_FILE`, `JAVDB_DEVICE_UUID
 
 When the user wants **Chinese-subtitled magnets** from forum posts and automatic PikPak download:
 
-**Content filter (default):** Japanese **有码** + **无码破解** + **国产无码**（泄密/流出/AI增强/AI短剧/熟女自拍；排除私拍/伪番号/OnlyFans）。详见 **§6 国产无码规则**。Western、FC2、素人 JAV 排除。`--all-regions` 关闭全部过滤。
+**Content filter (default):** Japanese **有码** + **无码破解** + **国产无码**（泄密/流出/AI增强/AI短剧/熟女自拍/酒店偷拍；排除私拍/伪番号/OnlyFans）。详见 **§6 国产无码规则**。Western、FC2、素人 JAV 排除。`--all-regions` 关闭全部过滤。
 
 **Download policy (in order):**
 1. Forum title indicates cnsub (中字/字幕/中文…) and thread has magnets → use forum magnet
