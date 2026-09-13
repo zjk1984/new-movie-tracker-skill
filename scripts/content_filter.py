@@ -30,6 +30,17 @@ STUDIO_NUM_RE = re.compile(r"^[A-Z]{2,6}-\d{2,5}$", re.IGNORECASE)
 UNCENSORED_MARKERS = ("无码破解", "無碼破解", "uncensored", "無修正", "[无码", "[無碼")
 DOMESTIC_MARKERS = ("国产无码", "國產無碼", "[国产", "[國產")
 DOMESTIC_LEAK_OUT_RE = re.compile(r"(?<!未)流出")
+PSEUDO_JAV_PREFIXES = frozenset({
+    "XJX", "JDSY", "MDSY", "MDSR", "JDSC", "CNXX", "RXAJ", "TMW", "TMG", "YCM",
+})
+PSEUDO_JAV_RE = re.compile(
+    r"(?:" + "|".join(PSEUDO_JAV_PREFIXES) + r")-\d+",
+    re.IGNORECASE,
+)
+ONLYFANS_RE = re.compile(
+    r"OnlyFans|HongKongDoll|Hong Kong Doll|玩偶姐姐",
+    re.IGNORECASE,
+)
 
 DOWNLOADABLE_REGIONS = frozenset({"jav_censored", "uncensored", "domestic_leak"})
 
@@ -39,11 +50,31 @@ def is_domestic_uncensored(title: str) -> bool:
     return any(marker in text for marker in DOMESTIC_MARKERS)
 
 
-def domestic_keep_reason(title: str) -> str | None:
-    """Return keep label for domestic posts: 私拍 / 泄密 / 流出 / AI增强."""
+def is_pseudo_jav(title: str, number: str = "") -> bool:
+    if number:
+        prefix = number.split("-", 1)[0].upper()
+        if prefix in PSEUDO_JAV_PREFIXES:
+            return True
+    return bool(PSEUDO_JAV_RE.search(title or ""))
+
+
+def is_domestic_excluded(title: str, number: str = "") -> bool:
     text = title or ""
     if "私拍" in text:
-        return "私拍"
+        return True
+    if ONLYFANS_RE.search(text):
+        return True
+    if is_pseudo_jav(text, number):
+        return True
+    return False
+
+
+def domestic_keep_reason(title: str, number: str = "") -> str | None:
+    """Return keep label for domestic posts: 泄密 / 流出 / AI增强 (excludes 私拍/伪番号/OnlyFans)."""
+    text = title or ""
+    num = (number or extract_av_number(text) or "").upper()
+    if is_domestic_excluded(text, num):
+        return None
     if "泄密" in text or "泄露" in text:
         return "泄密"
     if DOMESTIC_LEAK_OUT_RE.search(text):
@@ -66,7 +97,7 @@ def classify_region(item: dict[str, Any]) -> str:
 
     # Domestic uncensored — must be checked before generic 无码 markers
     if is_domestic_uncensored(title):
-        if domestic_keep_reason(title):
+        if domestic_keep_reason(title, number):
             return "domestic_leak"
         return "domestic_other"
 
@@ -106,7 +137,10 @@ def apply_region_filter(item: dict[str, Any], *, region_filter: bool = True) -> 
         item["av_number"] = number
 
     if region == "domestic_leak":
-        item["domestic_subtype"] = domestic_keep_reason(item.get("title", ""))
+        item["domestic_subtype"] = domestic_keep_reason(
+            item.get("title", ""),
+            item.get("av_number") or number or "",
+        )
 
     downloadable = region in DOWNLOADABLE_REGIONS
     if not region_filter or downloadable:
