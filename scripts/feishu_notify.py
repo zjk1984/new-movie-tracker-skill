@@ -431,12 +431,18 @@ def notify_cards(
 
     report_path = write_run_report(scan_stats, download_report, run_label=run_label)
     rel = report_path.relative_to(SKILL_DIR)
+    report_url: str | None = None
     if push_report:
         if commit_and_push_report(report_path):
+            report_url = github_blob_url(str(rel))
             print(f"[ok] report pushed: {rel}")
         else:
-            print(f"[warn] report saved locally but not pushed: {rel}")
-    report_url = github_blob_url(str(rel))
+            print(
+                f"[warn] report saved locally but not on GitHub; "
+                f"Feishu card will omit broken link: {rel}",
+            )
+    else:
+        print(f"[info] report saved locally only (--no-push): {rel}")
 
     card = build_scan_summary_card(scan_stats, download_report, report_url=report_url)
     result = send_interactive_card(card)

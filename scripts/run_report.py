@@ -756,13 +756,14 @@ def commit_and_push_report(report_path: Path, *, message: str | None = None) -> 
         return False
     msg = message or f"docs: add run report {rel.name}"
     try:
-        subprocess.run(["git", "add", str(rel)], cwd=str(SKILL_DIR), check=True)
+        # reports/*.md is gitignored locally; -f is required for Feishu GitHub links.
+        subprocess.run(["git", "add", "-f", str(rel)], cwd=str(SKILL_DIR), check=True)
         status = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
             cwd=str(SKILL_DIR),
         )
         if status.returncode == 0:
-            return True
+            return False
         subprocess.run(["git", "commit", "-m", msg], cwd=str(SKILL_DIR), check=True)
         subprocess.run(["git", "push", "-u", "origin", branch], cwd=str(SKILL_DIR), check=True)
         return True
