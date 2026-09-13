@@ -185,12 +185,24 @@ def item_download_name(item: dict) -> str:
     return title.split()[0] if title else "download"
 
 
-def load_magnets_from_result(result_path: Path, *, today_only: bool = True) -> list[dict]:
+def load_magnets_from_result(
+    result_path: Path,
+    *,
+    today_only: bool = True,
+    jav_censored_only: bool = True,
+) -> list[dict]:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from content_filter import is_jav_censored
+
     data = json.loads(result_path.read_text(encoding="utf-8"))
     today = data.get("today") or data.get("scan_time", "")[:10]
     items = []
     for item in data.get("matched", []):
         if today_only and item.get("date") != today:
+            continue
+        if jav_censored_only and not is_jav_censored(item):
             continue
         magnet = pick_item_magnet(item)
         if not magnet:
@@ -260,9 +272,14 @@ def submit_from_result(
     *,
     folder: str = DEFAULT_FOLDER,
     today_only: bool = True,
+    jav_censored_only: bool = True,
     access_token: str | None = None,
 ) -> tuple[int, int]:
-    items = load_magnets_from_result(result_path, today_only=today_only)
+    items = load_magnets_from_result(
+        result_path,
+        today_only=today_only,
+        jav_censored_only=jav_censored_only,
+    )
     if not items:
         print("[info] no magnets to submit")
         return 0, 0
@@ -282,6 +299,11 @@ def main() -> int:
         action="store_true",
         help="Submit all matched items in the result file, not just today's date",
     )
+    parser.add_argument(
+        "--all-regions",
+        action="store_true",
+        help="Include non-JAV-censored content (default: Japanese censored JAV only)",
+    )
     args = parser.parse_args()
 
     result_path = Path(os.environ.get("RESULT_JSON", "last_result.json"))
@@ -294,6 +316,7 @@ def main() -> int:
             result_path,
             folder=args.folder,
             today_only=not args.all,
+            jav_censored_only=not args.all_regions,
         )
     except RuntimeError as exc:
         print(f"[err] {exc}", file=sys.stderr)

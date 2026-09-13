@@ -96,6 +96,21 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `--cnsub-priority` | `False` | Cnsub-first magnet selection (implies `--fetch-magnets`). |
 | `--pikpak` | `False` | Submit selected magnets to PikPak after scan. |
 | `--pikpak-folder` | `My Pack` | PikPak target folder name. |
+| `--all-regions` | `False` | Include western/FC2/amateur/uncensored (default: 日本有码 JAV only). |
+
+## Content filter (default)
+
+Only **Japanese censored JAV** (`content_region: jav_censored`) keeps `selected_magnet` and is submitted to PikPak.
+
+Excluded types (magnets cleared, `skip_reason: excluded_*`):
+
+| Region | Examples |
+|--------|----------|
+| `western` | Blacked, Brazzers, 欧美 |
+| `fc2` | FC2-PPV-* |
+| `uncensored` | 无码高清, 无码破解 |
+| `amateur` | MAAN-*, 348NTR-*, 200GANA-*, 229SCUTE-* |
+| `other` | Unrecognized numbering |
 
 ## Cnsub-first workflow
 

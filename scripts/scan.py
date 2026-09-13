@@ -783,6 +783,16 @@ def scrape(args):
                         elif javdb_client:
                             print(f"[info] javdb lookup: {item['title'][:40]}...")
                             enrich_with_javdb(item, javdb_client, args)
+
+                        if getattr(args, "jav_censored_only", True):
+                            from content_filter import apply_region_filter, is_jav_censored
+
+                            apply_region_filter(item, jav_censored_only=True)
+                            if not is_jav_censored(item):
+                                print(
+                                    f"[skip] {item.get('content_region')}: "
+                                    f"{item['title'][:50]}"
+                                )
                         all_matched.append(item)
 
                     print(f"[info] page {page_num}: {len(posts)} rows, {new_posts} new, matched total {len(all_matched)}")
@@ -859,6 +869,10 @@ def scrape(args):
                     lines.append(f"javdb: {j.get('number')} | {j.get('release_date')} | {j.get('title', '')[:60]}")
                 if m.get("javdb_error"):
                     lines.append(f"javdb_error: {m['javdb_error']}")
+                if m.get("content_region"):
+                    lines.append(f"content_region: {m['content_region']}")
+                if m.get("skip_reason"):
+                    lines.append(f"skip_reason: {m['skip_reason']}")
                 if m.get("selected_magnet"):
                     lines.append(f"selected_magnet ({m.get('magnet_source', '?')}): {m['selected_magnet']}")
                 if "magnets" in m:
@@ -958,6 +972,11 @@ def main():
         help="Match all posts in the date range (skip actor name filter)",
     )
     parser.add_argument(
+        "--all-regions",
+        action="store_true",
+        help="Download all content types (default: Japanese censored JAV only)",
+    )
+    parser.add_argument(
         "--cnsub-priority",
         action="store_true",
         help="Cnsub-first magnets: forum cnsub -> JavDB cnsub -> forum fallback (implies --fetch-magnets)",
@@ -977,6 +996,9 @@ def main():
         args.javdb = True
     if args.cnsub_priority:
         args.fetch_magnets = True
+    args.jav_censored_only = not args.all_regions
+    if args.jav_censored_only:
+        print("[info] download filter: Japanese censored JAV only")
     scrape(args)
 
 
