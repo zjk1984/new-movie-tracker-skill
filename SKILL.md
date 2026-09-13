@@ -140,7 +140,38 @@ Token is saved to `javdb_auth.json` in the skill directory (gitignored). After l
 
 Optional env: `JAVDB_HOST`, `JAVDB_TOKEN`, `JAVDB_AUTH_FILE`, `JAVDB_DEVICE_UUID`.
 
-### 7. PikPak Download (optional)
+### 7. Cnsub-First Collect + PikPak (recommended workflow)
+
+When the user wants **Chinese-subtitled magnets** from forum posts and automatic PikPak download:
+
+**Policy (in order):**
+1. Forum title indicates cnsub (中字/字幕/中文…) and thread has magnets → use forum magnet
+2. Else look up the AV number on JavDB for a cnsub magnet
+3. Else fall back to any forum magnet
+4. Submit selected magnets to PikPak folder **My Pack**
+
+**One command (API fallback):**
+```bash
+export PIKPAK_TOKEN="your-token"
+python scripts/scan.py --days 3 --cnsub-priority --pikpak --pikpak-folder "My Pack"
+```
+
+**With actor list or keyword:**
+```bash
+python scripts/scan.py --actors 佐々木さき --days 3 --cnsub-priority --pikpak
+python scripts/scan.py --keyword 流出 --max-pages 10 --cnsub-priority --pikpak
+```
+
+**Agent + PikPak MCP (preferred when MCP is connected):**
+1. Run scan with `--cnsub-priority` (no `--pikpak` flag)
+2. Read `last_result.json`; for each item use `selected_magnet` (fallback: first `magnets[]`)
+3. Call PikPak MCP `add_link` for each magnet; resolve **My Pack** folder id with `ls` at root and pass as `parent`
+
+If MCP is unavailable, use `--pikpak` or `python scripts/pikpak_download.py` after the scan.
+
+Result fields: `selected_magnet`, `magnet_source` (`forum_cnsub` | `javdb_cnsub` | `forum_fallback`).
+
+### 8. PikPak Download (optional)
 If PikPak MCP is configured (see `.cursor/mcp.json` and [reference.md](reference.md)), use the `add_link` tool to submit magnet links. Default target folder is **My Pack** — resolve its folder ID with `ls` at root and pass it as `parent`.
 
 If MCP is unavailable, fall back to:

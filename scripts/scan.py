@@ -614,7 +614,11 @@ def scrape(args):
     print(f"[info] tracking {len(actors)} actors ({len(match_names)} names including aliases)")
 
     javdb_client = None
-    if getattr(args, "javdb", False) or getattr(args, "javdb_magnets", False):
+    if (
+        getattr(args, "javdb", False)
+        or getattr(args, "javdb_magnets", False)
+        or getattr(args, "cnsub_priority", False)
+    ):
         try:
             from javdb_client import JavDBClient
 
@@ -623,6 +627,8 @@ def scrape(args):
         except ImportError as exc:
             print(f"[err] {exc}")
             sys.exit(1)
+    if getattr(args, "cnsub_priority", False):
+        print("[info] cnsub-first magnet policy: forum cnsub -> javdb cnsub -> forum fallback")
 
     chrome = find_chrome()
     if not chrome:
@@ -751,7 +757,15 @@ def scrape(args):
                             links = extract_thread_links(page, post["href"], forum_url)
                             item["magnets"] = links["magnets"]
                             item["ed2k"] = links["ed2k"]
-                        if javdb_client:
+                        if getattr(args, "cnsub_priority", False):
+                            from magnet_select import apply_selection
+
+                            print(f"[info] selecting magnet: {item['title'][:40]}...")
+                            if apply_selection(item, javdb_client):
+                                print(f"[info]   -> {item.get('magnet_source')}")
+                            else:
+                                print("[info]   -> no magnet selected")
+                        elif javdb_client:
                             print(f"[info] javdb lookup: {item['title'][:40]}...")
                             enrich_with_javdb(item, javdb_client, args)
                         all_matched.append(item)
@@ -830,6 +844,8 @@ def scrape(args):
                     lines.append(f"javdb: {j.get('number')} | {j.get('release_date')} | {j.get('title', '')[:60]}")
                 if m.get("javdb_error"):
                     lines.append(f"javdb_error: {m['javdb_error']}")
+                if m.get("selected_magnet"):
+                    lines.append(f"selected_magnet ({m.get('magnet_source', '?')}): {m['selected_magnet']}")
                 if "magnets" in m:
                     if m["magnets"]:
                         lines.append("magnets:")
@@ -863,6 +879,17 @@ def scrape(args):
             )
             page.screenshot(path=str(screenshot_dir / "last_run.png"))
             print(f"[done] results saved to {out_dir}")
+
+            if getattr(args, "pikpak", False):
+                result_json = out_dir / "last_result.json"
+                try:
+                    from pikpak_download import submit_from_result
+
+                    folder = getattr(args, "pikpak_folder", None) or "My Pack"
+                    ok, total = submit_from_result(result_json, folder=folder, today_only=True)
+                    print(f"[done] pikpak: {ok}/{total} submitted to {folder}")
+                except Exception as exc:
+                    print(f"[err] pikpak download failed: {exc}")
 
         except PlaywrightTimeout:
             print("[err] page timeout")
@@ -910,9 +937,26 @@ def main():
     parser.add_argument("--javdb-cnsub", action="store_true", help="Filter JavDB magnets to those with Chinese subtitles")
     parser.add_argument("--javdb-hd", action="store_true", help="Filter JavDB magnets to HD only")
     parser.add_argument("--javdb-host", default=None, help="JavDB API host (default: https://jdforrepam.com)")
+    parser.add_argument(
+        "--cnsub-priority",
+        action="store_true",
+        help="Cnsub-first magnets: forum cnsub -> JavDB cnsub -> forum fallback (implies --fetch-magnets)",
+    )
+    parser.add_argument(
+        "--pikpak",
+        action="store_true",
+        help="After scan, submit selected magnets to PikPak (requires PIKPAK_TOKEN)",
+    )
+    parser.add_argument(
+        "--pikpak-folder",
+        default=os.environ.get("PIKPAK_FOLDER", "My Pack"),
+        help="PikPak target folder name (default: My Pack)",
+    )
     args = parser.parse_args()
     if args.javdb_magnets:
         args.javdb = True
+    if args.cnsub_priority:
+        args.fetch_magnets = True
     scrape(args)
 
 
