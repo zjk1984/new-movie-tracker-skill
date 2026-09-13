@@ -35,6 +35,17 @@ def refetch_threads(
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
         )
         page = context.new_page()
+        # Warm up forum session (helps Cloudflare + age gate)
+        try:
+            page.goto(forum_url, wait_until="domcontentloaded", timeout=90000)
+            page.wait_for_timeout(8000)
+            pass_age_gate(page)
+            page.wait_for_timeout(2000)
+            if "Just a moment" in page.content():
+                print("[warn] Cloudflare challenge on forum list — try --no-headless locally")
+        except Exception as exc:
+            print(f"[warn] forum warmup failed: {exc}")
+
         for i, thread in enumerate(threads, 1):
             href = thread.get("href", "")
             title = thread.get("title", "")
