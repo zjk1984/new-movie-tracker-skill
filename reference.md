@@ -339,7 +339,8 @@ python scripts/pikpak_download.py --sha-file feature_codes.txt
 
 - **Instant add** when PikPak cloud already has the GCID (`PHASE_TYPE_COMPLETE`).
 - **Fails** if the hash is not cached (no offline fetch by hash alone).
-- Scan extracts `pikpak_sha` from forum posts; cnsub-first policy falls back: magnet → JavDB → **PikPak SHA** → ed2k.
+- When a post has **no magnet links**, the scanner collects from the thread body: `ed2k://`, `PikPak://`, `filename|size|hash` pipe codes, and labeled 哈希校验/特征码 (`hash_entries`).
+- Selection order with magnets: cnsub forum → JavDB → forum fallback. **Without magnets:** PikPak SHA → ed2k → JavDB (if `--cnsub-priority`).
 - **ed2k** links are submitted as URL offline tasks (different hash algorithm from GCID).
 
 ## Troubleshooting

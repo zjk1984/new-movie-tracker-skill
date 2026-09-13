@@ -285,6 +285,16 @@ def pick_item_download(item: dict) -> dict | None:
             parsed["source"] = "forum_ed2k"
             return parsed
 
+    for entry in item.get("hash_entries") or []:
+        uri = (entry.get("uri") or "").strip()
+        if not uri:
+            continue
+        parsed = parse_download_link(uri)
+        if parsed:
+            parsed["name"] = item_download_name(item, parsed.get("name", "download"))
+            parsed["source"] = entry.get("source", "forum_hash_entry")
+            return parsed
+
     return None
 
 

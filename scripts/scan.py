@@ -483,13 +483,14 @@ def post_in_range(
     return bool(dt and dt >= cutoff)
 
 
-def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list[str]]:
+def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
     if not href:
-        return {"magnets": [], "ed2k": [], "pikpak_sha": []}
+        return {"magnets": [], "ed2k": [], "pikpak_sha": [], "hash_entries": []}
     full_url = urljoin(forum_url, href)
     magnets: set[str] = set()
     ed2k: set[str] = set()
     pikpak_sha: set[str] = set()
+    hash_entries: list[dict] = []
     try:
         page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
@@ -516,14 +517,13 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list[str]
         text = page.content()
         for m in re.findall(r'magnet:\?xt=urn:btih:[a-fA-F0-9]+(?:&[^"\s<>]+)?', text):
             magnets.add(m)
-        for e in re.findall(r'ed2k://[^"\s<>]+', text):
-            ed2k.add(e)
-        for sha in re.findall(
-            r'PikPak://[^|\s<>"\']+\|\d+\|[A-Fa-f0-9]{40}',
-            text,
-            flags=re.IGNORECASE,
-        ):
-            pikpak_sha.add(sha)
+
+        from pikpak_links import collect_alternatives_from_text
+
+        alts = collect_alternatives_from_text(text)
+        ed2k.update(alts["ed2k"])
+        pikpak_sha.update(alts["pikpak_sha"])
+        hash_entries = alts["hash_entries"]
 
     except Exception as e:
         print(f"[warn] failed to extract links from {full_url}: {e}")
@@ -531,6 +531,7 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list[str]
         "magnets": list(magnets),
         "ed2k": list(ed2k),
         "pikpak_sha": list(pikpak_sha),
+        "hash_entries": hash_entries,
     }
 
 
@@ -832,14 +833,23 @@ def scrape(args):
                             item["magnets"] = links["magnets"]
                             item["ed2k"] = links["ed2k"]
                             item["pikpak_sha"] = links["pikpak_sha"]
-                        if getattr(args, "cnsub_priority", False):
+                            item["hash_entries"] = links.get("hash_entries", [])
                             from magnet_select import apply_selection
 
-                            print(f"[info] selecting magnet: {item['title'][:40]}...")
-                            if apply_selection(item, javdb_client):
-                                print(f"[info]   -> {item.get('magnet_source')}")
+                            jd = javdb_client if getattr(args, "cnsub_priority", False) else None
+                            print(f"[info] selecting download: {item['title'][:40]}...")
+                            if apply_selection(item, jd):
+                                src = item.get("magnet_source") or item.get("download_source", "?")
+                                print(f"[info]   -> {src}")
+                            elif not item.get("magnets"):
+                                n_alt = (
+                                    len(item.get("ed2k") or [])
+                                    + len(item.get("pikpak_sha") or [])
+                                    + len(item.get("hash_entries") or [])
+                                )
+                                print(f"[info]   -> no magnet; collected {n_alt} alternative(s)")
                             else:
-                                print("[info]   -> no magnet selected")
+                                print("[info]   -> no download selected")
                         elif javdb_client:
                             print(f"[info] javdb lookup: {item['title'][:40]}...")
                             enrich_with_javdb(item, javdb_client, args)
@@ -984,6 +994,16 @@ def scrape(args):
                             lines.append(f"  - {link}")
                     else:
                         lines.append("pikpak_sha: (none found)")
+                if "hash_entries" in m and m["hash_entries"]:
+                    lines.append("hash_entries:")
+                    for entry in m["hash_entries"]:
+                        label = entry.get("label") or entry.get("uri") or entry.get("hash", "")
+                        lines.append(f"  - [{entry.get('kind', '?')}] {label}")
+                if m.get("selected_download") and not m.get("selected_magnet"):
+                    lines.append(
+                        f"selected_download ({m.get('download_source', '?')}): "
+                        f"{m['selected_download']}"
+                    )
                 lines.append("-" * 40)
 
             result_text = "\n".join(lines)
