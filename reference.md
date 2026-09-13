@@ -360,11 +360,10 @@ App needs **im:message** or **im:message:send_as_bot** permission. Add the bot t
 python scripts/feishu_notify.py ping
 python scripts/feishu_notify.py cards --reconstruct
 python scripts/feishu_notify.py cards --input data/last_result.json --download-report data/download_report.json
-python scripts/daily_run.py --headless   # sends 3 cards when FEISHU_RECEIVE_ID is set
+python scripts/daily_run.py --headless   # sends cards when FEISHU_RECEIVE_ID is set
 ```
 
-Cards: (1) forum scan summary — forums, magnet/ed2k/BT counts, categories, submit stats;
-(2) download failures — name + link + error; (3) download successes — name + link + phase.
+Cards: (1) forum scan summary; (2) download failures — Tab-separated table (name / type / link / error) in a code block for copy-paste.
 
 ### Cloud Agent
 

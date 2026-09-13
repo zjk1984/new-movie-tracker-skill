@@ -107,7 +107,7 @@ def maybe_feishu_notify(
             download_report_path=report_path if report_path.exists() else None,
             reconstruct_report=not report_path.exists(),
         )
-        print("[ok] feishu cards sent (scan / fail / success)")
+        print("[ok] feishu cards sent (scan summary + download fail table)")
     except Exception as exc:
         print(f"[warn] feishu notify failed: {exc}")
 

@@ -501,37 +501,37 @@ def build_scan_summary_card(
     }
 
 
-def build_download_success_card(download_report: dict[str, Any]) -> dict[str, Any]:
-    items = download_report.get("succeeded") or []
-    by_type = Counter(_link_type(x.get("uri") or x.get("url") or "") for x in items)
-    type_line = " | ".join(f"{k} **{v}**" for k, v in by_type.items()) if by_type else "无"
+def _cell(text: str) -> str:
+    """Sanitize for tab-separated copy-paste rows."""
+    return (text or "").replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
 
-    lines = [f"共 **{len(items)}** 条成功提交到 My Pack", f"类型: {type_line}", ""]
-    lines.extend(_md_item_lines(items, max_items=10))
 
-    return {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "template": "green",
-            "title": {"tag": "plain_text", "content": "✅ 下载成功"},
-        },
-        "elements": [
-            {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines) or "暂无成功记录"}},
-        ],
-    }
+def _build_fail_link_table(items: list[dict]) -> str:
+    """Tab-separated table for copy → Excel / 115 / 迅雷."""
+    rows = ["名称\t类型\t下载链接\t失败原因"]
+    for item in items:
+        name = _cell(item.get("name") or item.get("av_number") or "?")
+        ltype = item.get("link_type") or _link_type(item.get("uri") or item.get("url") or "")
+        uri = _cell(item.get("uri") or item.get("url") or "")
+        err = _cell(item.get("error") or "")
+        if "task_url_resolve_error" in err:
+            err = "URL解析失败"
+        rows.append(f"{name}\t{ltype}\t{uri}\t{err}")
+    return "\n".join(rows)
 
 
 def build_download_fail_card(download_report: dict[str, Any]) -> dict[str, Any]:
     items = download_report.get("failed") or []
-    lines = [
-        f"共 **{len(items)}** 条提交失败",
-        "",
-        "**失败原因汇总**",
-        _error_summary(items),
-        "",
-        "**失败明细**",
-    ]
-    lines.extend(_md_item_lines(items, max_items=10))
+    if not items:
+        md = "暂无失败记录"
+    else:
+        table = _build_fail_link_table(items)
+        md = (
+            f"共 **{len(items)}** 条提交失败\n\n"
+            f"**失败原因汇总**\n{_error_summary(items)}\n\n"
+            f"**链接表格**（Tab 分隔，选中代码块可复制到 Excel / 115 / 迅雷）\n"
+            f"```\n{table}\n```"
+        )
 
     return {
         "config": {"wide_screen_mode": True},
@@ -540,7 +540,7 @@ def build_download_fail_card(download_report: dict[str, Any]) -> dict[str, Any]:
             "title": {"tag": "plain_text", "content": "❌ 下载失败"},
         },
         "elements": [
-            {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines) or "暂无失败记录"}},
+            {"tag": "div", "text": {"tag": "lark_md", "content": md}},
         ],
     }
 
@@ -563,8 +563,9 @@ def notify_cards(
     cards = [
         build_scan_summary_card(scan_stats, download_report),
         build_download_fail_card(download_report),
-        build_download_success_card(download_report),
     ]
+    if not (download_report.get("failed") or []):
+        cards = cards[:1]
     results = []
     for card in cards:
         results.append(send_interactive_card(card))
@@ -625,7 +626,7 @@ def main() -> int:
     summary.add_argument("--pikpak-total", type=int, default=None)
     summary.set_defaults(func="summary")
 
-    cards = sub.add_parser("cards", help="Send 3 interactive cards: scan / fail / success")
+    cards = sub.add_parser("cards", help="Send cards: scan summary + download fail table")
     cards.add_argument(
         "--input",
         action="append",
@@ -687,7 +688,7 @@ def main() -> int:
                 ed2k_refetch_path=Path(args.ed2k_refetch) if args.ed2k_refetch else None,
                 reconstruct_report=args.reconstruct or not Path(args.download_report).exists(),
             )
-            print("[ok] 3 cards sent (scan summary / download fail / download success)")
+            print("[ok] cards sent (scan summary + download fail table)")
             return 0
     except Exception as exc:
         print(f"[err] {exc}", file=sys.stderr)
