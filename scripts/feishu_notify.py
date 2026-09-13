@@ -429,13 +429,22 @@ def notify_cards(
         scan_stats.get("matched") or [],
     )
 
-    report_path = write_run_report(scan_stats, download_report, run_label=run_label)
+    report_result = write_run_report(scan_stats, download_report, run_label=run_label)
+    report_path = report_result.path
     rel = report_path.relative_to(SKILL_DIR)
     report_url: str | None = None
     if push_report:
-        if commit_and_push_report(report_path):
+        if commit_and_push_report(
+            report_path,
+            archived_paths=report_result.archived_paths,
+        ):
             report_url = github_blob_url(str(rel))
             print(f"[ok] report pushed: {rel}")
+            if report_result.archived_paths:
+                print(
+                    f"[info] archived {len(report_result.archived_paths)} report(s) "
+                    f"to reports/backup/",
+                )
         else:
             print(
                 f"[warn] report saved locally but not on GitHub; "
