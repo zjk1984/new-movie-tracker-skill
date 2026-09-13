@@ -297,6 +297,27 @@ Explain results to the user:
 - **已跳过** — same thread or same btih already downloaded before
 - **无新增** — scan ran but nothing new to submit
 
+### 11. Feishu notifications (optional)
+
+Configure in `.env.local` (see `.env.local.example`):
+
+```bash
+FEISHU_APP_ID=cli_xxx
+FEISHU_APP_SECRET=xxx
+FEISHU_RECEIVE_ID=oc_xxx          # group chat_id — add bot to the group first
+FEISHU_RECEIVE_ID_TYPE=chat_id    # or open_id / user_id
+```
+
+Verify token: `python scripts/feishu_notify.py ping`
+
+Send scan summary manually:
+
+```bash
+python scripts/feishu_notify.py summary --input data/last_result.json
+```
+
+`daily_run.py` auto-sends when `FEISHU_RECEIVE_ID` is set (use `--no-feishu` to disable).
+
 ## Output Files
 - `result.txt` — Human-readable report (overwritten each run)
 - `last_result.json` — Structured data for downstream use

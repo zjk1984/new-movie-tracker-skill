@@ -343,6 +343,25 @@ python scripts/pikpak_login.py login
 
 For **Cursor MCP**, also set `PIKPAK_TOKEN` in **Settings → Secrets** (MCP reads env only). Scripts and `daily_run.py` use `pikpak_auth.json` automatically.
 
+### Feishu (Lark) notifications
+
+Add to `.env.local` (gitignored):
+
+| Variable | Description |
+|----------|-------------|
+| `FEISHU_APP_ID` | App ID from Feishu open platform (`cli_…`) |
+| `FEISHU_APP_SECRET` | App secret |
+| `FEISHU_RECEIVE_ID` | Target `chat_id` (group) or `open_id` / `user_id` |
+| `FEISHU_RECEIVE_ID_TYPE` | Default `chat_id` |
+
+App needs **im:message** or **im:message:send_as_bot** permission. Add the bot to the target group before sending.
+
+```bash
+python scripts/feishu_notify.py ping
+python scripts/feishu_notify.py summary --input data/last_result.json
+python scripts/daily_run.py --headless   # notifies when FEISHU_RECEIVE_ID is set
+```
+
 ### Cloud Agent
 
 Cloud Agents do not read local `~/.cursor/mcp.json`. Add the same server in [cursor.com/agents](https://cursor.com/agents) → **MCP**:

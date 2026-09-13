@@ -56,7 +56,7 @@ def run_scan(args: argparse.Namespace, output_dir: Path) -> int:
     return subprocess.call(cmd, cwd=str(SKILL_DIR))
 
 
-def run_download(args: argparse.Namespace, output_dir: Path) -> int:
+def run_download(args: argparse.Namespace, output_dir: Path) -> tuple[int, int | None, int | None]:
     sys.path.insert(0, str(SCRIPTS_DIR))
     from pikpak_auth import resolve_folder
     from pikpak_download import submit_from_result
@@ -64,7 +64,7 @@ def run_download(args: argparse.Namespace, output_dir: Path) -> int:
     result_path = output_dir / "last_result.json"
     if not result_path.exists():
         print(f"[err] scan result missing: {result_path}", file=sys.stderr)
-        return 1
+        return 1, None, None
     try:
         ok, total = submit_from_result(
             result_path,
@@ -75,9 +75,40 @@ def run_download(args: argparse.Namespace, output_dir: Path) -> int:
         )
     except RuntimeError as exc:
         print(f"[err] pikpak: {exc}", file=sys.stderr)
-        return 1
+        return 1, None, None
     print(f"[done] pikpak new-only: {ok}/{total} submitted")
-    return 0 if ok == total else 1
+    rc = 0 if ok == total else 1
+    return rc, ok, total
+
+
+def maybe_feishu_notify(
+    output_dir: Path,
+    *,
+    enabled: bool,
+    pikpak_ok: int | None = None,
+    pikpak_total: int | None = None,
+) -> None:
+    if not enabled:
+        return
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    from feishu_notify import is_configured, notify_scan_result
+
+    if not is_configured():
+        print("[info] feishu: credentials or FEISHU_RECEIVE_ID not set, skip notify")
+        return
+    result_path = output_dir / "last_result.json"
+    if not result_path.exists():
+        print("[warn] feishu: no last_result.json to summarize")
+        return
+    try:
+        notify_scan_result(
+            result_path,
+            pikpak_ok=pikpak_ok,
+            pikpak_total=pikpak_total,
+        )
+        print("[ok] feishu summary sent")
+    except Exception as exc:
+        print(f"[warn] feishu notify failed: {exc}")
 
 
 def main() -> int:
@@ -126,6 +157,16 @@ def main() -> int:
         default=None,
         help="PikPak target folder (default: saved or My Pack)",
     )
+    parser.add_argument(
+        "--feishu",
+        action="store_true",
+        help="Send scan summary to Feishu when FEISHU_* env is configured",
+    )
+    parser.add_argument(
+        "--no-feishu",
+        action="store_true",
+        help="Disable Feishu notify even if FEISHU_RECEIVE_ID is set",
+    )
     args = parser.parse_args()
     if args.no_headless:
         args.headless = False
@@ -139,14 +180,26 @@ def main() -> int:
     print(f"[info] output dir: {output_dir}")
 
     rc = 0
+    pikpak_ok: int | None = None
+    pikpak_total: int | None = None
     if not args.download_only:
         rc = run_scan(args, output_dir)
         if rc != 0:
             return rc
 
     if not args.scan_only:
-        dl_rc = run_download(args, output_dir)
+        dl_rc, pikpak_ok, pikpak_total = run_download(args, output_dir)
         rc = rc or dl_rc
+
+    feishu_enabled = args.feishu or (
+        not args.no_feishu and bool(os.environ.get("FEISHU_RECEIVE_ID"))
+    )
+    maybe_feishu_notify(
+        output_dir,
+        enabled=feishu_enabled,
+        pikpak_ok=pikpak_ok,
+        pikpak_total=pikpak_total,
+    )
 
     return rc
 
