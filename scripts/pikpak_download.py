@@ -544,6 +544,7 @@ def submit_from_result(
     today_only: bool = True,
     region_filter: bool = True,
     new_only: bool = False,
+    skip_scan_repeat: bool = True,
     state_file: Path | None = None,
     access_token: str | None = None,
 ) -> tuple[int, int]:
@@ -561,6 +562,16 @@ def submit_from_result(
         today_only=today_only,
         region_filter=region_filter,
     )
+    if skip_scan_repeat:
+        from scan_delta import filter_new_download_items
+
+        before_scan = len(items)
+        items, scan_repeat = filter_new_download_items(items, result_path.parent)
+        if scan_repeat:
+            print(
+                f"[info] scan dedup: skipped {scan_repeat}/{before_scan} download(s) "
+                f"already in previous scan",
+            )
     state_path = state_file or default_state_path(result_path.parent)
     state = load_state(state_path) if new_only else None
     if new_only and state is not None:

@@ -119,6 +119,19 @@ def filter_download_rows(
     return kept
 
 
+def filter_new_download_items(
+    items: list[dict[str, Any]],
+    output_dir: Path | str,
+) -> tuple[list[dict[str, Any]], int]:
+    """Drop PikPak download rows already present in the previous scan snapshot."""
+    previous = load_previous_matched(output_dir)
+    if not previous or not items:
+        return items, 0
+    seen = build_seen_key_set(previous)
+    kept = [item for item in items if is_item_new(item, seen)]
+    return kept, len(items) - len(kept)
+
+
 def filter_download_rows_to_matched(
     rows: list[dict[str, Any]],
     matched_items: list[dict[str, Any]],
