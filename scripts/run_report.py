@@ -144,7 +144,10 @@ def _previous_report_line(
     label = previous.name
     url: str | None = None
     try:
-        url = github_blob_url(str(previous.relative_to(SKILL_DIR)))
+        url = github_blob_url(
+            str(previous.relative_to(SKILL_DIR)),
+            branch=report_github_branch(),
+        )
     except ValueError:
         pass
     if url:
