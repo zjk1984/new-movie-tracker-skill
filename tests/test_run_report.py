@@ -122,7 +122,7 @@ class ReportArchiveTests(unittest.TestCase):
             reports_dir = Path(tmp)
             old = reports_dir / "daily_2026-09-13_120000.md"
             old.write_text("# old", encoding="utf-8")
-            previous, archived = archive_reports_to_backup(reports_dir)
+            previous, archived = archive_reports_to_backup(reports_dir, "daily")
             self.assertFalse(old.exists())
             self.assertEqual(len(archived), 1)
             self.assertEqual(archived[0].parent.name, "backup")
@@ -135,9 +135,59 @@ class ReportArchiveTests(unittest.TestCase):
             backup.mkdir()
             backed = backup / "daily_2026-09-13_120000.md"
             backed.write_text("# old", encoding="utf-8")
-            previous, archived = archive_reports_to_backup(reports_dir)
+            previous, archived = archive_reports_to_backup(reports_dir, "daily")
             self.assertEqual(previous, backed)
             self.assertEqual(archived, [])
+
+    def test_daily_and_custom_timelines_are_independent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp)
+            daily_old = reports_dir / "daily_2026-09-13_120000.md"
+            custom_old = reports_dir / "custom_2026-09-13_130000.md"
+            daily_old.write_text("# daily", encoding="utf-8")
+            custom_old.write_text("# custom", encoding="utf-8")
+
+            previous, archived = archive_reports_to_backup(reports_dir, "daily")
+            self.assertFalse(daily_old.exists())
+            self.assertTrue(custom_old.exists())
+            self.assertEqual(len(archived), 1)
+            self.assertEqual(previous.name, "daily_2026-09-13_120000.md")
+
+            scan_stats = {
+                "scan_time": "2026-09-13T14:00:00",
+                "forums": {},
+                "link_totals": {},
+                "posts_with": {},
+                "matched": [],
+            }
+            download_report = {
+                "ok": 0,
+                "failed_count": 0,
+                "total": 0,
+                "succeeded": [],
+                "failed": [],
+            }
+            daily_result = write_run_report(
+                scan_stats,
+                download_report,
+                reports_dir=reports_dir,
+                run_label="daily",
+            )
+            daily_body = daily_result.path.read_text(encoding="utf-8")
+            self.assertIn("daily_2026-09-13_120000.md", daily_body)
+            self.assertNotIn("custom_2026-09-13_130000.md", daily_body)
+
+            custom_result = write_run_report(
+                scan_stats,
+                download_report,
+                reports_dir=reports_dir,
+                run_label="custom",
+            )
+            custom_body = custom_result.path.read_text(encoding="utf-8")
+            self.assertIn("custom_2026-09-13_130000.md", custom_body)
+            self.assertNotIn("daily_2026-09-13_120000.md", custom_body)
+            self.assertTrue(daily_result.path.exists())
+            self.assertTrue(custom_result.path.exists())
 
     def test_write_run_report_includes_previous_link(self):
         with tempfile.TemporaryDirectory() as tmp:

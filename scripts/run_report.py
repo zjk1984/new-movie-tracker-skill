@@ -21,7 +21,7 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 REPORTS_DIR = SKILL_DIR / "reports"
 REPORTS_BACKUP_DIR = REPORTS_DIR / "backup"
 REPORT_NAME_RE = re.compile(
-    r"^(?:run|scan|daily)_(\d{4}-\d{2}-\d{2}_\d{6})\.md$",
+    r"^(?:run|scan|daily|custom)_(\d{4}-\d{2}-\d{2}_\d{6})\.md$",
     re.IGNORECASE,
 )
 
@@ -83,14 +83,21 @@ def _report_sort_key(path: Path) -> tuple[str, str]:
     return str(path.stat().st_mtime), path.name
 
 
-def _list_report_md_files(directory: Path) -> list[Path]:
+def _report_name_prefix(run_label: str) -> str:
+    return f"{run_label}_"
+
+
+def _matches_run_label(path: Path, run_label: str) -> bool:
+    return path.name.startswith(_report_name_prefix(run_label))
+
+
+def _list_report_md_files(directory: Path, *, run_label: str | None = None) -> list[Path]:
     if not directory.is_dir():
         return []
-    return sorted(
-        (p for p in directory.glob("*.md") if p.is_file()),
-        key=_report_sort_key,
-        reverse=True,
-    )
+    files = [p for p in directory.glob("*.md") if p.is_file()]
+    if run_label:
+        files = [p for p in files if _matches_run_label(p, run_label)]
+    return sorted(files, key=_report_sort_key, reverse=True)
 
 
 def _unique_backup_dest(backup_dir: Path, name: str) -> Path:
@@ -108,11 +115,12 @@ def _unique_backup_dest(backup_dir: Path, name: str) -> Path:
 
 def archive_reports_to_backup(
     reports_dir: Path,
+    run_label: str,
 ) -> tuple[Path | None, list[Path]]:
-    """Move reports/*.md into reports/backup/; return previous report path."""
+    """Move same-label reports/*.md into reports/backup/; return previous of that label."""
     backup_dir = reports_dir / "backup"
     backup_dir.mkdir(parents=True, exist_ok=True)
-    root_reports = _list_report_md_files(reports_dir)
+    root_reports = _list_report_md_files(reports_dir, run_label=run_label)
     archived: list[Path] = []
     if root_reports:
         for path in root_reports:
@@ -120,7 +128,7 @@ def archive_reports_to_backup(
             path.rename(dest)
             archived.append(dest)
         return archived[0], archived
-    backup_reports = _list_report_md_files(backup_dir)
+    backup_reports = _list_report_md_files(backup_dir, run_label=run_label)
     return (backup_reports[0] if backup_reports else None), archived
 
 
@@ -867,7 +875,7 @@ def write_run_report(
 ) -> RunReportResult:
     out_dir = reports_dir or REPORTS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
-    previous_report, archived_paths = archive_reports_to_backup(out_dir)
+    previous_report, archived_paths = archive_reports_to_backup(out_dir, run_label)
     ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     path = out_dir / f"{run_label}_{ts}.md"
     previous_line = _previous_report_line(previous_report, reports_dir=out_dir)
