@@ -497,6 +497,78 @@ def is_configured() -> bool:
         return False
 
 
+def build_scan_start_card(
+    *,
+    run_label: str = "扫描",
+    forum_urls: list[str] | None = None,
+    start_page: int = 1,
+    max_pages: int = 1,
+    days: int | None = None,
+    no_date_filter: bool = False,
+) -> dict[str, Any]:
+    forums = forum_urls or []
+    forum_lines = "\n".join(
+        f"• {_forum_label(url)}" for url in forums
+    ) or "• （无）"
+    end_page = start_page + max_pages - 1
+    if no_date_filter:
+        range_line = f"页码 **{start_page} ~ {end_page}**（共 **{max_pages}** 页）| 日期 **不限**"
+    elif days is not None:
+        range_line = (
+            f"页码 **1 ~ {max_pages}**（最多 **{max_pages}** 页）"
+            f" | 最近 **{days}** 天"
+        )
+    else:
+        range_line = f"页码 **{start_page} ~ {end_page}**（共 **{max_pages}** 页）"
+
+    title_map = {
+        "daily": "日常扫描",
+        "custom": "自定义扫描",
+        "scan": "论坛扫描",
+    }
+    task_name = title_map.get(run_label, run_label or "论坛扫描")
+
+    md = (
+        f"**开始时间** {format_beijing_time(beijing_now(), with_label=True)}\n\n"
+        f"**任务类型** {task_name}\n\n"
+        f"**扫描板块**\n{forum_lines}\n\n"
+        f"**扫描范围**\n• {range_line}\n\n"
+        f"**进度通知** 每 **100** 帖推送一次；完成后发送总结报告"
+    )
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "template": "green",
+            "title": {"tag": "plain_text", "content": "🚀 扫描已开始"},
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": md}},
+        ],
+    }
+
+
+def send_scan_start(
+    *,
+    run_label: str = "scan",
+    forum_urls: list[str] | None = None,
+    start_page: int = 1,
+    max_pages: int = 1,
+    days: int | None = None,
+    no_date_filter: bool = False,
+) -> dict[str, Any] | None:
+    if not is_configured():
+        return None
+    card = build_scan_start_card(
+        run_label=run_label,
+        forum_urls=forum_urls,
+        start_page=start_page,
+        max_pages=max_pages,
+        days=days,
+        no_date_filter=no_date_filter,
+    )
+    return send_interactive_card(card)
+
+
 def send_scan_progress(
     matched_count: int,
     *,

@@ -30,6 +30,7 @@ def run_scan(
     start_page: int | None = None,
     max_pages: int | None = None,
     no_date_filter: bool = False,
+    run_label: str = "daily",
 ) -> int:
     cmd = [
         sys.executable,
@@ -50,6 +51,8 @@ def run_scan(
         cmd.extend(["--start-page", str(start_page)])
     if no_date_filter:
         cmd.append("--no-date-filter")
+    if run_label:
+        cmd.extend(["--run-label", run_label])
     if args.headless:
         cmd.append("--headless")
     print("[info] running scan:", " ".join(cmd))

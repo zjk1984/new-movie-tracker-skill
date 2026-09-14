@@ -761,6 +761,24 @@ def scrape(args):
     if since:
         print(f"[info] date range: {since.strftime('%Y-%m-%d')} ~ {(until or today).strftime('%Y-%m-%d')}")
 
+    if getattr(args, "feishu_progress", False):
+        try:
+            from feishu_notify import is_configured, send_scan_start
+
+            if is_configured():
+                start_page = max(1, getattr(args, "start_page", 1) or 1)
+                send_scan_start(
+                    run_label=getattr(args, "run_label", None) or "scan",
+                    forum_urls=list(args.urls),
+                    start_page=start_page,
+                    max_pages=args.max_pages,
+                    days=args.days,
+                    no_date_filter=bool(getattr(args, "no_date_filter", False)),
+                )
+                print("[ok] feishu start card sent")
+        except Exception as exc:
+            print(f"[warn] feishu start card: {exc}")
+
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(user_data_dir),
@@ -1236,6 +1254,11 @@ def main():
         "--no-feishu-progress",
         action="store_true",
         help="Disable Feishu progress messages during scan",
+    )
+    parser.add_argument(
+        "--run-label",
+        default="scan",
+        help="Run label for Feishu start/progress messages (e.g. daily, custom)",
     )
     args = parser.parse_args()
     from env_utils import load_env_local

@@ -139,6 +139,7 @@ def main() -> int:
             start_page=args.start_page,
             max_pages=args.max_pages,
             no_date_filter=True,
+            run_label="custom",
         )
         if rc != 0:
             return rc
