@@ -891,10 +891,27 @@ def write_run_report(
     with_link = scan_stats.get("with_link", 0)
     without_link = scan_stats.get("without_link", 0)
     skipped_jav_score = scan_stats.get("skipped_jav_score", 0)
+    matched_repeat = scan_stats.get("matched_repeat") or 0
+    matched_total_all = scan_stats.get("matched_total_all")
+    matched_note = (
+        f"本次新增（相对上次扫描已隐藏 **{matched_repeat}** 条重复）"
+        if matched_repeat
+        else "扫描命中的全部帖子"
+    )
+    if matched_total_all is not None and matched_repeat:
+        matched_note = (
+            f"本次新增 **{scan_stats.get('matched_total', 0)}** / "
+            f"扫描共 **{matched_total_all}**（重复 **{matched_repeat}** 已隐藏）"
+        )
 
     jav_summary = scan_stats.get("javdb_summary") or {}
     jav_section = _jav_report_section(scan_stats.get("matched") or [], jav_summary)
     domestic_section = _domestic_report_sections(scan_stats.get("matched") or [])
+    duplicate_line = (
+        f"- **重复过滤**: 相对上次扫描隐藏 **{matched_repeat}** 条已出现剧集\n"
+        if matched_repeat
+        else ""
+    )
 
     body = f"""# 论坛扫描报告
 
@@ -903,7 +920,7 @@ def write_run_report(
 
 ## 扫描总结
 
-{previous_line}
+{previous_line}{duplicate_line}
 ### 扫描板块
 
 {forum_lines or "（无）"}
@@ -912,7 +929,7 @@ def write_run_report(
 
 | 项目 | 数量 | 说明 |
 | --- | --- | --- |
-| 匹配帖 | {scan_stats.get("matched_total", 0)} | 扫描命中的全部帖子 |
+| 匹配帖 | {scan_stats.get("matched_total", 0)} | {matched_note} |
 | 可下载(过滤保留) | {dl_posts} | 通过 content_filter 保留的帖 |
 | 有链接 | {with_link} | 帖内提取到 magnet/ed2k 等 |
 | 无链接 | {without_link} | 标题保留但未抓到链接(需进帖/Cloudflare) |

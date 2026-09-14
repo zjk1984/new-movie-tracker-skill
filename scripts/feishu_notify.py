@@ -355,10 +355,16 @@ def build_scan_summary_card(
         sub_text = " | ".join(f"{k} {v}" for k, v in sorted(subtype.items(), key=lambda x: -x[1]))
         domestic_lines = f"\n**国产子类** {sub_text}\n"
 
+    repeat = scan_stats.get("matched_repeat") or 0
+    repeat_line = (
+        f"（相对上次扫描隐藏重复 **{repeat}** 条，仅展示新增）\n"
+        if repeat
+        else ""
+    )
     md = (
         f"**扫描时间** {format_beijing_time(scan_stats.get('scan_time')) or '（无）'}\n\n"
         f"**扫描板块**\n{forum_lines or '(无)'}\n\n"
-        f"**帖子统计** 匹配 **{scan_stats.get('matched_total', 0)}** 帖\n"
+        f"**帖子统计** 匹配 **{scan_stats.get('matched_total', 0)}** 帖{repeat_line}\n"
         f"• 可下载(过滤保留): **{dl_posts}** 帖\n"
         f"• 有链接: **{with_link}** 帖 | 无链接: **{without_link}** 帖\n"
         f"  _(无链接=标题保留 ed2k/国产 但未进帖抓到链接)_\n\n"
@@ -428,6 +434,21 @@ def notify_cards(
         download_report,
         scan_stats.get("matched") or [],
     )
+
+    from scan_delta import apply_scan_dedup
+
+    output_dir = result_paths[0].parent if result_paths else SKILL_DIR / "data"
+    scan_stats, download_report = apply_scan_dedup(
+        scan_stats,
+        download_report,
+        output_dir=output_dir,
+    )
+    repeat = scan_stats.get("matched_repeat") or 0
+    if repeat:
+        print(
+            f"[info] scan dedup: hid {repeat} item(s) already in previous scan; "
+            f"showing {scan_stats.get('matched_total', 0)} new",
+        )
 
     report_result = write_run_report(scan_stats, download_report, run_label=run_label)
     report_path = report_result.path
