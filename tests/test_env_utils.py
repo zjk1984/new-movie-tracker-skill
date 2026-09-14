@@ -22,10 +22,16 @@ class BeijingTimeTests(unittest.TestCase):
             "2026-09-13 23:08:26",
         )
 
-    def test_naive_treated_as_beijing(self):
+    def test_naive_legacy_utc_converts_to_beijing(self):
         self.assertEqual(
             format_beijing_time("2026-09-13T23:08:26", with_label=False),
-            "2026-09-13 23:08:26",
+            "2026-09-14 07:08:26",
+        )
+
+    def test_naive_with_beijing_offset_unchanged(self):
+        self.assertEqual(
+            format_beijing_time("2026-09-14T07:08:26+08:00", with_label=False),
+            "2026-09-14 07:08:26",
         )
 
     def test_with_label(self):

@@ -51,6 +51,15 @@ def parse_datetime(value: datetime | str | None) -> datetime | None:
         return None
 
 
+def naive_datetime_tz() -> ZoneInfo:
+    """Timezone assumed for legacy ISO strings without offset (default UTC)."""
+    name = (os.environ.get("NAIVE_DATETIME_TZ") or "UTC").strip()
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo("UTC")
+
+
 def format_beijing_time(
     value: datetime | str | None,
     *,
@@ -61,9 +70,9 @@ def format_beijing_time(
     if dt is None:
         return ""
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=BEIJING_TZ)
-    else:
-        dt = dt.astimezone(BEIJING_TZ)
+        # Legacy scan_time from UTC servers had no offset; new scans use +08:00.
+        dt = dt.replace(tzinfo=naive_datetime_tz())
+    dt = dt.astimezone(BEIJING_TZ)
     formatted = dt.strftime(BEIJING_TIME_FMT)
     if with_label:
         return f"{formatted} (北京时间)"
