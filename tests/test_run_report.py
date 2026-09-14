@@ -216,6 +216,21 @@ class ReportArchiveTests(unittest.TestCase):
 
 
 class PreviousReportLineTests(unittest.TestCase):
+    def test_github_link_uses_report_branch_not_current_branch(self):
+        reports_dir = ROOT / "reports"
+        previous = reports_dir / "backup" / "_test_previous_report_line.md"
+        previous.parent.mkdir(parents=True, exist_ok=True)
+        previous.write_text("x", encoding="utf-8")
+        try:
+            with patch("run_report._github_repo_slug", return_value="owner/repo"):
+                with patch("run_report.report_github_branch", return_value="main"):
+                    with patch("run_report.current_git_branch", return_value="cursor/feature-branch"):
+                        line = _previous_report_line(previous, reports_dir=reports_dir)
+            self.assertIn("/blob/main/", line)
+            self.assertNotIn("/blob/cursor/", line)
+        finally:
+            previous.unlink(missing_ok=True)
+
     def test_relative_link_when_no_github(self):
         with tempfile.TemporaryDirectory() as tmp:
             reports_dir = Path(tmp)
