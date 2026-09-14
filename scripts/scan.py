@@ -1061,6 +1061,10 @@ def scrape(args):
             print("\n" + result_text)
 
             (out_dir / "result.txt").write_text(result_text, encoding="utf-8")
+            from scan_delta import rotate_scan_snapshot
+
+            if rotate_scan_snapshot(out_dir):
+                print("[info] rotated last_result.json -> previous_result.json")
             (out_dir / "last_result.json").write_text(
                 json.dumps({
                     "scan_time": beijing_now_iso(),
