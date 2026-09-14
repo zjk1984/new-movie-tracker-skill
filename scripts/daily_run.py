@@ -43,7 +43,8 @@ def run_scan(
         "--all-posts",
         "--fetch-magnets",
         "--cnsub-priority",
-        *sum([["--urls", url] for url in args.urls], []),
+        "--urls",
+        *args.urls,
     ]
     if start_page is not None:
         cmd.extend(["--start-page", str(start_page)])
