@@ -23,7 +23,14 @@ DEFAULT_FORUMS = [
 ]
 
 
-def run_scan(args: argparse.Namespace, output_dir: Path) -> int:
+def run_scan(
+    args: argparse.Namespace,
+    output_dir: Path,
+    *,
+    start_page: int | None = None,
+    max_pages: int | None = None,
+    no_date_filter: bool = False,
+) -> int:
     cmd = [
         sys.executable,
         str(SCRIPTS_DIR / "scan.py"),
@@ -32,12 +39,16 @@ def run_scan(args: argparse.Namespace, output_dir: Path) -> int:
         "--days",
         str(args.days),
         "--max-pages",
-        str(args.max_pages),
+        str(max_pages if max_pages is not None else args.max_pages),
         "--all-posts",
         "--fetch-magnets",
         "--cnsub-priority",
         *sum([["--urls", url] for url in args.urls], []),
     ]
+    if start_page is not None:
+        cmd.extend(["--start-page", str(start_page)])
+    if no_date_filter:
+        cmd.append("--no-date-filter")
     if args.headless:
         cmd.append("--headless")
     print("[info] running scan:", " ".join(cmd))
@@ -81,6 +92,7 @@ def maybe_feishu_notify(
     enabled: bool,
     pikpak_ok: int | None = None,
     pikpak_total: int | None = None,
+    run_label: str = "daily",
 ) -> None:
     if not enabled:
         return
@@ -99,7 +111,7 @@ def maybe_feishu_notify(
         _, md_path, md_url = notify_cards(
             [result_path],
             download_report_path=report_path if report_path.exists() else None,
-            run_label="daily",
+            run_label=run_label,
         )
         print(f"[ok] feishu summary sent; report: {md_path}")
         if md_url:
