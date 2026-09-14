@@ -21,10 +21,14 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 MAX_PAGES_LIMIT = 100
 
 
-def clamp_max_pages(value: int) -> int:
-    if value < 1:
+def clamp_max_pages(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("max-pages must be an integer") from exc
+    if n < 1:
         raise argparse.ArgumentTypeError("max-pages must be >= 1")
-    return min(value, MAX_PAGES_LIMIT)
+    return min(n, MAX_PAGES_LIMIT)
 
 
 def main() -> int:
