@@ -668,18 +668,21 @@ def match_post(
     cutoff: datetime,
     today: datetime,
     all_posts: bool = False,
+    no_date_filter: bool = False,
 ) -> dict | None:
     dt = parse_date(post["date_text"], today)
     if keywords:
         if not any(kw in post["title"] for kw in keywords):
             return None
-        if not post_in_range(dt, since, until, cutoff, keyword_only=True):
+        if not no_date_filter and not post_in_range(
+            dt, since, until, cutoff, keyword_only=True,
+        ):
             return None
     elif all_posts:
-        if not post_in_range(dt, since, until, cutoff):
+        if not no_date_filter and not post_in_range(dt, since, until, cutoff):
             return None
     else:
-        if not post_in_range(dt, since, until, cutoff):
+        if not no_date_filter and not post_in_range(dt, since, until, cutoff):
             return None
         matched_names = sorted(name for name in match_names if name in post["title"])
         found = sorted({actor for name in matched_names for actor in match_index.get(name, {name})})
@@ -857,6 +860,7 @@ def scrape(args):
                             cutoff=cutoff,
                             today=today,
                             all_posts=all_posts,
+                            no_date_filter=bool(getattr(args, "no_date_filter", False)),
                         )
                         if not item:
                             continue
@@ -922,7 +926,12 @@ def scrape(args):
                     total_pages_scanned += 1
                     last_page_num = page_num
 
-                    if start_page == 1 and page_num >= 2 and posts:
+                    if (
+                        not getattr(args, "no_date_filter", False)
+                        and start_page == 1
+                        and page_num >= 2
+                        and posts
+                    ):
                         dates = [parse_date(p["date_text"], today) for p in posts]
                         valid_dates = [d for d in dates if d]
                         stop_before = since if since else cutoff
@@ -1151,6 +1160,11 @@ def main():
         "--all-posts",
         action="store_true",
         help="Match all posts in the date range (skip actor name filter)",
+    )
+    parser.add_argument(
+        "--no-date-filter",
+        action="store_true",
+        help="Collect all posts on scanned pages regardless of post date",
     )
     parser.add_argument(
         "--all-regions",
