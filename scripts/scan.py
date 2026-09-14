@@ -1067,8 +1067,6 @@ def scrape(args):
                 lines.append("-" * 40)
 
             result_text = "\n".join(lines)
-            print("\n" + result_text)
-
             (out_dir / "result.txt").write_text(result_text, encoding="utf-8")
             from scan_delta import rotate_scan_snapshot
 
@@ -1088,6 +1086,13 @@ def scrape(args):
             )
             page.screenshot(path=str(screenshot_dir / "last_run.png"))
             print(f"[done] results saved to {out_dir}")
+            try:
+                print("\n" + result_text)
+            except BlockingIOError:
+                print(
+                    "[warn] stdout blocked; full scan text saved to result.txt",
+                    file=sys.stderr,
+                )
 
             if getattr(args, "pikpak", False):
                 result_json = out_dir / "last_result.json"
