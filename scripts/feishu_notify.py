@@ -459,7 +459,9 @@ def notify_cards(
             report_path,
             archived_paths=report_result.archived_paths,
         ):
-            report_url = github_blob_url(str(rel))
+            from run_report import report_github_branch
+
+            report_url = github_blob_url(str(rel), branch=report_github_branch())
             print(f"[ok] report pushed: {rel}")
             if report_result.archived_paths:
                 print(
