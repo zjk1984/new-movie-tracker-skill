@@ -784,6 +784,7 @@ def scrape(args):
             all_matched = []
             total_posts = 0
             total_pages_scanned = 0
+            feishu_progress_sent = 0
             cf_keywords = ["赫拉克利特", "亚里士多德", "希腊谚语", "佛教谚语", "cf-browser-verification", "challenge-platform"]
 
             keywords = [k for k in (getattr(args, "keywords", None) or []) if k]
@@ -920,6 +921,31 @@ def scrape(args):
                                         f"{item['title'][:50]}"
                                     )
                         all_matched.append(item)
+                        if getattr(args, "feishu_progress", False):
+                            milestone = (len(all_matched) // 100) * 100
+                            if milestone >= 100 and milestone > feishu_progress_sent:
+                                try:
+                                    from feishu_notify import is_configured, send_scan_progress
+
+                                    if is_configured():
+                                        page_range = (
+                                            f"{start_page}~{end_page}"
+                                            if start_page > 1 or end_page > start_page
+                                            else None
+                                        )
+                                        send_scan_progress(
+                                            milestone,
+                                            forum_url=forum_url,
+                                            page_num=page_num,
+                                            page_range=page_range,
+                                        )
+                                        feishu_progress_sent = milestone
+                                        print(
+                                            f"[ok] feishu progress sent: "
+                                            f"{milestone} matched posts",
+                                        )
+                                except Exception as exc:
+                                    print(f"[warn] feishu progress: {exc}")
 
                     print(f"[info] page {page_num}: {len(posts)} rows, {new_posts} new, matched total {len(all_matched)}")
                     total_posts += len(posts)
@@ -1201,7 +1227,24 @@ def main():
         action="store_true",
         help="With --pikpak, skip magnets already in download_state.json",
     )
+    parser.add_argument(
+        "--feishu-progress",
+        action="store_true",
+        help="Send Feishu message every 100 matched posts (default when FEISHU_RECEIVE_ID set)",
+    )
+    parser.add_argument(
+        "--no-feishu-progress",
+        action="store_true",
+        help="Disable Feishu progress messages during scan",
+    )
     args = parser.parse_args()
+    from env_utils import load_env_local
+
+    load_env_local(SKILL_DIR)
+    if not args.no_feishu_progress:
+        args.feishu_progress = args.feishu_progress or bool(
+            os.environ.get("FEISHU_RECEIVE_ID"),
+        )
     if args.javdb_magnets:
         args.javdb = True
     if args.cnsub_priority:

@@ -27,7 +27,7 @@ FORUM_LABELS = {
     "forum-37": "forum-37 无码",
 }
 
-from env_utils import beijing_now_iso, format_beijing_time, load_env_local
+from env_utils import beijing_now, beijing_now_iso, format_beijing_time, load_env_local
 
 
 def resolve_app_credentials() -> tuple[str, str]:
@@ -495,6 +495,30 @@ def is_configured() -> bool:
         return True
     except RuntimeError:
         return False
+
+
+def send_scan_progress(
+    matched_count: int,
+    *,
+    forum_url: str = "",
+    page_num: int | None = None,
+    page_range: str | None = None,
+    run_label: str = "扫描",
+) -> dict[str, Any] | None:
+    """Notify Feishu every N matched posts during a long scan."""
+    if not is_configured():
+        return None
+    forum = _forum_label(forum_url) if forum_url else "未知"
+    lines = [
+        f"【{run_label}进度】已匹配 {matched_count} 帖",
+        f"板块: {forum}",
+    ]
+    if page_num is not None:
+        lines.append(f"当前页: {page_num}")
+    if page_range:
+        lines.append(f"页码范围: {page_range}")
+    lines.append(f"时间: {format_beijing_time(beijing_now(), with_label=False)}")
+    return send_text("\n".join(lines))
 
 
 def main() -> int:
