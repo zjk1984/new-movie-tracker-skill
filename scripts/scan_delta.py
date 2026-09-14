@@ -119,6 +119,27 @@ def filter_download_rows(
     return kept
 
 
+def filter_download_rows_to_matched(
+    rows: list[dict[str, Any]],
+    matched_items: list[dict[str, Any]],
+    matched_by_href: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Keep download rows that belong to the given matched scan items only."""
+    if not matched_items:
+        return []
+    if not rows:
+        return []
+    from submit_gate import build_submit_probe
+
+    allowed = build_seen_key_set(matched_items)
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        probe = build_submit_probe(row, matched_by_href)
+        if item_dedup_keys(probe).intersection(allowed):
+            kept.append(row)
+    return kept
+
+
 def _forum_label(forum_url: str) -> str:
     from feishu_notify import FORUM_LABELS, _forum_key
 
@@ -227,22 +248,22 @@ def apply_scan_dedup(
         scan_stats.setdefault("matched_total_all", len(scan_stats.get("matched") or []))
         return scan_stats, download_report
 
-    matched = list(scan_stats.get("matched") or [])
-    new_matched, repeat_count = filter_new_matched(matched, previous)
+    matched_all = list(scan_stats.get("matched") or [])
+    new_matched, repeat_count = filter_new_matched(matched_all, previous)
     scan_stats = recompute_scan_summary(scan_stats, new_matched)
     scan_stats["matched_repeat"] = repeat_count
-    scan_stats["matched_total_all"] = len(matched)
+    scan_stats["matched_total_all"] = len(matched_all)
 
-    matched_by_href = {m.get("href"): m for m in matched if m.get("href")}
+    matched_by_href = {m.get("href"): m for m in matched_all if m.get("href")}
     report = dict(download_report)
-    report["succeeded"] = filter_download_rows(
+    report["succeeded"] = filter_download_rows_to_matched(
         list(report.get("succeeded") or []),
-        previous,
+        new_matched,
         matched_by_href,
     )
-    report["failed"] = filter_download_rows(
+    report["failed"] = filter_download_rows_to_matched(
         list(report.get("failed") or []),
-        previous,
+        new_matched,
         matched_by_href,
     )
     report["ok"] = len(report["succeeded"])

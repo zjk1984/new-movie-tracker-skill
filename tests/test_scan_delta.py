@@ -79,6 +79,33 @@ class ScanDeltaTests(unittest.TestCase):
             self.assertEqual(len(report["succeeded"]), 1)
             self.assertEqual(report["succeeded"][0]["name"], "SNOS-270")
 
+    def test_no_new_matched_clears_download_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            previous = [
+                {"href": "t1", "av_number": "HMN-900"},
+                {"href": "t2", "av_number": "MIDA-753"},
+            ]
+            (out / "previous_result.json").write_text(
+                json.dumps({"matched": previous}),
+                encoding="utf-8",
+            )
+            scan_stats = {
+                "matched": [{"href": "t1", "av_number": "HMN-900"}],
+                "matched_total": 1,
+            }
+            download_report = {
+                "succeeded": [{"href": "t1", "name": "HMN-900", "uri": "magnet:?xt=urn:btih:111"}],
+                "failed": [],
+                "ok": 1,
+                "failed_count": 0,
+                "total": 1,
+            }
+            stats, report = apply_scan_dedup(scan_stats, download_report, output_dir=out)
+            self.assertEqual(stats["matched_total"], 0)
+            self.assertEqual(report["ok"], 0)
+            self.assertEqual(report["succeeded"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
