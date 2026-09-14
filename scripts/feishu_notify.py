@@ -459,7 +459,9 @@ def notify_cards(
             report_path,
             archived_paths=report_result.archived_paths,
         ):
-            report_url = github_blob_url(str(rel))
+            from run_report import report_github_branch
+
+            report_url = github_blob_url(str(rel), branch=report_github_branch())
             print(f"[ok] report pushed: {rel}")
             if report_result.archived_paths:
                 print(
@@ -521,12 +523,7 @@ def build_scan_start_card(
     else:
         range_line = f"页码 **{start_page} ~ {end_page}**（共 **{max_pages}** 页）"
 
-    title_map = {
-        "daily": "日常扫描",
-        "custom": "自定义扫描",
-        "scan": "论坛扫描",
-    }
-    task_name = title_map.get(run_label, run_label or "论坛扫描")
+    task_name = _run_label_title(run_label)
 
     md = (
         f"**开始时间** {format_beijing_time(beijing_now(), with_label=True)}\n\n"
@@ -567,6 +564,113 @@ def send_scan_start(
         no_date_filter=no_date_filter,
     )
     return send_interactive_card(card)
+
+
+def _run_label_title(run_label: str) -> str:
+    title_map = {
+        "daily": "日常扫描",
+        "custom": "自定义扫描",
+        "scan": "论坛扫描",
+    }
+    return title_map.get(run_label, run_label or "论坛扫描")
+
+
+def build_scan_done_card(
+    scan_stats: dict[str, Any],
+    *,
+    run_label: str = "scan",
+) -> dict[str, Any]:
+    forums = scan_stats.get("forums") or {}
+    forum_lines = "\n".join(
+        f"• {name}: **{count}** 帖" for name, count in sorted(forums.items())
+    ) or "• （无）"
+    lt = scan_stats.get("link_totals") or {}
+    pw = scan_stats.get("posts_with") or {}
+    md = (
+        f"**完成时间** {format_beijing_time(beijing_now(), with_label=True)}\n\n"
+        f"**任务类型** {_run_label_title(run_label)}\n\n"
+        f"**扫描板块**\n{forum_lines}\n\n"
+        f"**帖子统计** 匹配 **{scan_stats.get('matched_total', 0)}** 帖\n"
+        f"• 可下载: **{scan_stats.get('downloadable', 0)}** 帖\n"
+        f"• 有链接: **{scan_stats.get('with_link', 0)}** 帖"
+        f" | 无链接: **{scan_stats.get('without_link', 0)}** 帖\n\n"
+        f"**链接采集**\n"
+        f"• 磁力: **{lt.get('magnet', 0)}** 条 ({pw.get('magnet', 0)} 帖)\n"
+        f"• ed2k: **{lt.get('ed2k', 0)}** 条 ({pw.get('ed2k', 0)} 帖)\n"
+        f"• BT种子: **{lt.get('bt', 0)}** 条 ({pw.get('bt', 0)} 帖)\n\n"
+        f"**下一步** PikPak 提交进行中（若未跳过下载）"
+    )
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "template": "orange",
+            "title": {"tag": "plain_text", "content": "✅ 扫描完成"},
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": md}},
+        ],
+    }
+
+
+def build_pikpak_done_card(
+    download_report: dict[str, Any],
+    *,
+    run_label: str = "scan",
+) -> dict[str, Any]:
+    ok = int(download_report.get("ok") or 0)
+    fail = int(download_report.get("failed_count") or 0)
+    total = int(download_report.get("total") or (ok + fail))
+    md = (
+        f"**完成时间** {format_beijing_time(beijing_now(), with_label=True)}\n\n"
+        f"**任务类型** {_run_label_title(run_label)}\n\n"
+        f"**PikPak 提交结果**（按链接计）\n"
+        f"• 成功: **{ok}**\n"
+        f"• 失败: **{fail}**\n"
+        f"• 合计: **{total}**\n\n"
+    )
+    if fail:
+        md += f"**失败原因**\n{_error_summary(download_report.get('failed') or [])}\n\n"
+    md += "**下一步** 正在生成完整 Markdown 报告并推送"
+    template = "green" if fail == 0 else "yellow"
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "template": template,
+            "title": {"tag": "plain_text", "content": "✅ PikPak 提交完成"},
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": md}},
+        ],
+    }
+
+
+def send_scan_done(
+    result_path: Path,
+    *,
+    run_label: str = "scan",
+) -> dict[str, Any] | None:
+    if not is_configured() or not result_path.exists():
+        return None
+    scan_stats = analyze_scan([result_path], enrich_javdb=False)
+    return send_interactive_card(build_scan_done_card(scan_stats, run_label=run_label))
+
+
+def send_pikpak_done(
+    download_report_path: Path,
+    *,
+    run_label: str = "scan",
+    pikpak_ok: int | None = None,
+    pikpak_total: int | None = None,
+) -> dict[str, Any] | None:
+    if not is_configured():
+        return None
+    report = load_download_report(download_report_path if download_report_path.exists() else None)
+    if pikpak_ok is not None:
+        report["ok"] = pikpak_ok
+    if pikpak_total is not None:
+        report["total"] = pikpak_total
+        report["failed_count"] = max(0, pikpak_total - int(report.get("ok") or 0))
+    return send_interactive_card(build_pikpak_done_card(report, run_label=run_label))
 
 
 def send_scan_progress(

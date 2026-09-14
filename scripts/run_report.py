@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import html
+import os
 import re
 import subprocess
 import sys
@@ -961,32 +962,53 @@ def write_run_report(
     return RunReportResult(path=path, archived_paths=archived_paths, previous_report=previous_report)
 
 
+def report_github_branch() -> str:
+    return (os.environ.get("REPORT_GITHUB_BRANCH") or "main").strip() or "main"
+
+
 def commit_and_push_report(
     report_path: Path,
     *,
     archived_paths: list[Path] | None = None,
     message: str | None = None,
+    push_branch: str | None = None,
 ) -> bool:
+    """Commit report files and push to main (or REPORT_GITHUB_BRANCH).
+
+    Reports always land on the default report branch so Feishu summary links
+    stay valid even when the agent runs on a feature branch.
+    """
     rel = report_path.relative_to(SKILL_DIR)
-    branch = current_git_branch()
-    if not branch:
+    current = current_git_branch()
+    target = push_branch or report_github_branch()
+    if not current:
         return False
     msg = message or f"docs: add run report {rel.name}"
+    paths_to_add = [rel] + [
+        archived.relative_to(SKILL_DIR) for archived in (archived_paths or [])
+    ]
     try:
-        # reports/*.md is gitignored locally; -f is required for Feishu GitHub links.
-        subprocess.run(["git", "add", "-f", str(rel)], cwd=str(SKILL_DIR), check=True)
-        for archived in archived_paths or []:
-            arch_rel = archived.relative_to(SKILL_DIR)
-            subprocess.run(["git", "add", "-f", str(arch_rel)], cwd=str(SKILL_DIR), check=True)
+        subprocess.run(
+            ["git", "fetch", "origin", target],
+            cwd=str(SKILL_DIR),
+            check=True,
+        )
+        subprocess.run(["git", "checkout", target], cwd=str(SKILL_DIR), check=True)
+        subprocess.run(["git", "pull", "origin", target], cwd=str(SKILL_DIR), check=True)
+        for path_rel in paths_to_add:
+            subprocess.run(["git", "add", "-f", str(path_rel)], cwd=str(SKILL_DIR), check=True)
         subprocess.run(["git", "add", "-u", "reports"], cwd=str(SKILL_DIR), check=False)
         status = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
             cwd=str(SKILL_DIR),
         )
         if status.returncode == 0:
+            subprocess.run(["git", "checkout", current], cwd=str(SKILL_DIR), check=False)
             return False
         subprocess.run(["git", "commit", "-m", msg], cwd=str(SKILL_DIR), check=True)
-        subprocess.run(["git", "push", "-u", "origin", branch], cwd=str(SKILL_DIR), check=True)
+        subprocess.run(["git", "push", "-u", "origin", target], cwd=str(SKILL_DIR), check=True)
+        subprocess.run(["git", "checkout", current], cwd=str(SKILL_DIR), check=False)
         return True
     except subprocess.CalledProcessError:
+        subprocess.run(["git", "checkout", current or target], cwd=str(SKILL_DIR), check=False)
         return False

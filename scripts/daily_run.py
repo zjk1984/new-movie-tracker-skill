@@ -90,6 +90,55 @@ def run_download(args: argparse.Namespace, output_dir: Path) -> tuple[int, int |
     return rc, ok, total
 
 
+def maybe_feishu_scan_done(
+    output_dir: Path,
+    *,
+    enabled: bool,
+    run_label: str = "daily",
+) -> None:
+    if not enabled:
+        return
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    from feishu_notify import is_configured, send_scan_done
+
+    if not is_configured():
+        return
+    result_path = output_dir / "last_result.json"
+    try:
+        send_scan_done(result_path, run_label=run_label)
+        print("[ok] feishu scan-done card sent")
+    except Exception as exc:
+        print(f"[warn] feishu scan-done failed: {exc}")
+
+
+def maybe_feishu_pikpak_done(
+    output_dir: Path,
+    *,
+    enabled: bool,
+    pikpak_ok: int | None = None,
+    pikpak_total: int | None = None,
+    run_label: str = "daily",
+) -> None:
+    if not enabled:
+        return
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    from feishu_notify import is_configured, send_pikpak_done
+
+    if not is_configured():
+        return
+    report_path = output_dir / "download_report.json"
+    try:
+        send_pikpak_done(
+            report_path,
+            run_label=run_label,
+            pikpak_ok=pikpak_ok,
+            pikpak_total=pikpak_total,
+        )
+        print("[ok] feishu pikpak-done card sent")
+    except Exception as exc:
+        print(f"[warn] feishu pikpak-done failed: {exc}")
+
+
 def maybe_feishu_notify(
     output_dir: Path,
     *,
@@ -195,18 +244,27 @@ def main() -> int:
     rc = 0
     pikpak_ok: int | None = None
     pikpak_total: int | None = None
+    feishu_enabled = args.feishu or (
+        not args.no_feishu and bool(os.environ.get("FEISHU_RECEIVE_ID"))
+    )
+
     if not args.download_only:
         rc = run_scan(args, output_dir)
         if rc != 0:
             return rc
+        maybe_feishu_scan_done(output_dir, enabled=feishu_enabled, run_label="daily")
 
     if not args.scan_only:
         dl_rc, pikpak_ok, pikpak_total = run_download(args, output_dir)
         rc = rc or dl_rc
+        maybe_feishu_pikpak_done(
+            output_dir,
+            enabled=feishu_enabled,
+            pikpak_ok=pikpak_ok,
+            pikpak_total=pikpak_total,
+            run_label="daily",
+        )
 
-    feishu_enabled = args.feishu or (
-        not args.no_feishu and bool(os.environ.get("FEISHU_RECEIVE_ID"))
-    )
     maybe_feishu_notify(
         output_dir,
         enabled=feishu_enabled,

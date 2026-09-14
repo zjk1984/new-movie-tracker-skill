@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from daily_run import (  # noqa: E402
     DEFAULT_FORUMS,
     maybe_feishu_notify,
+    maybe_feishu_pikpak_done,
+    maybe_feishu_scan_done,
     run_download,
     run_scan,
 )
@@ -129,6 +131,10 @@ def main() -> int:
         pikpak_folder=args.pikpak_folder,
     )
 
+    feishu_enabled = args.feishu or (
+        not args.no_feishu and bool(os.environ.get("FEISHU_RECEIVE_ID"))
+    )
+
     rc = 0
     pikpak_ok: int | None = None
     pikpak_total: int | None = None
@@ -143,14 +149,19 @@ def main() -> int:
         )
         if rc != 0:
             return rc
+        maybe_feishu_scan_done(output_dir, enabled=feishu_enabled, run_label="custom")
 
     if not args.scan_only:
         dl_rc, pikpak_ok, pikpak_total = run_download(args, output_dir)
         rc = rc or dl_rc
+        maybe_feishu_pikpak_done(
+            output_dir,
+            enabled=feishu_enabled,
+            pikpak_ok=pikpak_ok,
+            pikpak_total=pikpak_total,
+            run_label="custom",
+        )
 
-    feishu_enabled = args.feishu or (
-        not args.no_feishu and bool(os.environ.get("FEISHU_RECEIVE_ID"))
-    )
     maybe_feishu_notify(
         output_dir,
         enabled=feishu_enabled,
