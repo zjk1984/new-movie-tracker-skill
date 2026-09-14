@@ -13,6 +13,7 @@ from typing import Any, NamedTuple
 from urllib.parse import urljoin, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from env_utils import beijing_now, format_beijing_time
 from pikpak_links import normalize_ed2k_uri
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -897,8 +898,8 @@ def write_run_report(
 
     body = f"""# 论坛扫描报告
 
-- **生成时间**: {datetime.now().isoformat(timespec="seconds")}
-- **扫描时间**: {str(scan_stats.get("scan_time", ""))[:19]}
+- **生成时间**: {format_beijing_time(beijing_now())}
+- **扫描时间**: {format_beijing_time(scan_stats.get("scan_time")) or "（无）"}
 
 ## 扫描总结
 

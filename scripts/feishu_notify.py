@@ -27,7 +27,7 @@ FORUM_LABELS = {
     "forum-37": "forum-37 无码",
 }
 
-from env_utils import load_env_local
+from env_utils import beijing_now_iso, format_beijing_time, load_env_local
 
 
 def resolve_app_credentials() -> tuple[str, str]:
@@ -273,7 +273,7 @@ def analyze_scan(
         javdb_summary["skipped_low_score"] = skipped_jav_score
 
     return {
-        "scan_time": max(scan_times) if scan_times else datetime.now().isoformat(timespec="seconds"),
+        "scan_time": max(scan_times) if scan_times else beijing_now_iso(),
         "forums": dict(forums),
         "matched_total": len(matched),
         "downloadable": downloadable,
@@ -356,7 +356,7 @@ def build_scan_summary_card(
         domestic_lines = f"\n**国产子类** {sub_text}\n"
 
     md = (
-        f"**扫描时间** {str(scan_stats.get('scan_time', ''))[:19]}\n\n"
+        f"**扫描时间** {format_beijing_time(scan_stats.get('scan_time')) or '（无）'}\n\n"
         f"**扫描板块**\n{forum_lines or '(无)'}\n\n"
         f"**帖子统计** 匹配 **{scan_stats.get('matched_total', 0)}** 帖\n"
         f"• 可下载(过滤保留): **{dl_posts}** 帖\n"

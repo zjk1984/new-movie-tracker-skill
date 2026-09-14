@@ -17,6 +17,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
+from env_utils import beijing_now, beijing_now_iso, format_beijing_time
 from forum_browser import pass_age_gate
 
 SKILL_DIR = Path(__file__).parent.parent
@@ -935,7 +936,9 @@ def scrape(args):
             if not all_matched:
                 lines = []
                 lines.append("=" * 60)
-                lines.append(f"scan_time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                lines.append(
+                    f"scan_time: {format_beijing_time(beijing_now(), with_label=False)}",
+                )
                 lines.append(f"actors: {len(actors)}")
                 lines.append(f"match_names: {len(match_names)}")
                 lines.append(f"posts_scanned: {total_posts}")
@@ -957,7 +960,9 @@ def scrape(args):
 
             lines = []
             lines.append("=" * 60)
-            lines.append(f"scan_time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append(
+                f"scan_time: {format_beijing_time(beijing_now(), with_label=False)}",
+            )
             lines.append(f"actors: {len(actors)}")
             lines.append(f"match_names: {len(match_names)}")
             lines.append(f"posts_scanned: {total_posts}")
@@ -1058,7 +1063,7 @@ def scrape(args):
             (out_dir / "result.txt").write_text(result_text, encoding="utf-8")
             (out_dir / "last_result.json").write_text(
                 json.dumps({
-                    "scan_time": datetime.now().isoformat(),
+                    "scan_time": beijing_now_iso(),
                     "cutoff": cutoff.strftime("%Y-%m-%d"),
                     "today": today.strftime("%Y-%m-%d"),
                     "matched": all_matched,
