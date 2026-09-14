@@ -140,7 +140,7 @@ def main() -> int:
         help="Forum URLs to scan (default: forum-2/95/142 + forum-103 + forum-37)",
     )
     parser.add_argument("--days", type=int, default=2, help="Recent days to scan (default: 2)")
-    parser.add_argument("--max-pages", type=int, default=100, help="Max pages per forum")
+    parser.add_argument("--max-pages", type=int, default=10, help="Max pages per forum")
     parser.add_argument(
         "--headless",
         action="store_true",
