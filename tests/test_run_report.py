@@ -17,6 +17,7 @@ from run_report import (  # noqa: E402
     _success_full_title,
     _success_name_cell,
     archive_reports_to_backup,
+    scan_funnel_stats_rows,
     write_run_report,
 )
 
@@ -114,6 +115,28 @@ class SuccessNameCellTests(unittest.TestCase):
         self.assertIn("thread-1.html", section)
         self.assertIn("<pre><code>magnet:?xt=urn:btih:abc</code></pre>", section)
         self.assertNotIn("| 名称 | 类型 | 评分 |", section)
+
+
+class ScanFunnelStatsTests(unittest.TestCase):
+    def test_stats_rows_follow_funnel_order(self):
+        rows = scan_funnel_stats_rows(
+            {
+                "matched_total": 311,
+                "link_totals": {"magnet": 574, "ed2k": 62, "bt": 241},
+                "posts_with": {"magnet": 172, "ed2k": 57, "bt": 40},
+                "downloadable": 206,
+                "with_link": 129,
+                "without_link": 77,
+                "skipped_jav_score": 24,
+            },
+            {"ok": 101, "failed_count": 0, "total": 101},
+        )
+        labels = [row[0] for row in rows]
+        self.assertEqual(labels[0], "匹配帖")
+        self.assertEqual(labels[1], "采集链接合计")
+        self.assertEqual(rows[1][1], "877")
+        self.assertEqual(labels[5], "可下载（过滤保留）")
+        self.assertIn("PikPak 合计", labels[-1])
 
 
 class ReportArchiveTests(unittest.TestCase):

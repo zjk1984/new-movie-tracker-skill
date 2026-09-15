@@ -168,6 +168,111 @@ def _md_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _matched_note(scan_stats: dict[str, Any]) -> str:
+    matched_repeat = scan_stats.get("matched_repeat") or 0
+    matched_total_all = scan_stats.get("matched_total_all")
+    if matched_total_all is not None and matched_repeat:
+        return (
+            f"本次新增 **{scan_stats.get('matched_total', 0)}** / "
+            f"扫描共 **{matched_total_all}**（重复 **{matched_repeat}** 已隐藏）"
+        )
+    if matched_repeat:
+        return f"本次新增（相对上次扫描已隐藏 **{matched_repeat}** 条重复）"
+    return "扫描日期范围内命中的全部帖子（含后续会被过滤的类型）"
+
+
+def scan_funnel_stats_rows(
+    scan_stats: dict[str, Any],
+    download_report: dict[str, Any],
+) -> list[list[str]]:
+    """Statistics table rows ordered by scan → filter → submit funnel."""
+    lt = scan_stats.get("link_totals") or {}
+    pw = scan_stats.get("posts_with") or {}
+    ok = download_report.get("ok", 0)
+    fail = download_report.get("failed_count", 0)
+    total = download_report.get("total") or (ok + fail)
+    dl_posts = scan_stats.get("downloadable", 0)
+    with_link = scan_stats.get("with_link", 0)
+    without_link = scan_stats.get("without_link", 0)
+    skipped_jav_score = scan_stats.get("skipped_jav_score", 0)
+    link_sum = lt.get("magnet", 0) + lt.get("ed2k", 0) + lt.get("bt", 0)
+
+    return [
+        ["匹配帖", str(scan_stats.get("matched_total", 0)), _matched_note(scan_stats)],
+        [
+            "采集链接合计",
+            str(link_sum),
+            "全部匹配帖内抓到的 URI 总数（磁力+ed2k+BT；一帖可含多条；含将被过滤的帖）",
+        ],
+        [
+            "磁力链接",
+            f"{lt.get('magnet', 0)} ({pw.get('magnet', 0)} 帖)",
+            "magnet URI 条数（括号内为至少含 1 条磁力的帖数）",
+        ],
+        [
+            "ed2k 链接",
+            f"{lt.get('ed2k', 0)} ({pw.get('ed2k', 0)} 帖)",
+            "ed2k URI 条数（含进帖抓取结果）",
+        ],
+        [
+            "BT 种子/特征码",
+            f"{lt.get('bt', 0)} ({pw.get('bt', 0)} 帖)",
+            "BT 特征码/hash 转 magnet 的条数",
+        ],
+        [
+            "可下载（过滤保留）",
+            str(dl_posts),
+            "通过 content_filter 的帖（日本有码/无码 + 国产泄密/流出/ed2k 等）",
+        ],
+        [
+            "有链接",
+            str(with_link),
+            "可下载帖中已选出 magnet/ed2k/特征码 的帖数",
+        ],
+        [
+            "无链接",
+            str(without_link),
+            "可下载但未抓到或未选出链接（含 JavDB 低分暂记为无链的帖）",
+        ],
+        [
+            "JavDB 低分/无分",
+            str(skipped_jav_score),
+            "日本片 JavDB 评分&lt;4 或无评分，不提交 PikPak",
+        ],
+        [
+            "PikPak 成功",
+            str(ok),
+            "按**链接**提交成功（new_only 去重后）",
+        ],
+        [
+            "PikPak 失败",
+            str(fail),
+            "按**链接**提交失败",
+        ],
+        [
+            "PikPak 合计",
+            str(total),
+            "成功+失败链接数，**非帖数**（合集帖/多 ed2k 可能 1 帖对应多条）",
+        ],
+    ]
+
+
+def scan_funnel_footnote(
+    scan_stats: dict[str, Any],
+    download_report: dict[str, Any],
+) -> str:
+    dl_posts = scan_stats.get("downloadable", 0)
+    without_link = scan_stats.get("without_link", 0)
+    total = download_report.get("total") or download_report.get("ok", 0)
+    lt = scan_stats.get("link_totals") or {}
+    link_sum = lt.get("magnet", 0) + lt.get("ed2k", 0) + lt.get("bt", 0)
+    return (
+        f"**数据漏斗**：匹配帖 → 采集链接({link_sum} 条 URI) → 内容过滤({dl_posts} 帖可下载)"
+        f" → 选出链接 → JavDB 门控 → PikPak 提交({total} 条)。"
+        f"链接条数≠帖数；{without_link} 帖可下载但无链；日本片低分/无分不提交。"
+    )
+
+
 def _infer_link_type(item: dict[str, Any]) -> str:
     link_type = (item.get("link_type") or item.get("type") or "").strip()
     if link_type and link_type != "url":
@@ -884,12 +989,6 @@ def write_run_report(
     previous_line = _previous_report_line(previous_report, reports_dir=out_dir)
 
     forums = scan_stats.get("forums") or {}
-    lt = scan_stats.get("link_totals") or {}
-    pw = scan_stats.get("posts_with") or {}
-    ok = download_report.get("ok", 0)
-    fail = download_report.get("failed_count", 0)
-    total = download_report.get("total") or (ok + fail)
-
     forum_lines = "\n".join(f"- {name}: {count} 帖" for name, count in sorted(forums.items()))
 
     failed_items = list(download_report.get("failed") or [])
@@ -899,22 +998,12 @@ def write_run_report(
         scan_stats.get("matched") or [],
     )
 
-    dl_posts = scan_stats.get("downloadable", 0)
-    with_link = scan_stats.get("with_link", 0)
-    without_link = scan_stats.get("without_link", 0)
-    skipped_jav_score = scan_stats.get("skipped_jav_score", 0)
     matched_repeat = scan_stats.get("matched_repeat") or 0
-    matched_total_all = scan_stats.get("matched_total_all")
-    matched_note = (
-        f"本次新增（相对上次扫描已隐藏 **{matched_repeat}** 条重复）"
-        if matched_repeat
-        else "扫描命中的全部帖子"
+    stats_table = _md_table(
+        ["项目", "数量", "说明"],
+        scan_funnel_stats_rows(scan_stats, download_report),
     )
-    if matched_total_all is not None and matched_repeat:
-        matched_note = (
-            f"本次新增 **{scan_stats.get('matched_total', 0)}** / "
-            f"扫描共 **{matched_total_all}**（重复 **{matched_repeat}** 已隐藏）"
-        )
+    funnel_note = scan_funnel_footnote(scan_stats, download_report)
 
     jav_summary = scan_stats.get("javdb_summary") or {}
     jav_section = _jav_report_section(scan_stats.get("matched") or [], jav_summary)
@@ -937,23 +1026,10 @@ def write_run_report(
 
 {forum_lines or "（无）"}
 
-### 统计
+### 统计（数据漏斗）
 
-| 项目 | 数量 | 说明 |
-| --- | --- | --- |
-| 匹配帖 | {scan_stats.get("matched_total", 0)} | {matched_note} |
-| 可下载(过滤保留) | {dl_posts} | 通过 content_filter 保留的帖 |
-| 有链接 | {with_link} | 帖内提取到 magnet/ed2k 等 |
-| 无链接 | {without_link} | 标题保留但未抓到链接(需进帖/Cloudflare) |
-| 磁力链接 | {lt.get("magnet", 0)} ({pw.get("magnet", 0)} 帖) | 采集到的磁力 URI 数 |
-| ed2k 链接 | {lt.get("ed2k", 0)} ({pw.get("ed2k", 0)} 帖) | 含 refetch 进帖结果 |
-| BT 种子 | {lt.get("bt", 0)} ({pw.get("bt", 0)} 帖) | BT种子帖/特征码 |
-| PikPak 成功 | {ok} | 按**链接**提交成功 |
-| PikPak 失败 | {fail} | 按**链接**提交失败 |
-| PikPak 合计 | {total} | 成功+失败链接数，非帖数 |
-| JavDB 低分/无分跳过 | {skipped_jav_score} | 日本片评分&lt;4 或无评分不下载 |
-
-> **为何可下载 {dl_posts} ≠ PikPak {total}？** {without_link} 帖无链接未提交；有链接帖中多 ed2k 文件按链接逐条提交。日本片 JavDB 评分&lt;4 或无评分不提交 PikPak。
+{stats_table}
+> {funnel_note}
 
 ## 下载失败
 
