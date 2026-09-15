@@ -718,6 +718,12 @@ def ensure_javdb_score_gate(
         return False
     item["av_number"] = number
 
+    q = item.get("javdb_query") or {}
+    q_number = (q.get("number") or "").strip().upper()
+    if q_number and q_number != str(number).upper():
+        item.pop("javdb_query", None)
+        item.pop("javdb", None)
+
     if query_if_missing and not item.get("javdb_query"):
         own_client = client is None
         if own_client:
