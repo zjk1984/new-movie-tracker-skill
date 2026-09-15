@@ -131,6 +131,26 @@ def _any_str(value: Any) -> str:
     return str(value)
 
 
+def extract_tag_names(detail: dict[str, Any]) -> list[str]:
+    """Return unique tag names from JavDB movie detail `tags: [{id, name}, ...]`."""
+    raw = detail.get("tags")
+    if not isinstance(raw, list):
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+    for tag in raw:
+        if isinstance(tag, dict):
+            name = _any_str(tag.get("name")).strip()
+        elif isinstance(tag, str):
+            name = tag.strip()
+        else:
+            continue
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
 def _parse_score(value: Any) -> float | None:
     if value is None or value == "":
         return None
@@ -506,6 +526,7 @@ class JavDBClient:
         detail = self.movie_detail(movie_id)
         resolved_number = _any_str(detail.get("number") or number).upper()
         content_type = classify_javdb_content(detail, resolved_number)
+        tags = extract_tag_names(detail)
         result: dict[str, Any] = {
             "number": resolved_number,
             "javdb_id": movie_id,
@@ -516,8 +537,16 @@ class JavDBClient:
             "score": _parse_score(detail.get("score")),
             "content_type": content_type,
             "content_type_label": content_type_label(content_type),
+            "tags": tags,
+            "tag_labels": ", ".join(tags),
             "query_status": "ok",
         }
+        maker_name = _any_str(detail.get("maker_name")).strip()
+        series_name = _any_str(detail.get("series_name")).strip()
+        if maker_name:
+            result["maker_name"] = maker_name
+        if series_name:
+            result["series_name"] = series_name
         if fetch_magnets:
             all_rows = self.movie_magnets(movie_id)
             result["magnet_total"] = len(all_rows)
@@ -591,7 +620,11 @@ def format_lookup_summary(info: dict[str, Any], *, error: str | None = None) -> 
 
 
 def build_query_report(info: dict[str, Any]) -> dict[str, Any]:
-    return {
+    tags = info.get("tags") or []
+    tag_labels = info.get("tag_labels")
+    if tag_labels is None and tags:
+        tag_labels = ", ".join(tags)
+    report: dict[str, Any] = {
         "query_status": info.get("query_status", "ok"),
         "number": info.get("number"),
         "content_type": info.get("content_type"),
@@ -607,7 +640,14 @@ def build_query_report(info: dict[str, Any]) -> dict[str, Any]:
         "magnet_filtered": info.get("magnet_filtered", 0),
         "best_magnet": info.get("best_magnet") or ((info.get("magnets") or [""])[0]),
         "summary": info.get("summary") or format_lookup_summary(info),
+        "tags": tags,
+        "tag_labels": tag_labels or "",
     }
+    if info.get("maker_name"):
+        report["maker_name"] = info["maker_name"]
+    if info.get("series_name"):
+        report["series_name"] = info["series_name"]
+    return report
 
 
 def build_error_report(number: str, error: str) -> dict[str, Any]:
@@ -627,6 +667,8 @@ def build_error_report(number: str, error: str) -> dict[str, Any]:
         "magnet_filtered": 0,
         "best_magnet": "",
         "summary": format_lookup_summary({}, error=error),
+        "tags": [],
+        "tag_labels": "",
         "error": error,
     }
 
