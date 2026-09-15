@@ -60,6 +60,7 @@ class JavDBTagTests(unittest.TestCase):
     def test_find_excluded_javdb_tag(self):
         self.assertEqual(find_excluded_javdb_tag(["巨乳", "多P"]), "多P")
         self.assertEqual(find_excluded_javdb_tag(["恋乳癖"]), "恋乳癖")
+        self.assertEqual(find_excluded_javdb_tag(["淫语", "人妻"]), "淫语")
         self.assertIsNone(find_excluded_javdb_tag(["巨乳", "人妻"]))
         self.assertIsNone(find_excluded_javdb_tag([]))
         self.assertIsNone(find_excluded_javdb_tag(None))

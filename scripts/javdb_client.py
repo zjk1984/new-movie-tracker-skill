@@ -757,7 +757,7 @@ def attach_javdb_query(item: dict[str, Any], client: JavDBClient) -> None:
 
 JAV_REPORT_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
 JAVDB_MIN_DOWNLOAD_SCORE = float(os.environ.get("JAVDB_MIN_DOWNLOAD_SCORE", "4"))
-JAVDB_EXCLUDED_TAGS = frozenset({"多P", "恋乳癖", "业余"})
+JAVDB_EXCLUDED_TAGS = frozenset({"多P", "恋乳癖", "业余", "淫语"})
 
 
 def _clear_download_selection(item: dict[str, Any]) -> None:
