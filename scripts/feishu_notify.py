@@ -331,6 +331,44 @@ def _submit_funnel_card_lines(scan_stats: dict[str, Any]) -> str:
     )
 
 
+JAV_CARD_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
+
+
+def _javdb_tags_card_lines(
+    matched: list[dict[str, Any]],
+    *,
+    limit: int = 10,
+) -> str:
+    """Compact JavDB tag lines for Japanese items that have javdb_query.tags."""
+    lines: list[str] = []
+    for item in matched:
+        region = item.get("content_region") or ""
+        if region not in JAV_CARD_REGIONS:
+            continue
+        q = item.get("javdb_query") or {}
+        if q.get("query_status") != "ok":
+            continue
+        tags = q.get("tags") or []
+        if not tags:
+            tag_labels = (q.get("tag_labels") or "").strip()
+            if tag_labels:
+                tags = [t.strip() for t in tag_labels.split(",") if t.strip()]
+        if not tags:
+            continue
+        number = q.get("number") or item.get("av_number") or "?"
+        score = q.get("score")
+        score_text = f" ({score:.2f})" if score is not None else ""
+        label = ", ".join(tags[:8])
+        if len(tags) > 8:
+            label += "…"
+        lines.append(f"• **{number}**{score_text}: {label}")
+        if len(lines) >= limit:
+            break
+    if not lines:
+        return ""
+    return "\n**JavDB 标签**\n" + "\n".join(lines) + "\n"
+
+
 def _submit_funnel_footnote(
     scan_stats: dict[str, Any],
     link_sum: int,
@@ -385,6 +423,8 @@ def build_scan_summary_card(
         sub_text = " | ".join(f"{k} {v}" for k, v in sorted(subtype.items(), key=lambda x: -x[1]))
         domestic_lines = f"\n**国产子类** {sub_text}\n"
 
+    tag_lines = _javdb_tags_card_lines(scan_stats.get("matched") or [])
+
     repeat = scan_stats.get("matched_repeat") or 0
     repeat_line = (
         f"（相对上次扫描隐藏重复 **{repeat}** 条，仅展示新增）\n"
@@ -405,7 +445,7 @@ def build_scan_summary_card(
         f"{_submit_funnel_card_lines(scan_stats)}"
         f"6. PikPak 提交: 成功 **{ok}** + 失败 **{fail}** = **{total}** 条（按链接计）\n"
         f"{_submit_funnel_footnote(scan_stats, link_sum, total)}\n"
-        f"{jav_lines}{domestic_lines}\n"
+        f"{jav_lines}{domestic_lines}{tag_lines}\n"
         f"**失败原因汇总**\n{_error_summary(download_report.get('failed') or [])}\n"
     )
     if report_url:
