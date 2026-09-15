@@ -10,7 +10,10 @@ import sys
 import re
 import json
 import argparse
+import threading
 import unicodedata
+from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urljoin
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -703,7 +706,483 @@ def match_post(
     return item
 
 
-def scrape(args):
+CF_KEYWORDS = [
+    "赫拉克利特",
+    "亚里士多德",
+    "希腊谚语",
+    "佛教谚语",
+    "cf-browser-verification",
+    "challenge-platform",
+]
+
+_print_lock = threading.Lock()
+
+
+def scan_log(message: str) -> None:
+    with _print_lock:
+        print(message, flush=True)
+
+
+@dataclass
+class MatchContext:
+    keywords: list[str]
+    match_names: set[str]
+    match_index: dict[str, set[str]]
+    since: datetime | None
+    until: datetime | None
+    cutoff: datetime
+    today: datetime
+    all_posts: bool
+    no_date_filter: bool
+
+
+@dataclass
+class ForumListResult:
+    forum_url: str
+    candidates: list[dict]
+    total_posts: int
+    pages_scanned: int
+    stopped: Literal["ok", "break_forum", "abort"] = "ok"
+
+
+def check_cloudflare(
+    page,
+    args,
+    screenshot_dir: Path,
+    page_num: int,
+    *,
+    label: str = "",
+) -> Literal["ok", "break_forum", "abort"]:
+    title = page.title()
+    content = page.content()
+    is_cf = any(k in content or k in title for k in CF_KEYWORDS)
+    if not is_cf:
+        return "ok"
+
+    tag = f" {label}" if label else ""
+    scan_log(f"[warn] cloudflare challenge detected{tag}")
+    if not args.headless:
+        scan_log(
+            "[hint] please complete verification in the opened chrome window "
+            "(if any). waiting up to 90s...",
+        )
+        for _ in range(90):
+            page.wait_for_timeout(1000)
+            try:
+                content = page.content()
+                title = page.title()
+            except Exception:
+                content = ""
+                title = ""
+            still_cf = any(k in content or k in title for k in CF_KEYWORDS)
+            if not still_cf:
+                scan_log("[info] challenge passed")
+                return "ok"
+        scan_log("[err] timeout waiting for challenge")
+        page.screenshot(path=str(screenshot_dir / f"cf_timeout_{page_num}.png"))
+        return "abort"
+
+    scan_log(f"[warn] cloudflare on page {page_num}, stopping current forum")
+    page.screenshot(path=str(screenshot_dir / f"cf_block_{page_num}.png"))
+    return "break_forum"
+
+
+def list_forum_pages(
+    page,
+    forum_url: str,
+    args,
+    match_ctx: MatchContext,
+    screenshot_dir: Path,
+) -> ForumListResult:
+    """Phase 1: paginate a forum list and return matched candidates (no thread fetch)."""
+    scan_log(f"\n[info] scanning forum: {forum_url}")
+    seen_hrefs: set[str] = set()
+    candidates: list[dict] = []
+    total_posts = 0
+    pages_scanned = 0
+    stopped: Literal["ok", "break_forum", "abort"] = "ok"
+
+    start_page = max(1, getattr(args, "start_page", 1) or 1)
+    end_page = start_page + args.max_pages - 1
+    if start_page > 1:
+        scan_log(f"[info] page range: {start_page} ~ {end_page}")
+
+    for page_num in range(start_page, end_page + 1):
+        url = build_page_url(forum_url, page_num)
+        scan_log(f"[info] opening page {page_num}: {url}")
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(3000)
+        pass_age_gate(page)
+
+        cf = check_cloudflare(
+            page,
+            args,
+            screenshot_dir,
+            page_num,
+            label=f" ({forum_url})",
+        )
+        if cf == "abort":
+            return ForumListResult(
+                forum_url, candidates, total_posts, pages_scanned, "abort",
+            )
+        if cf == "break_forum":
+            stopped = "break_forum"
+            break
+
+        posts = parse_posts_from_page(page)
+        new_posts = 0
+        page_new: list[dict] = []
+        for post in posts:
+            if post["href"] and post["href"] not in seen_hrefs:
+                seen_hrefs.add(post["href"])
+                page_new.append(post)
+                new_posts += 1
+            elif not post["href"] and post["title"] not in seen_hrefs:
+                seen_hrefs.add(post["title"])
+                page_new.append(post)
+                new_posts += 1
+
+        for post in page_new:
+            item = match_post(
+                post,
+                keywords=match_ctx.keywords,
+                match_names=match_ctx.match_names,
+                match_index=match_ctx.match_index,
+                since=match_ctx.since,
+                until=match_ctx.until,
+                cutoff=match_ctx.cutoff,
+                today=match_ctx.today,
+                all_posts=match_ctx.all_posts,
+                no_date_filter=match_ctx.no_date_filter,
+            )
+            if not item:
+                continue
+            item["forum"] = forum_url
+            candidates.append(item)
+
+        scan_log(
+            f"[info] page {page_num}: {len(posts)} rows, {new_posts} new, "
+            f"listed total {len(candidates)}",
+        )
+        total_posts += len(posts)
+        pages_scanned += 1
+
+        if (
+            not match_ctx.no_date_filter
+            and start_page == 1
+            and page_num >= 2
+            and posts
+        ):
+            dates = [parse_date(p["date_text"], match_ctx.today) for p in posts]
+            valid_dates = [d for d in dates if d]
+            stop_before = match_ctx.since if match_ctx.since else match_ctx.cutoff
+            if valid_dates and max(valid_dates) < stop_before:
+                scan_log(
+                    f"[info] page {page_num} newest post is before range, stopping early",
+                )
+                break
+
+        if page_num < end_page:
+            page.wait_for_timeout(4000 if match_ctx.since or start_page > 1 else 2000)
+
+    return ForumListResult(forum_url, candidates, total_posts, pages_scanned, stopped)
+
+
+def apply_item_filters(item: dict, javdb_client, args) -> None:
+    if not getattr(args, "region_filter", True):
+        return
+    from content_filter import apply_region_filter, is_downloadable
+
+    apply_region_filter(item, region_filter=True)
+    if not is_downloadable(item):
+        scan_log(f"[skip] {item.get('content_region')}: {item['title'][:50]}")
+        return
+    if javdb_client and getattr(args, "javdb_query", True):
+        from content_filter import is_downloadable as _is_dl
+        from javdb_client import attach_javdb_query, ensure_javdb_score_gate
+
+        if _is_dl(item) and not item.get("javdb_query"):
+            attach_javdb_query(item, javdb_client)
+            q = item.get("javdb_query") or {}
+            scan_log(f"[info]   javdb: {q.get('summary', '')}")
+        if _is_dl(item) and not ensure_javdb_score_gate(item, javdb_client):
+            scan_log(
+                f"[skip] javdb score: {item.get('skip_reason', '?')} "
+                f"{item['title'][:50]}",
+            )
+
+
+def enrich_matched_post(page, item: dict, args, javdb_client) -> dict:
+    """Phase 2: open thread, extract links, apply selection and content filters."""
+    forum_url = item.get("forum") or ""
+    href = item.get("href") or ""
+    if args.fetch_magnets and href:
+        scan_log(f"[info] fetching links for: {item['title'][:40]}...")
+        links = extract_thread_links(page, href, forum_url)
+        item["magnets"] = links["magnets"]
+        item["ed2k"] = links["ed2k"]
+        item["pikpak_sha"] = links["pikpak_sha"]
+        item["hash_entries"] = links.get("hash_entries", [])
+        from magnet_select import apply_selection
+
+        jd = javdb_client if getattr(args, "cnsub_priority", False) else None
+        scan_log(f"[info] selecting download: {item['title'][:40]}...")
+        if apply_selection(item, jd):
+            src = item.get("magnet_source") or item.get("download_source", "?")
+            scan_log(f"[info]   -> {src}")
+        elif not item.get("magnets"):
+            n_alt = (
+                len(item.get("ed2k") or [])
+                + len(item.get("pikpak_sha") or [])
+                + len(item.get("hash_entries") or [])
+            )
+            scan_log(f"[info]   -> no magnet; collected {n_alt} alternative(s)")
+        else:
+            scan_log("[info]   -> no download selected")
+    elif javdb_client:
+        scan_log(f"[info] javdb lookup: {item['title'][:40]}...")
+        enrich_with_javdb(item, javdb_client, args)
+
+    apply_item_filters(item, javdb_client, args)
+    return item
+
+
+def maybe_send_feishu_progress(
+    matched_count: int,
+    feishu_progress_sent: int,
+    args,
+    *,
+    forum_url: str = "",
+    page_num: int | None = None,
+    page_range: str | None = None,
+    phase: str = "",
+) -> int:
+    if not getattr(args, "feishu_progress", False):
+        return feishu_progress_sent
+    milestone = (matched_count // 100) * 100
+    if milestone < 100 or milestone <= feishu_progress_sent:
+        return feishu_progress_sent
+    try:
+        from feishu_notify import is_configured, send_scan_progress
+
+        if not is_configured():
+            return feishu_progress_sent
+        send_scan_progress(
+            milestone,
+            forum_url=forum_url,
+            page_num=page_num,
+            page_range=page_range,
+            run_label=getattr(args, "run_label", None) or "scan",
+        )
+        scan_log(f"[ok] feishu progress sent: {milestone} matched posts{phase}")
+        return milestone
+    except Exception as exc:
+        scan_log(f"[warn] feishu progress: {exc}")
+        return feishu_progress_sent
+
+
+def dedupe_candidates(candidates: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    out: list[dict] = []
+    for item in candidates:
+        key = (item.get("href") or "").strip() or f"title:{item.get('title', '')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def save_scan_results(
+    args,
+    out_dir: Path,
+    all_matched: list[dict],
+    *,
+    total_posts: int,
+    total_pages_scanned: int,
+    cutoff: datetime,
+    today: datetime,
+    actors: set[str],
+    match_names: set[str],
+    since: datetime | None,
+    until: datetime | None,
+    page,
+    screenshot_dir: Path,
+    num_forums: int,
+) -> None:
+    if not all_matched:
+        lines = [
+            "=" * 60,
+            f"scan_time: {format_beijing_time(beijing_now(), with_label=False)}",
+            f"actors: {len(actors)}",
+            f"match_names: {len(match_names)}",
+            f"posts_scanned: {total_posts}",
+            f"pages_scanned: {total_pages_scanned}",
+        ]
+        range_label = (
+            f"{since.strftime('%Y-%m-%d')} ~ {(until or today).strftime('%Y-%m-%d')}"
+            if since
+            else f"{cutoff.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}"
+        )
+        lines.extend(["range: " + range_label, "=" * 60, "", "no matched posts in the recent period."])
+        result_text = "\n".join(lines)
+        print("\n" + result_text)
+        (out_dir / "result.txt").write_text(result_text, encoding="utf-8")
+        page.screenshot(path=str(screenshot_dir / "last_run.png"))
+        print(f"[done] results saved to {out_dir}")
+        return
+
+    lines = [
+        "=" * 60,
+        f"scan_time: {format_beijing_time(beijing_now(), with_label=False)}",
+        f"actors: {len(actors)}",
+        f"match_names: {len(match_names)}",
+        f"posts_scanned: {total_posts}",
+        f"pages_scanned: {total_pages_scanned}",
+        f"forums: {num_forums}",
+    ]
+    range_label = (
+        f"{since.strftime('%Y-%m-%d')} ~ {(until or today).strftime('%Y-%m-%d')}"
+        if since
+        else f"{cutoff.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}"
+    )
+    lines.extend(["range: " + range_label, "=" * 60, f"\nmatched {len(all_matched)} posts\n"])
+    javdb_summary = build_javdb_summary(all_matched)
+    summary_text = format_javdb_summary_text(javdb_summary)
+    if summary_text:
+        lines.append(summary_text.strip())
+        lines.append("")
+
+    for m in all_matched:
+        lines.append(f"date: {m['date']} ({m['date_raw']})")
+        lines.append(f"title: {m['title']}")
+        if m.get("keywords"):
+            lines.append(f"keywords: {', '.join(m['keywords'])}")
+        if m.get("actors"):
+            lines.append(f"actors: {', '.join(m['actors'])}")
+        if m.get("matched_names") and sorted(m["actors"]) != sorted(m["matched_names"]):
+            lines.append(f"matched_names: {', '.join(m['matched_names'])}")
+        lines.append(f"href: {m['href']}")
+        if m.get("av_number"):
+            lines.append(f"av_number: {m['av_number']}")
+        if m.get("release_date"):
+            lines.append(f"release_date: {m['release_date']}")
+        if m.get("javdb"):
+            j = m["javdb"]
+            label = j.get("content_type_label") or ""
+            lines.append(
+                f"javdb: {j.get('number')} [{label}] | {j.get('release_date')} | "
+                f"{j.get('title', '')[:50]}",
+            )
+        if m.get("javdb_query"):
+            lines.append(f"javdb_query: {m['javdb_query'].get('summary', '')}")
+        if m.get("javdb_error"):
+            lines.append(f"javdb_error: {m['javdb_error']}")
+        if m.get("content_region"):
+            region_line = f"content_region: {m['content_region']}"
+            if m.get("domestic_subtype"):
+                region_line += f" ({m['domestic_subtype']})"
+            lines.append(region_line)
+        if m.get("skip_reason"):
+            lines.append(f"skip_reason: {m['skip_reason']}")
+        if m.get("selected_magnet"):
+            lines.append(
+                f"selected_magnet ({m.get('magnet_source', '?')}): {m['selected_magnet']}",
+            )
+        if m.get("selected_pikpak_sha"):
+            lines.append(
+                f"selected_pikpak_sha ({m.get('download_source', '?')}): "
+                f"{m['selected_pikpak_sha']}",
+            )
+        if m.get("selected_ed2k"):
+            lines.append(
+                f"selected_ed2k ({m.get('download_source', '?')}): {m['selected_ed2k']}",
+            )
+        if "magnets" in m:
+            if m["magnets"]:
+                lines.append("magnets:")
+                for mg in m["magnets"]:
+                    lines.append(f"  - {mg}")
+            else:
+                lines.append("magnets: (none found)")
+        if "ed2k" in m:
+            if m["ed2k"]:
+                lines.append("ed2k:")
+                for link in m["ed2k"]:
+                    lines.append(f"  - {link}")
+            else:
+                lines.append("ed2k: (none found)")
+        if "pikpak_sha" in m:
+            if m["pikpak_sha"]:
+                lines.append("pikpak_sha:")
+                for link in m["pikpak_sha"]:
+                    lines.append(f"  - {link}")
+            else:
+                lines.append("pikpak_sha: (none found)")
+        if "hash_entries" in m and m["hash_entries"]:
+            lines.append("hash_entries:")
+            for entry in m["hash_entries"]:
+                label = entry.get("label") or entry.get("uri") or entry.get("hash", "")
+                lines.append(f"  - [{entry.get('kind', '?')}] {label}")
+        if m.get("selected_download") and not m.get("selected_magnet"):
+            lines.append(
+                f"selected_download ({m.get('download_source', '?')}): "
+                f"{m['selected_download']}",
+            )
+        lines.append("-" * 40)
+
+    result_text = "\n".join(lines)
+    (out_dir / "result.txt").write_text(result_text, encoding="utf-8")
+    from scan_delta import rotate_scan_snapshot
+
+    if rotate_scan_snapshot(out_dir):
+        print("[info] rotated last_result.json -> previous_result.json")
+    (out_dir / "last_result.json").write_text(
+        json.dumps(
+            {
+                "scan_time": beijing_now_iso(),
+                "cutoff": cutoff.strftime("%Y-%m-%d"),
+                "today": today.strftime("%Y-%m-%d"),
+                "matched": all_matched,
+                "javdb_summary": javdb_summary,
+                "total_posts": total_posts,
+                "pages_scanned": total_pages_scanned,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    page.screenshot(path=str(screenshot_dir / "last_run.png"))
+    print(f"[done] results saved to {out_dir}")
+    try:
+        print("\n" + result_text)
+    except BlockingIOError:
+        print(
+            "[warn] stdout blocked; full scan text saved to result.txt",
+            file=sys.stderr,
+        )
+
+    if getattr(args, "pikpak", False):
+        result_json = out_dir / "last_result.json"
+        try:
+            from pikpak_auth import resolve_folder
+            from pikpak_download import submit_from_result
+
+            folder = resolve_folder(getattr(args, "pikpak_folder", None))
+            ok, total = submit_from_result(
+                result_json,
+                folder=folder,
+                today_only=not getattr(args, "pikpak_new_only", False),
+                new_only=getattr(args, "pikpak_new_only", False),
+            )
+            print(f"[done] pikpak: {ok}/{total} submitted to {folder}")
+        except Exception as exc:
+            print(f"[err] pikpak download failed: {exc}")
+
+
+def prepare_scrape_setup(args):
+    """Shared actor/date/javdb setup for serial and two-phase scans."""
     all_posts = bool(getattr(args, "all_posts", False))
     if all_posts:
         actors: set[str] = set()
@@ -741,6 +1220,47 @@ def scrape(args):
     if getattr(args, "cnsub_priority", False):
         print("[info] cnsub-first magnet policy: forum cnsub -> javdb cnsub -> forum fallback")
 
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    since = parse_date_arg(args.since) if getattr(args, "since", None) else None
+    until = parse_date_arg(args.until) if getattr(args, "until", None) else None
+    if since and not args.until and len(args.since.strip()) in (7, 6):
+        until = month_end(since)
+    cutoff = today - timedelta(days=args.days - 1)
+    if since:
+        print(
+            f"[info] date range: {since.strftime('%Y-%m-%d')} ~ "
+            f"{(until or today).strftime('%Y-%m-%d')}",
+        )
+
+    match_ctx = MatchContext(
+        keywords=keywords,
+        match_names=match_names,
+        match_index=match_index,
+        since=since,
+        until=until,
+        cutoff=cutoff,
+        today=today,
+        all_posts=all_posts,
+        no_date_filter=bool(getattr(args, "no_date_filter", False)),
+    )
+    return actors, match_names, javdb_client, match_ctx, cutoff, today, since, until
+
+
+def scrape(args):
+    if (
+        getattr(args, "two_phase", False)
+        and len(args.urls) > 1
+        and not getattr(args, "serial", False)
+    ):
+        from scan_phases import scrape_two_phase
+
+        scrape_two_phase(args)
+        return
+
+    actors, match_names, javdb_client, match_ctx, cutoff, today, since, until = (
+        prepare_scrape_setup(args)
+    )
+
     chrome = find_chrome()
     if not chrome:
         print("[err] chrome not found")
@@ -751,15 +1271,6 @@ def scrape(args):
     user_data_dir = out_dir / "chrome_profile"
     screenshot_dir = out_dir / "screenshots"
     screenshot_dir.mkdir(exist_ok=True)
-
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    since = parse_date_arg(args.since) if getattr(args, "since", None) else None
-    until = parse_date_arg(args.until) if getattr(args, "until", None) else None
-    if since and not args.until and len(args.since.strip()) in (7, 6):
-        until = month_end(since)
-    cutoff = today - timedelta(days=args.days - 1)
-    if since:
-        print(f"[info] date range: {since.strftime('%Y-%m-%d')} ~ {(until or today).strftime('%Y-%m-%d')}")
 
     if getattr(args, "feishu_progress", False):
         try:
@@ -799,362 +1310,63 @@ def scrape(args):
         page = context.new_page()
 
         try:
-            all_matched = []
+            all_matched: list[dict] = []
             total_posts = 0
             total_pages_scanned = 0
             feishu_progress_sent = 0
-            cf_keywords = ["赫拉克利特", "亚里士多德", "希腊谚语", "佛教谚语", "cf-browser-verification", "challenge-platform"]
-
-            keywords = [k for k in (getattr(args, "keywords", None) or []) if k]
+            start_page = max(1, getattr(args, "start_page", 1) or 1)
+            end_page = start_page + args.max_pages - 1
+            page_range = (
+                f"{start_page}~{end_page}"
+                if start_page > 1 or end_page > start_page
+                else None
+            )
 
             for forum_url in args.urls:
-                print(f"\n[info] scanning forum: {forum_url}")
-                seen_hrefs = set()
-                last_page_num = 0
+                list_result = list_forum_pages(
+                    page, forum_url, args, match_ctx, screenshot_dir,
+                )
+                if list_result.stopped == "abort":
+                    context.close()
+                    return
+                total_posts += list_result.total_posts
+                total_pages_scanned += list_result.pages_scanned
 
-                start_page = max(1, getattr(args, "start_page", 1) or 1)
-                end_page = start_page + args.max_pages - 1
-                if start_page > 1:
-                    print(f"[info] page range: {start_page} ~ {end_page}")
+                for item in list_result.candidates:
+                    if args.fetch_magnets and item.get("href"):
+                        enrich_matched_post(page, item, args, javdb_client)
+                    elif javdb_client:
+                        scan_log(f"[info] javdb lookup: {item['title'][:40]}...")
+                        enrich_with_javdb(item, javdb_client, args)
+                        apply_item_filters(item, javdb_client, args)
+                    all_matched.append(item)
+                    feishu_progress_sent = maybe_send_feishu_progress(
+                        len(all_matched),
+                        feishu_progress_sent,
+                        args,
+                        forum_url=forum_url,
+                        page_range=page_range,
+                    )
 
-                for page_num in range(start_page, end_page + 1):
-                    url = build_page_url(forum_url, page_num)
-                    print(f"[info] opening page {page_num}: {url}")
-                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(3000)
-                    pass_age_gate(page)
-
-                    title = page.title()
-                    content = page.content()
-                    is_cf = any(k in content or k in title for k in cf_keywords)
-
-                    if is_cf:
-                        print("[warn] cloudflare challenge detected")
-                        if not args.headless:
-                            print("[hint] please complete verification in the opened chrome window (if any). waiting up to 90s...")
-                            for _ in range(90):
-                                page.wait_for_timeout(1000)
-                                try:
-                                    content = page.content()
-                                    title = page.title()
-                                except Exception:
-                                    # Page is navigating, likely challenge passed
-                                    content = ""
-                                    title = ""
-                                still_cf = any(k in content or k in title for k in cf_keywords)
-                                if not still_cf:
-                                    print("[info] challenge passed")
-                                    break
-                            else:
-                                print("[err] timeout waiting for challenge")
-                                page.screenshot(path=str(screenshot_dir / f"cf_timeout_{page_num}.png"))
-                                context.close()
-                                return
-                        else:
-                            print("[warn] cloudflare on page {0}, saving partial results".format(page_num))
-                            page.screenshot(path=str(screenshot_dir / f"cf_block_{page_num}.png"))
-                            break
-
-                    posts = parse_posts_from_page(page)
-                    new_posts = 0
-                    page_new = []
-                    for post in posts:
-                        if post["href"] and post["href"] not in seen_hrefs:
-                            seen_hrefs.add(post["href"])
-                            page_new.append(post)
-                            new_posts += 1
-                        elif not post["href"] and post["title"] not in seen_hrefs:
-                            seen_hrefs.add(post["title"])
-                            page_new.append(post)
-                            new_posts += 1
-
-                    for post in page_new:
-                        item = match_post(
-                            post,
-                            keywords=keywords,
-                            match_names=match_names,
-                            match_index=match_index,
-                            since=since,
-                            until=until,
-                            cutoff=cutoff,
-                            today=today,
-                            all_posts=all_posts,
-                            no_date_filter=bool(getattr(args, "no_date_filter", False)),
-                        )
-                        if not item:
-                            continue
-                        item["forum"] = forum_url
-                        if args.fetch_magnets and post.get("href"):
-                            print(f"[info] fetching links for: {post['title'][:40]}...")
-                            links = extract_thread_links(page, post["href"], forum_url)
-                            item["magnets"] = links["magnets"]
-                            item["ed2k"] = links["ed2k"]
-                            item["pikpak_sha"] = links["pikpak_sha"]
-                            item["hash_entries"] = links.get("hash_entries", [])
-                            from magnet_select import apply_selection
-
-                            jd = javdb_client if getattr(args, "cnsub_priority", False) else None
-                            print(f"[info] selecting download: {item['title'][:40]}...")
-                            if apply_selection(item, jd):
-                                src = item.get("magnet_source") or item.get("download_source", "?")
-                                print(f"[info]   -> {src}")
-                            elif not item.get("magnets"):
-                                n_alt = (
-                                    len(item.get("ed2k") or [])
-                                    + len(item.get("pikpak_sha") or [])
-                                    + len(item.get("hash_entries") or [])
-                                )
-                                print(f"[info]   -> no magnet; collected {n_alt} alternative(s)")
-                            else:
-                                print("[info]   -> no download selected")
-                        elif javdb_client:
-                            print(f"[info] javdb lookup: {item['title'][:40]}...")
-                            enrich_with_javdb(item, javdb_client, args)
-
-                        if getattr(args, "region_filter", True):
-                            from content_filter import apply_region_filter, is_downloadable
-
-                            apply_region_filter(item, region_filter=True)
-                            if not is_downloadable(item):
-                                print(
-                                    f"[skip] {item.get('content_region')}: "
-                                    f"{item['title'][:50]}"
-                                )
-                            elif javdb_client and getattr(args, "javdb_query", True):
-                                from content_filter import is_downloadable as _is_dl
-                                from javdb_client import attach_javdb_query
-
-                                if _is_dl(item) and not item.get("javdb_query"):
-                                    attach_javdb_query(item, javdb_client)
-                                    q = item.get("javdb_query") or {}
-                                    print(f"[info]   javdb: {q.get('summary', '')}")
-                                from javdb_client import ensure_javdb_score_gate
-
-                                if _is_dl(item) and not ensure_javdb_score_gate(
-                                    item, javdb_client,
-                                ):
-                                    print(
-                                        f"[skip] javdb score: "
-                                        f"{item.get('skip_reason', '?')} "
-                                        f"{item['title'][:50]}"
-                                    )
-                        all_matched.append(item)
-                        if getattr(args, "feishu_progress", False):
-                            milestone = (len(all_matched) // 100) * 100
-                            if milestone >= 100 and milestone > feishu_progress_sent:
-                                try:
-                                    from feishu_notify import is_configured, send_scan_progress
-
-                                    if is_configured():
-                                        page_range = (
-                                            f"{start_page}~{end_page}"
-                                            if start_page > 1 or end_page > start_page
-                                            else None
-                                        )
-                                        send_scan_progress(
-                                            milestone,
-                                            forum_url=forum_url,
-                                            page_num=page_num,
-                                            page_range=page_range,
-                                        )
-                                        feishu_progress_sent = milestone
-                                        print(
-                                            f"[ok] feishu progress sent: "
-                                            f"{milestone} matched posts",
-                                        )
-                                except Exception as exc:
-                                    print(f"[warn] feishu progress: {exc}")
-
-                    print(f"[info] page {page_num}: {len(posts)} rows, {new_posts} new, matched total {len(all_matched)}")
-                    total_posts += len(posts)
-                    total_pages_scanned += 1
-                    last_page_num = page_num
-
-                    if (
-                        not getattr(args, "no_date_filter", False)
-                        and start_page == 1
-                        and page_num >= 2
-                        and posts
-                    ):
-                        dates = [parse_date(p["date_text"], today) for p in posts]
-                        valid_dates = [d for d in dates if d]
-                        stop_before = since if since else cutoff
-                        if valid_dates and max(valid_dates) < stop_before:
-                            print(f"[info] page {page_num} newest post is before range, stopping early")
-                            break
-
-                    if page_num < end_page:
-                        page.wait_for_timeout(4000 if since or start_page > 1 else 2000)
-
+            save_scan_results(
+                args,
+                out_dir,
+                all_matched,
+                total_posts=total_posts,
+                total_pages_scanned=total_pages_scanned,
+                cutoff=cutoff,
+                today=today,
+                actors=actors,
+                match_names=match_names,
+                since=since,
+                until=until,
+                page=page,
+                screenshot_dir=screenshot_dir,
+                num_forums=len(args.urls),
+            )
             if not all_matched:
-                lines = []
-                lines.append("=" * 60)
-                lines.append(
-                    f"scan_time: {format_beijing_time(beijing_now(), with_label=False)}",
-                )
-                lines.append(f"actors: {len(actors)}")
-                lines.append(f"match_names: {len(match_names)}")
-                lines.append(f"posts_scanned: {total_posts}")
-                lines.append(f"pages_scanned: {total_pages_scanned}")
-                range_label = (
-                    f"{since.strftime('%Y-%m-%d')} ~ {(until or today).strftime('%Y-%m-%d')}"
-                    if since else f"{cutoff.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}"
-                )
-                lines.append(f"range: {range_label}")
-                lines.append("=" * 60)
-                lines.append("\nno matched posts in the recent period.")
-                result_text = "\n".join(lines)
-                print("\n" + result_text)
-                (out_dir / "result.txt").write_text(result_text, encoding="utf-8")
-                page.screenshot(path=str(screenshot_dir / "last_run.png"))
-                print(f"[done] results saved to {out_dir}")
                 context.close()
                 return
-
-            lines = []
-            lines.append("=" * 60)
-            lines.append(
-                f"scan_time: {format_beijing_time(beijing_now(), with_label=False)}",
-            )
-            lines.append(f"actors: {len(actors)}")
-            lines.append(f"match_names: {len(match_names)}")
-            lines.append(f"posts_scanned: {total_posts}")
-            lines.append(f"pages_scanned: {total_pages_scanned}")
-            lines.append(f"forums: {len(args.urls)}")
-            range_label = (
-                f"{since.strftime('%Y-%m-%d')} ~ {(until or today).strftime('%Y-%m-%d')}"
-                if since else f"{cutoff.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}"
-            )
-            lines.append(f"range: {range_label}")
-            lines.append("=" * 60)
-            lines.append(f"\nmatched {len(all_matched)} posts\n")
-            javdb_summary = build_javdb_summary(all_matched)
-            summary_text = format_javdb_summary_text(javdb_summary)
-            if summary_text:
-                lines.append(summary_text.strip())
-                lines.append("")
-
-            for m in all_matched:
-                lines.append(f"date: {m['date']} ({m['date_raw']})")
-                lines.append(f"title: {m['title']}")
-                if m.get("keywords"):
-                    lines.append(f"keywords: {', '.join(m['keywords'])}")
-                if m.get("actors"):
-                    lines.append(f"actors: {', '.join(m['actors'])}")
-                if m.get("matched_names") and sorted(m["actors"]) != sorted(m["matched_names"]):
-                    lines.append(f"matched_names: {', '.join(m['matched_names'])}")
-                lines.append(f"href: {m['href']}")
-                if m.get("av_number"):
-                    lines.append(f"av_number: {m['av_number']}")
-                if m.get("release_date"):
-                    lines.append(f"release_date: {m['release_date']}")
-                if m.get("javdb"):
-                    j = m["javdb"]
-                    label = j.get("content_type_label") or ""
-                    lines.append(
-                        f"javdb: {j.get('number')} [{label}] | {j.get('release_date')} | "
-                        f"{j.get('title', '')[:50]}"
-                    )
-                if m.get("javdb_query"):
-                    lines.append(f"javdb_query: {m['javdb_query'].get('summary', '')}")
-                if m.get("javdb_error"):
-                    lines.append(f"javdb_error: {m['javdb_error']}")
-                if m.get("content_region"):
-                    region_line = f"content_region: {m['content_region']}"
-                    if m.get("domestic_subtype"):
-                        region_line += f" ({m['domestic_subtype']})"
-                    lines.append(region_line)
-                if m.get("skip_reason"):
-                    lines.append(f"skip_reason: {m['skip_reason']}")
-                if m.get("selected_magnet"):
-                    lines.append(f"selected_magnet ({m.get('magnet_source', '?')}): {m['selected_magnet']}")
-                if m.get("selected_pikpak_sha"):
-                    lines.append(
-                        f"selected_pikpak_sha ({m.get('download_source', '?')}): "
-                        f"{m['selected_pikpak_sha']}"
-                    )
-                if m.get("selected_ed2k"):
-                    lines.append(
-                        f"selected_ed2k ({m.get('download_source', '?')}): {m['selected_ed2k']}"
-                    )
-                if "magnets" in m:
-                    if m["magnets"]:
-                        lines.append("magnets:")
-                        for mg in m["magnets"]:
-                            lines.append(f"  - {mg}")
-                    else:
-                        lines.append("magnets: (none found)")
-                if "ed2k" in m:
-                    if m["ed2k"]:
-                        lines.append("ed2k:")
-                        for link in m["ed2k"]:
-                            lines.append(f"  - {link}")
-                    else:
-                        lines.append("ed2k: (none found)")
-                if "pikpak_sha" in m:
-                    if m["pikpak_sha"]:
-                        lines.append("pikpak_sha:")
-                        for link in m["pikpak_sha"]:
-                            lines.append(f"  - {link}")
-                    else:
-                        lines.append("pikpak_sha: (none found)")
-                if "hash_entries" in m and m["hash_entries"]:
-                    lines.append("hash_entries:")
-                    for entry in m["hash_entries"]:
-                        label = entry.get("label") or entry.get("uri") or entry.get("hash", "")
-                        lines.append(f"  - [{entry.get('kind', '?')}] {label}")
-                if m.get("selected_download") and not m.get("selected_magnet"):
-                    lines.append(
-                        f"selected_download ({m.get('download_source', '?')}): "
-                        f"{m['selected_download']}"
-                    )
-                lines.append("-" * 40)
-
-            result_text = "\n".join(lines)
-            (out_dir / "result.txt").write_text(result_text, encoding="utf-8")
-            from scan_delta import rotate_scan_snapshot
-
-            if rotate_scan_snapshot(out_dir):
-                print("[info] rotated last_result.json -> previous_result.json")
-            (out_dir / "last_result.json").write_text(
-                json.dumps({
-                    "scan_time": beijing_now_iso(),
-                    "cutoff": cutoff.strftime("%Y-%m-%d"),
-                    "today": today.strftime("%Y-%m-%d"),
-                    "matched": all_matched,
-                    "javdb_summary": javdb_summary,
-                    "total_posts": total_posts,
-                    "pages_scanned": total_pages_scanned,
-                }, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            page.screenshot(path=str(screenshot_dir / "last_run.png"))
-            print(f"[done] results saved to {out_dir}")
-            try:
-                print("\n" + result_text)
-            except BlockingIOError:
-                print(
-                    "[warn] stdout blocked; full scan text saved to result.txt",
-                    file=sys.stderr,
-                )
-
-            if getattr(args, "pikpak", False):
-                result_json = out_dir / "last_result.json"
-                try:
-                    from pikpak_download import submit_from_result
-
-                    from pikpak_auth import resolve_folder
-
-                    folder = resolve_folder(getattr(args, "pikpak_folder", None))
-                    ok, total = submit_from_result(
-                        result_json,
-                        folder=folder,
-                        today_only=not getattr(args, "pikpak_new_only", False),
-                        new_only=getattr(args, "pikpak_new_only", False),
-                    )
-                    print(f"[done] pikpak: {ok}/{total} submitted to {folder}")
-                except Exception as exc:
-                    print(f"[err] pikpak download failed: {exc}")
 
         except PlaywrightTimeout:
             print("[err] page timeout")
@@ -1259,6 +1471,28 @@ def main():
         "--run-label",
         default="scan",
         help="Run label for Feishu start/progress messages (e.g. daily, custom)",
+    )
+    parser.add_argument(
+        "--two-phase",
+        action="store_true",
+        help="Two-phase parallel scan for multi-forum runs (list then enrich)",
+    )
+    parser.add_argument(
+        "--serial",
+        action="store_true",
+        help="Force single-browser serial scan (disable --two-phase)",
+    )
+    parser.add_argument(
+        "--list-workers",
+        type=int,
+        default=int(os.environ.get("SCAN_LIST_WORKERS", "3")),
+        help="Parallel forum list workers in two-phase mode (default: 3)",
+    )
+    parser.add_argument(
+        "--fetch-workers",
+        type=int,
+        default=int(os.environ.get("SCAN_FETCH_WORKERS", "4")),
+        help="Parallel thread-fetch workers in two-phase mode (default: 4)",
     )
     args = parser.parse_args()
     from env_utils import load_env_local
