@@ -702,6 +702,7 @@ def attach_javdb_query(item: dict[str, Any], client: JavDBClient) -> None:
 
 JAV_REPORT_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
 JAVDB_MIN_DOWNLOAD_SCORE = float(os.environ.get("JAVDB_MIN_DOWNLOAD_SCORE", "4"))
+JAVDB_EXCLUDED_TAGS = frozenset({"多P", "恋乳癖", "业余"})
 
 
 def _clear_download_selection(item: dict[str, Any]) -> None:
@@ -723,6 +724,27 @@ def item_needs_javdb_score(item: dict[str, Any]) -> bool:
     from content_filter import classify_region
 
     return classify_region({"title": title, "av_number": number}) in JAV_REPORT_REGIONS
+
+
+def find_excluded_javdb_tag(tags: list[str] | None) -> str | None:
+    """Return the first excluded tag name present in *tags*, or None."""
+    if not tags:
+        return None
+    tag_set = set(tags)
+    for excluded in JAVDB_EXCLUDED_TAGS:
+        if excluded in tag_set:
+            return excluded
+    return None
+
+
+def javdb_tags_ok(item: dict[str, Any]) -> bool | None:
+    """Return True/False when JavDB tag gate applies; None if item is not Japanese JAV."""
+    if not item_needs_javdb_score(item):
+        return None
+    q = item.get("javdb_query") or {}
+    if q.get("query_status") != "ok":
+        return True
+    return find_excluded_javdb_tag(q.get("tags")) is None
 
 
 def javdb_score_ok(
@@ -771,6 +793,13 @@ def ensure_javdb_score_gate(
         if own_client:
             client = JavDBClient()
         attach_javdb_query(item, client)
+
+    tag_ok = javdb_tags_ok(item)
+    if tag_ok is False:
+        excluded = find_excluded_javdb_tag((item.get("javdb_query") or {}).get("tags"))
+        item["skip_reason"] = f"javdb_tag_excluded_{excluded}"
+        _clear_download_selection(item)
+        return False
 
     ok = javdb_score_ok(item, min_score=min_score)
     if ok is False:
