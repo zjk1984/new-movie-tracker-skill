@@ -4,12 +4,14 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from javdb_client import (  # noqa: E402
     build_query_report,
+    current_beijing_year,
     ensure_javdb_score_gate,
     extract_tag_names,
     find_excluded_javdb_tag,
@@ -133,7 +135,21 @@ class JavDBTagTests(unittest.TestCase):
 
 
 class JavDBReviewsGateTests(unittest.TestCase):
-    CURRENT_YEAR = 2026
+    MOCK_YEAR = 2025
+
+    def test_current_beijing_year_delegates_to_beijing_now(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from env_utils import beijing_now
+
+        with patch("env_utils.beijing_now", return_value=datetime(2027, 6, 15, tzinfo=ZoneInfo("Asia/Shanghai"))):
+            self.assertEqual(current_beijing_year(), 2027)
+
+    def test_reviews_threshold_uses_runtime_beijing_year(self):
+        with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):
+            self.assertEqual(reviews_threshold_for_year(self.MOCK_YEAR - 1), 1000)
+            self.assertEqual(reviews_threshold_for_year(self.MOCK_YEAR), 100)
 
     def test_parse_release_date_year(self):
         self.assertEqual(parse_release_date_year("2025-12-31"), 2025)
@@ -142,7 +158,7 @@ class JavDBReviewsGateTests(unittest.TestCase):
         self.assertIsNone(parse_release_date_year("invalid"))
 
     def test_reviews_threshold_for_year(self):
-        y = self.CURRENT_YEAR
+        y = self.MOCK_YEAR
         self.assertEqual(reviews_threshold_for_year(y - 1, current_year=y), 1000)
         self.assertEqual(reviews_threshold_for_year(y, current_year=y), 100)
         self.assertEqual(reviews_threshold_for_year(y + 1, current_year=y), 100)
@@ -162,29 +178,32 @@ class JavDBReviewsGateTests(unittest.TestCase):
         }
 
     def test_javdb_reviews_ok_prior_year_needs_1000(self):
-        y = self.CURRENT_YEAR
-        with self.subTest("below threshold"):
-            item = self._item(release_date=f"{y - 1}-06-01", reviews_count=999)
-            self.assertFalse(javdb_reviews_ok(item))
-        with self.subTest("at threshold"):
-            item = self._item(release_date=f"{y - 1}-06-01", reviews_count=1000)
-            self.assertTrue(javdb_reviews_ok(item))
+        y = self.MOCK_YEAR
+        with patch("javdb_client.current_beijing_year", return_value=y):
+            with self.subTest("below threshold"):
+                item = self._item(release_date=f"{y - 1}-06-01", reviews_count=999)
+                self.assertFalse(javdb_reviews_ok(item))
+            with self.subTest("at threshold"):
+                item = self._item(release_date=f"{y - 1}-06-01", reviews_count=1000)
+                self.assertTrue(javdb_reviews_ok(item))
 
     def test_javdb_reviews_ok_current_year_needs_100(self):
-        y = self.CURRENT_YEAR
-        with self.subTest("below threshold"):
-            item = self._item(release_date=f"{y}-03-01", reviews_count=99)
-            self.assertFalse(javdb_reviews_ok(item))
-        with self.subTest("at threshold"):
-            item = self._item(release_date=f"{y}-03-01", reviews_count=100)
-            self.assertTrue(javdb_reviews_ok(item))
+        y = self.MOCK_YEAR
+        with patch("javdb_client.current_beijing_year", return_value=y):
+            with self.subTest("below threshold"):
+                item = self._item(release_date=f"{y}-03-01", reviews_count=99)
+                self.assertFalse(javdb_reviews_ok(item))
+            with self.subTest("at threshold"):
+                item = self._item(release_date=f"{y}-03-01", reviews_count=100)
+                self.assertTrue(javdb_reviews_ok(item))
 
     def test_javdb_reviews_ok_year_boundary_dec31_vs_jan1(self):
-        y = self.CURRENT_YEAR
-        dec31 = self._item(release_date=f"{y - 1}-12-31", reviews_count=500)
-        self.assertFalse(javdb_reviews_ok(dec31))
-        jan1 = self._item(release_date=f"{y}-01-01", reviews_count=500)
-        self.assertTrue(javdb_reviews_ok(jan1))
+        y = self.MOCK_YEAR
+        with patch("javdb_client.current_beijing_year", return_value=y):
+            dec31 = self._item(release_date=f"{y - 1}-12-31", reviews_count=500)
+            self.assertFalse(javdb_reviews_ok(dec31))
+            jan1 = self._item(release_date=f"{y}-01-01", reviews_count=500)
+            self.assertTrue(javdb_reviews_ok(jan1))
 
     def test_javdb_reviews_ok_missing_fields(self):
         item = {
@@ -202,27 +221,30 @@ class JavDBReviewsGateTests(unittest.TestCase):
         self.assertFalse(javdb_reviews_ok(item))
 
     def test_ensure_javdb_score_gate_skips_low_reviews(self):
-        item = self._item(release_date=f"{self.CURRENT_YEAR}-02-01", reviews_count=50)
-        item["selected_magnet"] = "magnet:?xt=urn:btih:abc"
-        self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
-        self.assertEqual(item["skip_reason"], "javdb_reviews_low_50")
-        self.assertNotIn("selected_magnet", item)
+        with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):
+            item = self._item(release_date=f"{self.MOCK_YEAR}-02-01", reviews_count=50)
+            item["selected_magnet"] = "magnet:?xt=urn:btih:abc"
+            self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
+            self.assertEqual(item["skip_reason"], "javdb_reviews_low_50")
+            self.assertNotIn("selected_magnet", item)
 
     def test_ensure_javdb_score_gate_reviews_before_score(self):
-        item = self._item(
-            release_date=f"{self.CURRENT_YEAR - 1}-01-01",
-            reviews_count=10,
-            score=2.0,
-        )
-        self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
-        self.assertEqual(item["skip_reason"], "javdb_reviews_low_10")
+        with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):
+            item = self._item(
+                release_date=f"{self.MOCK_YEAR - 1}-01-01",
+                reviews_count=10,
+                score=2.0,
+            )
+            self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
+            self.assertEqual(item["skip_reason"], "javdb_reviews_low_10")
 
     def test_ensure_javdb_score_gate_allows_high_reviews(self):
-        item = self._item(
-            release_date=f"{self.CURRENT_YEAR - 1}-01-01",
-            reviews_count=1200,
-        )
-        self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
+        with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):
+            item = self._item(
+                release_date=f"{self.MOCK_YEAR - 1}-01-01",
+                reviews_count=1200,
+            )
+            self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
 
 
 if __name__ == "__main__":

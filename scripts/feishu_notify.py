@@ -340,7 +340,9 @@ def _javdb_tags_card_lines(
     limit: int = 10,
 ) -> str:
     """Compact JavDB tag lines for Japanese items that have javdb_query.tags."""
-    lines: list[str] = []
+    from run_report import _item_release_date, _release_date_desc_sort_key
+
+    candidates: list[dict[str, Any]] = []
     for item in matched:
         region = item.get("content_region") or ""
         if region not in JAV_CARD_REGIONS:
@@ -355,6 +357,20 @@ def _javdb_tags_card_lines(
                 tags = [t.strip() for t in tag_labels.split(",") if t.strip()]
         if not tags:
             continue
+        candidates.append(item)
+
+    candidates.sort(
+        key=lambda x: _release_date_desc_sort_key(_item_release_date(x)),
+        reverse=True,
+    )
+
+    lines: list[str] = []
+    for item in candidates[:limit]:
+        q = item.get("javdb_query") or {}
+        tags = q.get("tags") or []
+        if not tags:
+            tag_labels = (q.get("tag_labels") or "").strip()
+            tags = [t.strip() for t in tag_labels.split(",") if t.strip()]
         number = q.get("number") or item.get("av_number") or "?"
         score = q.get("score")
         score_text = f" ({score:.2f})" if score is not None else ""
@@ -368,8 +384,6 @@ def _javdb_tags_card_lines(
         if len(tags) > 8:
             label += "…"
         lines.append(f"• **{number}**{release_text}{reviews_text}{score_text}: {label}")
-        if len(lines) >= limit:
-            break
     if not lines:
         return ""
     return "\n**JavDB 标签**\n" + "\n".join(lines) + "\n"
