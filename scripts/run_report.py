@@ -311,7 +311,9 @@ FORUM_SITE_BASE = "https://www.sehuatang.org/"
 
 
 def _thread_post_url(item: dict[str, Any]) -> str:
-    href = (item.get("href") or "").strip()
+    from forum_browser import canonical_thread_href
+
+    href = canonical_thread_href((item.get("href") or "").strip())
     if not href:
         return ""
     if href.startswith("http://") or href.startswith("https://"):
@@ -564,7 +566,7 @@ def _build_undownloaded_entries(
 
         reason = _skip_reason_label(item, failed_error=failed_error)
         if not links and reason == "未成功下载":
-            reason = "无链接"
+            reason = "链接未抓取"
 
         entry = {
             "title": (item.get("title") or "").replace("\n", " ").strip(),

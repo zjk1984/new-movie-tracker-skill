@@ -391,7 +391,13 @@ def parse_posts_from_page(page):
                 date_el = row.locator("td.by em, td.by span, .by em, .by span").first
                 date_text = date_el.inner_text(timeout=2000).strip() if date_el.count() > 0 else ""
                 if title:
-                    posts.append({"title": title, "date_text": date_text, "href": str(href)})
+                    from forum_browser import canonical_thread_href
+
+                    posts.append({
+                        "title": title,
+                        "date_text": date_text,
+                        "href": canonical_thread_href(str(href)),
+                    })
             except Exception:
                 continue
     else:
@@ -413,7 +419,13 @@ def parse_posts_from_page(page):
                             date_text = de.inner_text(timeout=1000).strip() if de.count() > 0 else ""
                     except Exception:
                         pass
-                    posts.append({"title": title, "date_text": date_text, "href": str(href)})
+                    from forum_browser import canonical_thread_href
+
+                    posts.append({
+                        "title": title,
+                        "date_text": date_text,
+                        "href": canonical_thread_href(str(href)),
+                    })
             except Exception:
                 continue
     return posts
@@ -498,14 +510,19 @@ def extract_thread_post_html(page) -> str:
 
 
 def _merge_link_hrefs(page, prefix: str, target: set[str]) -> None:
-    for selector in (f'a[href^{prefix}]', f'[data-clipboard-text^="{prefix}"]'):
+    selectors = (
+        f'a[href^{prefix}]',
+        f'[data-clipboard-text^="{prefix}"]',
+        f'[data-clipboard^="{prefix}"]',
+    )
+    for selector in selectors:
         loc = page.locator(selector)
         try:
             count = loc.count()
         except Exception:
             continue
         for i in range(count):
-            for attr in ("href", "data-clipboard-text", "data-url"):
+            for attr in ("href", "data-clipboard-text", "data-clipboard", "data-url"):
                 try:
                     val = loc.nth(i).get_attribute(attr)
                     if val and val.startswith(prefix):
@@ -514,9 +531,31 @@ def _merge_link_hrefs(page, prefix: str, target: set[str]) -> None:
                     continue
 
 
+def _wait_past_cloudflare_page(page, *, timeout_s: int = 45) -> bool:
+    """Wait for Cloudflare interstitial to clear before reading post body."""
+    for _ in range(timeout_s):
+        try:
+            title = page.title()
+            content = page.content()
+        except Exception:
+            title = ""
+            content = ""
+        blocked = any(
+            k in title or k in content
+            for k in ("Just a moment", "cf-browser-verification", "Checking your browser")
+        )
+        if not blocked:
+            return True
+        page.wait_for_timeout(1000)
+    return False
+
+
 def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
     if not href:
         return {"magnets": [], "ed2k": [], "pikpak_sha": [], "hash_entries": []}
+    from forum_browser import canonical_thread_href
+
+    href = canonical_thread_href(href)
     full_url = urljoin(forum_url, href)
     magnets: set[str] = set()
     ed2k: set[str] = set()
@@ -527,6 +566,8 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
         page.wait_for_timeout(2000)
         pass_age_gate(page)
         page.wait_for_timeout(1000)
+        if not _wait_past_cloudflare_page(page):
+            print(f"[warn] cloudflare still blocking {full_url}")
 
         _merge_link_hrefs(page, "magnet:", magnets)
         _merge_link_hrefs(page, "ed2k://", ed2k)
@@ -537,6 +578,14 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
         search_html = f"{post_html}\n{full_html}" if post_html else full_html
 
         for m in re.findall(r'magnet:\?xt=urn:btih:[a-fA-F0-9]+(?:&[^"\s<>]+)?', search_html):
+            magnets.add(m)
+        for m in re.findall(r'\[url=(magnet:\?[^\]\s]+)\]', search_html, flags=re.IGNORECASE):
+            magnets.add(m)
+        for m in re.findall(
+            r'(?:href|data-clipboard-text|data-clipboard|data-url|onclick)=["\'](magnet:\?[^"\']+)["\']',
+            search_html,
+            flags=re.IGNORECASE,
+        ):
             magnets.add(m)
 
         from pikpak_links import collect_alternatives_from_text, extract_ed2k_links
@@ -551,13 +600,19 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
             else:
                 hash_entries.extend(alts["hash_entries"])
 
-        # Plain text fallback from visible post body
-        if post_html:
-            try:
-                plain = page.locator("td.t_f, div.pcb, [id^='postmessage_']").first.inner_text()
-                ed2k.update(extract_ed2k_links(plain))
-            except Exception:
-                pass
+        # Plain text fallback from visible post body (first post / OP)
+        try:
+            plain = page.locator("td.t_f, div.pcb, [id^='postmessage_']").first.inner_text()
+        except Exception:
+            plain = ""
+        if plain:
+            ed2k.update(extract_ed2k_links(plain))
+            plain_alts = collect_alternatives_from_text(plain)
+            magnets.update(plain_alts.get("magnets") or [])
+            ed2k.update(plain_alts["ed2k"])
+            pikpak_sha.update(plain_alts["pikpak_sha"])
+            if plain_alts.get("hash_entries"):
+                hash_entries.extend(plain_alts["hash_entries"])
 
         if ed2k:
             print(f"[info]   ed2k from post body: {len(ed2k)}")
@@ -982,10 +1037,17 @@ def maybe_send_feishu_progress(
 
 
 def dedupe_candidates(candidates: list[dict]) -> list[dict]:
+    from forum_browser import canonical_thread_href, thread_id_from_href
+
     seen: set[str] = set()
     out: list[dict] = []
     for item in candidates:
-        key = (item.get("href") or "").strip() or f"title:{item.get('title', '')}"
+        href = (item.get("href") or "").strip()
+        if href:
+            item["href"] = canonical_thread_href(href)
+            key = thread_id_from_href(item["href"]) or item["href"]
+        else:
+            key = f"title:{item.get('title', '')}"
         if key in seen:
             continue
         seen.add(key)

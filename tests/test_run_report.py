@@ -286,7 +286,7 @@ class UndownloadedPostsTests(unittest.TestCase):
         with patch("title_translate.translate_title_for_item", return_value="最色情的邻居"):
             section = _md_undownloaded_posts(matched, download_report)
         self.assertIn("### 日本片（1 帖）", section)
-        self.assertIn("ABC-123 · 无链接", section)
+        self.assertIn("ABC-123 · 链接未抓取", section)
         self.assertIn("最色情的邻居", section)
         self.assertIn('href="https://www.sehuatang.org/thread-no-link.html"', section)
         self.assertIn("_（无链接）_", section)
