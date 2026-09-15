@@ -317,6 +317,22 @@ Equivalent crontab line:
 
 Verify: `crontab -l | grep new-movie-tracker-daily` · Log: `data/daily_run.log` · Dry-run: `./scripts/setup_cron.sh --dry-run`
 
+### GitHub Actions schedule (07:00 Asia/Shanghai, optional)
+
+Only if you run `daily_run` in CI with the required secrets and browser setup. **07:00 北京时间** equals:
+
+```yaml
+on:
+  schedule:
+    # Option A: UTC (GitHub default)
+    - cron: '0 23 * * *'
+    # Option B: explicit timezone (clearer)
+    - cron: '0 7 * * *'
+      timezone: Asia/Shanghai
+```
+
+Self-hosted cron/systemd remains the recommended path for Cloudflare + local `chrome_profile`.
+
 ### Linux systemd timer (07:00 Asia/Shanghai)
 
 For servers using systemd instead of cron:
