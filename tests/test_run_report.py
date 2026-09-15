@@ -433,6 +433,71 @@ class UndownloadedPostsTests(unittest.TestCase):
         self.assertIn('href="https://www.sehuatang.org/thread-domestic.html"', section)
         self.assertIn("<pre><code>magnet:?xt=urn:btih:pending</code></pre>", section)
 
+    def test_domestic_undownloaded_sorted_by_post_date_desc(self):
+        matched = [
+            {
+                "href": "thread-old.html",
+                "title": "[国产] old post",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "酒店偷拍",
+                "date": "2024-06-01",
+                "magnets": ["magnet:?xt=urn:btih:old"],
+            },
+            {
+                "href": "thread-new.html",
+                "title": "[国产] new post",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "素人",
+                "date": "2026-03-15",
+                "magnets": ["magnet:?xt=urn:btih:new"],
+            },
+            {
+                "href": "thread-nodate.html",
+                "title": "[国产] no date",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "ed2k",
+                "magnets": ["magnet:?xt=urn:btih:nodate"],
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+        _, domestic_entries = _build_undownloaded_entries(matched, download_report)
+        self.assertEqual(
+            [e["href"] for e in domestic_entries],
+            ["thread-new.html", "thread-old.html", "thread-nodate.html"],
+        )
+
+    def test_domestic_success_sorted_by_post_date_desc(self):
+        matched = [
+            {
+                "href": "thread-old.html",
+                "title": "[国产] old post",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "酒店偷拍",
+                "date": "2024-06-01",
+            },
+            {
+                "href": "thread-new.html",
+                "title": "[国产] new post",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "素人",
+                "date": "2026-03-15",
+            },
+            {
+                "href": "thread-nodate.html",
+                "title": "[国产] no date",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "ed2k",
+            },
+        ]
+        succeeded = [
+            {"href": "thread-old.html", "name": "old", "uri": "magnet:?xt=urn:btih:old"},
+            {"href": "thread-new.html", "name": "new", "uri": "magnet:?xt=urn:btih:new"},
+            {"href": "thread-nodate.html", "name": "nodate", "uri": "magnet:?xt=urn:btih:nodate"},
+        ]
+        section = _md_success_sections(succeeded, matched)
+        self.assertLess(section.index("new post"), section.index("old post"))
+        self.assertLess(section.index("old post"), section.index("no date"))
+
 
 class MdTableCellLinkTests(unittest.TestCase):
     def test_plain_text_without_url(self):
