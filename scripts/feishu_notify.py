@@ -317,6 +317,36 @@ def _error_summary(failed: list[dict]) -> str:
     return "\n".join(f"• {reason}: **{count}**" for reason, count in buckets.most_common(6))
 
 
+def _submit_funnel_card_lines(scan_stats: dict[str, Any]) -> str:
+    sf = scan_stats.get("submit_funnel") or {}
+    if not sf:
+        return ""
+    multi = sf.get("multi_link_posts", 0)
+    multi_text = f"（**{multi}** 帖含多条）" if multi else ""
+    return (
+        f"5a. 待提交链接（展开）: **{sf.get('expanded_links', 0)}** 条{multi_text}\n"
+        f"5b. 扫描去重后: **{sf.get('submit_candidates', 0)}** 条"
+        f"（跳过旧扫描 **{sf.get('scan_dedup_skipped', 0)}** 条）\n"
+        f"5c. new_only 跳过: **{sf.get('new_only_skipped', 0)}** 条（已在 download_state）\n"
+    )
+
+
+def _submit_funnel_footnote(
+    scan_stats: dict[str, Any],
+    link_sum: int,
+    total: int,
+) -> str:
+    sf = scan_stats.get("submit_funnel") or {}
+    if sf:
+        return (
+            f"_有链接帖展开 **{sf.get('expanded_links', 0)}** 条 URI → "
+            f"扫描去重 **{sf.get('submit_candidates', 0)}** → "
+            f"new_only 跳过 **{sf.get('new_only_skipped', 0)}** → "
+            f"本次提交 **{total}** 条_"
+        )
+    return f"_{link_sum} 条 URI ≠ {total} 条提交：内容过滤 + 无链接 + JavDB 门控 + 去重_"
+
+
 def build_scan_summary_card(
     scan_stats: dict[str, Any],
     download_report: dict[str, Any],
@@ -372,8 +402,9 @@ def build_scan_summary_card(
         f"3. 可下载(过滤): **{dl_posts}** 帖\n"
         f"4. 有链接: **{with_link}** 帖 | 无链接: **{without_link}** 帖\n"
         f"5. JavDB 低分/无分: **{skipped_score}** 帖\n"
+        f"{_submit_funnel_card_lines(scan_stats)}"
         f"6. PikPak 提交: 成功 **{ok}** + 失败 **{fail}** = **{total}** 条（按链接计）\n"
-        f"_{link_sum} 条 URI ≠ {total} 条提交：内容过滤 + 无链接 + JavDB 门控 + 去重_"
+        f"{_submit_funnel_footnote(scan_stats, link_sum, total)}\n"
         f"{jav_lines}{domestic_lines}\n"
         f"**失败原因汇总**\n{_error_summary(download_report.get('failed') or [])}\n"
     )
@@ -435,7 +466,7 @@ def notify_cards(
         scan_stats.get("matched") or [],
     )
 
-    from scan_delta import apply_scan_dedup
+    from scan_delta import apply_scan_dedup, compute_submit_funnel_stats
 
     output_dir = result_paths[0].parent if result_paths else SKILL_DIR / "data"
     scan_stats, download_report = apply_scan_dedup(
@@ -443,6 +474,16 @@ def notify_cards(
         download_report,
         output_dir=output_dir,
     )
+    if result_paths:
+        try:
+            scan_stats["submit_funnel"] = compute_submit_funnel_stats(
+                scan_stats.get("matched") or [],
+                download_report,
+                result_path=result_paths[0],
+                output_dir=output_dir,
+            )
+        except Exception as exc:
+            print(f"[warn] submit funnel stats: {exc}")
     repeat = scan_stats.get("matched_repeat") or 0
     if repeat:
         print(

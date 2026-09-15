@@ -239,6 +239,7 @@ def scan_funnel_stats_rows(
             str(skipped_jav_score),
             "日本片 JavDB 评分&lt;4 或无评分，不提交 PikPak",
         ],
+        *_submit_funnel_stat_rows(scan_stats, download_report),
         [
             "PikPak 成功",
             str(ok),
@@ -257,18 +258,62 @@ def scan_funnel_stats_rows(
     ]
 
 
+def _submit_funnel_stat_rows(
+    scan_stats: dict[str, Any],
+    download_report: dict[str, Any],
+) -> list[list[str]]:
+    sf = scan_stats.get("submit_funnel") or {}
+    if not sf:
+        return []
+    with_link = scan_stats.get("with_link", 0)
+    multi = sf.get("multi_link_posts", 0)
+    multi_note = f"，其中 **{multi}** 帖含多条" if multi else ""
+    scan_skip = sf.get("scan_dedup_skipped", 0)
+    return [
+        [
+            "待提交链接（展开）",
+            str(sf.get("expanded_links", 0)),
+            f"有链接 **{with_link}** 帖展开为 URI 条数{multi_note}（帖数≠链接数）",
+        ],
+        [
+            "扫描去重后",
+            str(sf.get("submit_candidates", 0)),
+            f"相对上次扫描仍为新的链接（跳过 **{scan_skip}** 条旧扫描重复）",
+        ],
+        [
+            "new_only 跳过",
+            str(sf.get("new_only_skipped", 0)),
+            "已在 download_state 提交过，本次不重复提交",
+        ],
+    ]
+
+
 def scan_funnel_footnote(
     scan_stats: dict[str, Any],
     download_report: dict[str, Any],
 ) -> str:
     dl_posts = scan_stats.get("downloadable", 0)
     without_link = scan_stats.get("without_link", 0)
+    with_link = scan_stats.get("with_link", 0)
     total = download_report.get("total") or download_report.get("ok", 0)
     lt = scan_stats.get("link_totals") or {}
     link_sum = lt.get("magnet", 0) + lt.get("ed2k", 0) + lt.get("bt", 0)
-    return (
+    base = (
         f"**数据漏斗**：匹配帖 → 采集链接({link_sum} 条 URI) → 内容过滤({dl_posts} 帖可下载)"
-        f" → 选出链接 → JavDB 门控 → PikPak 提交({total} 条)。"
+        f" → 有链接({with_link} 帖)"
+    )
+    sf = scan_stats.get("submit_funnel") or {}
+    if sf:
+        base += (
+            f" → 展开({sf.get('expanded_links', 0)} 条)"
+            f" → 扫描去重后({sf.get('submit_candidates', 0)} 条)"
+            f" → new_only 跳过({sf.get('new_only_skipped', 0)} 条)"
+            f" → PikPak 提交({total} 条)"
+        )
+    else:
+        base += f" → JavDB 门控 → PikPak 提交({total} 条)"
+    return (
+        f"{base}。"
         f"链接条数≠帖数；{without_link} 帖可下载但无链；日本片低分/无分不提交。"
     )
 
