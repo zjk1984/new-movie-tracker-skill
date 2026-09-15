@@ -62,8 +62,15 @@ def is_pseudo_jav(title: str, number: str = "") -> bool:
     return bool(PSEUDO_JAV_RE.search(title or ""))
 
 
+def title_has_ai_enhanced(title: str) -> bool:
+    text = title or ""
+    return "AI增强" in text or "AI 增强" in text
+
+
 def is_domestic_excluded(title: str, number: str = "") -> bool:
     text = title or ""
+    if title_has_ai_enhanced(text):
+        return True
     if "私拍" in text:
         return True
     if ONLYFANS_RE.search(text):
@@ -93,8 +100,6 @@ def domestic_keep_reason(title: str, number: str = "", *, has_ed2k: bool = False
         return "泄密"
     if DOMESTIC_LEAK_OUT_RE.search(text):
         return "流出"
-    if "AI增强" in text or "AI 增强" in text:
-        return "AI增强"
     if title_has_ed2k(text) or has_ed2k:
         return "ed2k"
     return None
