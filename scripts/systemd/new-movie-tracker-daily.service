@@ -1,0 +1,16 @@
+[Unit]
+Description=New Movie Tracker daily scan + PikPak download
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%i
+Environment=TZ=Asia/Shanghai
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%i/scripts/daily_run.sh
+StandardOutput=append:%i/data/daily_run.log
+StandardError=append:%i/data/daily_run.log
+
+[Install]
+WantedBy=multi-user.target

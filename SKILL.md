@@ -278,7 +278,7 @@ python scripts/pikpak_download.py --sha 'PikPak://file.mkv|123456789|GCID40CHARH
 
 ### 10. Daily Schedule (7:00 AM, incremental download)
 
-Run every morning at **07:00** to scan recent forum posts and submit **only new magnets** since the last run (tracked in `download_state.json`).
+Run every morning at **07:00 Asia/Shanghai (北京时间)** to scan recent forum posts and submit **only new magnets** since the last run (tracked in `download_state.json`). Install with `scripts/setup_cron.sh` (Linux) or `scripts/setup_windows_task.ps1` (Windows).
 
 **One-time setup**
 1. Save PikPak token: `python scripts/pikpak_login.py login` (stored in `pikpak_auth.json`).

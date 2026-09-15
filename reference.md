@@ -234,9 +234,11 @@ python scripts/scan.py --days 3 --fetch-magnets
 
 If a Cloudflare challenge appears, complete it manually in the opened window. The script waits up to 90s. After success, cookies are saved in `chrome_profile/` inside the output directory.
 
-## Daily Schedule (07:00, incremental download)
+## Daily Schedule (07:00 Asia/Shanghai, incremental download)
 
 `scripts/daily_run.py` scans **forum-2 / forum-95 / forum-142** (今日下载链接) + forum-103 + forum-37, applies cnsub-first + content filter, then submits **only new downloads** to PikPak (dedup via `download_state.json` in the output directory).
+
+**Timezone:** schedules use **Asia/Shanghai (北京时间, UTC+8)** — the same default as report timestamps in `env_utils.py`. GitHub Actions is not used: the run needs a local Chrome profile, Cloudflare session, and PikPak credentials on the host machine.
 
 ### Prepare once
 
@@ -278,11 +280,13 @@ Incremental logic (`download_state.json`):
 - Skip if **btih** hash already submitted
 - Skip if **thread href** already submitted (same post)
 
-### Windows Task Scheduler (07:00)
+### Windows Task Scheduler (07:00 Asia/Shanghai)
+
+Set Windows system timezone to **(UTC+08:00) Beijing** (or run at 07:00 local if the machine is already in China Standard Time).
 
 1. Open **Task Scheduler** → **Create Basic Task**
 2. Name: `NewMovieTracker-Daily`
-3. Trigger: **Daily** → **07:00:00** (local time)
+3. Trigger: **Daily** → **07:00:00**
 4. Action: **Start a program**
    - Program: `C:\path\to\new-movie-tracker-skill\scripts\daily_run.bat`
    - Start in: `C:\path\to\new-movie-tracker-skill`
@@ -297,10 +301,46 @@ Arguments: scripts\daily_run.py --headless
 Start in: C:\path\to\new-movie-tracker-skill
 ```
 
-### Linux cron (07:00)
+### Linux cron (07:00 Asia/Shanghai)
+
+One-liner install (recommended):
+
+```bash
+./scripts/setup_cron.sh
+```
+
+Equivalent crontab line:
 
 ```cron
-0 7 * * * /path/to/new-movie-tracker-skill/scripts/daily_run.sh
+0 7 * * * TZ=Asia/Shanghai /path/to/new-movie-tracker-skill/scripts/daily_run.sh # new-movie-tracker-daily
+```
+
+Verify: `crontab -l | grep new-movie-tracker-daily` · Log: `data/daily_run.log` · Dry-run: `./scripts/setup_cron.sh --dry-run`
+
+### GitHub Actions schedule (07:00 Asia/Shanghai, optional)
+
+Only if you run `daily_run` in CI with the required secrets and browser setup. **07:00 北京时间** equals:
+
+```yaml
+on:
+  schedule:
+    # Option A: UTC (GitHub default)
+    - cron: '0 23 * * *'
+    # Option B: explicit timezone (clearer)
+    - cron: '0 7 * * *'
+      timezone: Asia/Shanghai
+```
+
+Self-hosted cron/systemd remains the recommended path for Cloudflare + local `chrome_profile`.
+
+### Linux systemd timer (07:00 Asia/Shanghai)
+
+For servers using systemd instead of cron:
+
+```bash
+sudo ./scripts/setup_systemd_timer.sh
+systemctl list-timers new-movie-tracker-daily.timer
+sudo systemctl start new-movie-tracker-daily.service   # manual test
 ```
 
 ## Scheduled Automation (legacy scan-only)

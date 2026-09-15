@@ -1,4 +1,4 @@
-# Register Windows Task Scheduler job for daily_run (07:00 local time).
+# Register Windows Task Scheduler job for daily_run (07:00 Asia/Shanghai local time).
 # Run in PowerShell (Admin optional):  .\scripts\setup_windows_task.ps1
 param(
     [string]$Time = "07:00",
