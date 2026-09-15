@@ -8,6 +8,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = Path(
@@ -91,14 +92,46 @@ def translate_ja_to_zh(text: str) -> str:
         return ""
 
 
+def _magnet_dn_text(item: dict[str, Any]) -> str:
+    uri = item.get("uri") or item.get("url") or item.get("magnet") or ""
+    match = re.search(r"[?&]dn=([^&]+)", uri, flags=re.IGNORECASE)
+    return unquote(match.group(1)).strip() if match else ""
+
+
+def _strip_leading_av_number(text: str, av_number: str) -> str:
+    text = (text or "").strip()
+    if not text or not av_number:
+        return text
+    return re.sub(
+        rf"^\s*{re.escape(av_number)}\s*",
+        "",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def _javdb_title_matches_item(item: dict[str, Any], q: dict[str, Any]) -> bool:
+    av_number = (item.get("av_number") or "").strip().upper()
+    q_number = (q.get("number") or "").strip().upper()
+    if av_number and q_number and av_number != q_number:
+        return False
+    return bool(q.get("title"))
+
+
 def source_text_for_item(item: dict[str, Any]) -> str:
     region = item.get("content_region") or ""
     q = item.get("javdb_query") or {}
-    if region in {"jav_censored", "uncensored", "fc2"} and q.get("title"):
+    if region in {"jav_censored", "uncensored", "fc2"} and _javdb_title_matches_item(item, q):
         return str(q["title"])
-    title = (item.get("title") or "").replace("\n", " ").strip()
-    stripped = AV_PREFIX_RE.sub("", title).strip()
-    return stripped or title
+
+    av_number = (item.get("av_number") or "").strip().upper()
+    for raw in (item.get("name"), _magnet_dn_text(item), item.get("title")):
+        text = _strip_leading_av_number(str(raw or ""), av_number)
+        text = AV_PREFIX_RE.sub("", text.replace("\n", " ")).strip()
+        if text:
+            return text
+    return ""
 
 
 def translate_title_for_item(item: dict[str, Any]) -> str:
