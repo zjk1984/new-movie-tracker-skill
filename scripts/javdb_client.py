@@ -88,6 +88,18 @@ def extract_av_number(text: str) -> str | None:
     return m.group(0).upper() if m else None
 
 
+def extract_all_av_numbers(text: str) -> list[str]:
+    """Return unique AV numbers found in text, preserving first-seen order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for match in AV_NUMBER_RE.finditer(text or ""):
+        num = match.group(0).upper()
+        if num not in seen:
+            seen.add(num)
+            out.append(num)
+    return out
+
+
 def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
