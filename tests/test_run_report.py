@@ -11,8 +11,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from run_report import (  # noqa: E402
+    _build_undownloaded_entries,
     _md_success_sections,
     _md_table_cell_link,
+    _md_undownloaded_posts,
     _previous_report_line,
     _success_full_title,
     _success_name_cell,
@@ -263,6 +265,67 @@ class PreviousReportLineTests(unittest.TestCase):
             with patch("run_report.github_blob_url", return_value=None):
                 line = _previous_report_line(previous, reports_dir=reports_dir)
             self.assertIn("[daily_2026-09-13_120000.md](backup/daily_2026-09-13_120000.md)", line)
+
+
+class UndownloadedPostsTests(unittest.TestCase):
+    def test_includes_no_link_downloadable_post_with_translated_title(self):
+        matched = [
+            {
+                "href": "thread-no-link.html",
+                "title": "[有码] ABC-123 最高にエロい隣人",
+                "content_region": "jav_censored",
+                "av_number": "ABC-123",
+                "javdb_query": {
+                    "query_status": "ok",
+                    "score": 4.5,
+                    "title": "最高にエロい隣人",
+                },
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+        with patch("title_translate.translate_title_for_item", return_value="最色情的邻居"):
+            section = _md_undownloaded_posts(matched, download_report)
+        self.assertIn("### 日本片（1 帖）", section)
+        self.assertIn("ABC-123 · 无链接", section)
+        self.assertIn("最色情的邻居", section)
+        self.assertIn('href="https://www.sehuatang.org/thread-no-link.html"', section)
+        self.assertIn("_（无链接）_", section)
+        self.assertNotIn("<pre><code>magnet:", section)
+
+    def test_skips_no_link_post_when_href_already_succeeded(self):
+        matched = [
+            {
+                "href": "thread-done.html",
+                "title": "[国产] 酒店偷拍",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "酒店偷拍",
+            },
+        ]
+        download_report = {
+            "succeeded": [{"href": "thread-done.html", "uri": "magnet:?xt=urn:btih:abc"}],
+            "failed": [],
+        }
+        jav_entries, domestic_entries = _build_undownloaded_entries(matched, download_report)
+        self.assertEqual(jav_entries, [])
+        self.assertEqual(domestic_entries, [])
+
+    def test_domestic_uses_chinese_title_and_thread_link(self):
+        matched = [
+            {
+                "href": "thread-domestic.html",
+                "title": "[国产] 素人ハメ撮り",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "素人",
+                "magnets": ["magnet:?xt=urn:btih:pending"],
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+        with patch("title_translate.translate_title_for_item", return_value="素人拍摄"):
+            section = _md_undownloaded_posts(matched, download_report)
+        self.assertIn("### 国产（1 帖）", section)
+        self.assertIn("素人拍摄", section)
+        self.assertIn('href="https://www.sehuatang.org/thread-domestic.html"', section)
+        self.assertIn("<pre><code>magnet:?xt=urn:btih:pending</code></pre>", section)
 
 
 class MdTableCellLinkTests(unittest.TestCase):

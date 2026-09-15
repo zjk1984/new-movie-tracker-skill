@@ -530,6 +530,11 @@ def _build_undownloaded_entries(
         for x in (download_report.get("succeeded") or [])
         if _item_uri(x)
     }
+    succeeded_hrefs = {
+        (x.get("href") or "").strip()
+        for x in (download_report.get("succeeded") or [])
+        if (x.get("href") or "").strip()
+    }
     failed_by_uri, failed_by_href = _index_failed(download_report.get("failed") or [])
 
     jav_entries: list[dict[str, Any]] = []
@@ -543,23 +548,29 @@ def _build_undownloaded_entries(
             continue
 
         links = _collect_post_uris(item)
-        if not links:
-            continue
+        href = (item.get("href") or "").strip()
+        if links:
+            pending = [(kind, uri) for kind, uri in links if uri not in succeeded_uris]
+            if not pending:
+                continue
+        else:
+            if href and href in succeeded_hrefs:
+                continue
+            pending = []
 
-        pending = [(kind, uri) for kind, uri in links if uri not in succeeded_uris]
-        if not pending:
-            continue
-
-        href = item.get("href") or ""
         errors = [failed_by_uri.get(uri, "") for _, uri in pending if failed_by_uri.get(uri)]
         failed_error = errors[0] if errors else failed_by_href.get(href, "")
         from title_translate import translate_title_for_item
+
+        reason = _skip_reason_label(item, failed_error=failed_error)
+        if not links and reason == "未成功下载":
+            reason = "无链接"
 
         entry = {
             "title": (item.get("title") or "").replace("\n", " ").strip(),
             "title_zh": translate_title_for_item(item),
             "label": item.get("av_number") or _truncate(item.get("title", ""), 40),
-            "reason": _skip_reason_label(item, failed_error=failed_error),
+            "reason": reason,
             "links": pending,
             "href": href,
             "thread_url": _thread_post_url(item),
@@ -605,7 +616,7 @@ def _md_undownloaded_posts(
 
     lines = [
         "## 未下载帖子\n",
-        "> 每条帖子单独列出；选中下方代码块复制链接（多链接时每行一条，`#` 开头为注释可忽略）。\n",
+        "> 每条帖子单独列出；标题链至论坛帖；有链接时选中下方代码块复制（多链接时每行一条，`#` 开头为注释可忽略）。\n",
     ]
 
     if jav_entries:
@@ -623,9 +634,8 @@ def _md_undownloaded_posts(
             lines.append(
                 f"#### [{sub}] {_truncate(entry['label'], 36)} · {entry['reason']}\n"
             )
-            lines.append(_md_title_line(entry["title"], entry.get("thread_url", "")))
-            if entry.get("title_zh"):
-                lines.append(f"**中文**: {entry['title_zh']}\n")
+            display_title = entry.get("title_zh") or entry["title"]
+            lines.append(_md_title_line(display_title, entry.get("thread_url", "")))
             lines.append(_md_copyable_links(entry["links"]))
 
     return "\n".join(lines)
