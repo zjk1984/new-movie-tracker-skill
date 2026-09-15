@@ -59,6 +59,8 @@ class FeishuMilestoneCardTests(unittest.TestCase):
                             "query_status": "ok",
                             "number": "HMN-900",
                             "score": 4.25,
+                            "release_date": "2026-03-15",
+                            "reviews_count": 1234,
                             "tags": ["巨乳", "中出し"],
                             "tag_labels": "巨乳, 中出し",
                         },
@@ -70,6 +72,8 @@ class FeishuMilestoneCardTests(unittest.TestCase):
         body = card["elements"][0]["text"]["content"]
         self.assertIn("**JavDB 标签**", body)
         self.assertIn("**HMN-900**", body)
+        self.assertIn("2026-03-15", body)
+        self.assertIn("1234人评", body)
         self.assertIn("巨乳", body)
         self.assertIn("中出し", body)
 

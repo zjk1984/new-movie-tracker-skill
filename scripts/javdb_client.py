@@ -161,6 +161,54 @@ def _parse_score(value: Any) -> float | None:
     return score if score > 0 else None
 
 
+def _parse_reviews_count(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    return count if count >= 0 else None
+
+
+def parse_release_date_year(release_date: str | None) -> int | None:
+    """Parse JavDB release_date (YYYY-MM-DD) and return calendar year."""
+    text = _any_str(release_date).strip()
+    if not text:
+        return None
+    parts = text.split("-")
+    if len(parts) >= 3:
+        try:
+            return datetime(int(parts[0]), int(parts[1]), int(parts[2])).year
+        except (TypeError, ValueError):
+            return None
+    if len(text) >= 4 and text[:4].isdigit():
+        try:
+            return int(text[:4])
+        except ValueError:
+            return None
+    return None
+
+
+def current_beijing_year() -> int:
+    from env_utils import beijing_now
+
+    return beijing_now().year
+
+
+def reviews_threshold_for_year(
+    release_year: int,
+    *,
+    current_year: int | None = None,
+) -> int:
+    """Minimum reviews_count required for a release year (Asia/Shanghai calendar)."""
+    if current_year is None:
+        current_year = current_beijing_year()
+    if release_year < current_year:
+        return 1000
+    return 100
+
+
 def format_cnsub_label(info: dict[str, Any]) -> str:
     """Human-readable Chinese-subtitle status from JavDB metadata + magnets."""
     if info.get("query_status") == "error":
@@ -532,6 +580,7 @@ class JavDBClient:
             "javdb_id": movie_id,
             "title": _any_str(detail.get("title")),
             "release_date": _any_str(detail.get("release_date")),
+            "reviews_count": _parse_reviews_count(detail.get("reviews_count")),
             "duration": detail.get("duration"),
             "has_cnsub": detail.get("has_cnsub"),
             "score": _parse_score(detail.get("score")),
@@ -599,6 +648,9 @@ def format_lookup_summary(info: dict[str, Any], *, error: str | None = None) -> 
     number = info.get("number", "?")
     label = info.get("content_type_label") or content_type_label(info.get("content_type", ""))
     parts = [f"JavDB {number} [{label}]", f"发行 {info.get('release_date') or '-'}"]
+    reviews_count = info.get("reviews_count")
+    if reviews_count is not None:
+        parts.append(f"评价 {reviews_count} 人")
     score = info.get("score")
     if score is not None:
         parts.append(f"评分 {score:.2f}")
@@ -630,6 +682,7 @@ def build_query_report(info: dict[str, Any]) -> dict[str, Any]:
         "content_type": info.get("content_type"),
         "content_type_label": info.get("content_type_label"),
         "release_date": info.get("release_date"),
+        "reviews_count": info.get("reviews_count"),
         "title": info.get("title"),
         "has_cnsub": info.get("has_cnsub"),
         "cnsub_magnet_count": info.get("cnsub_magnet_count", 0),
@@ -657,6 +710,7 @@ def build_error_report(number: str, error: str) -> dict[str, Any]:
         "content_type": "",
         "content_type_label": "",
         "release_date": "",
+        "reviews_count": None,
         "title": "",
         "has_cnsub": None,
         "cnsub_magnet_count": 0,
@@ -687,6 +741,7 @@ def attach_javdb_query(item: dict[str, Any], client: JavDBClient) -> None:
             "number": info.get("number"),
             "title": info.get("title"),
             "release_date": info.get("release_date"),
+            "reviews_count": info.get("reviews_count"),
             "content_type": info.get("content_type"),
             "content_type_label": info.get("content_type_label"),
             "has_cnsub": info.get("has_cnsub"),
@@ -747,6 +802,42 @@ def javdb_tags_ok(item: dict[str, Any]) -> bool | None:
     return find_excluded_javdb_tag(q.get("tags")) is None
 
 
+def javdb_reviews_ok(item: dict[str, Any]) -> bool | None:
+    """Return True/False when JavDB reviews gate applies; None if not Japanese JAV."""
+    if not item_needs_javdb_score(item):
+        return None
+    q = item.get("javdb_query") or {}
+    if q.get("query_status") != "ok":
+        return True
+
+    release_date = q.get("release_date")
+    release_year = parse_release_date_year(release_date)
+    if release_year is None:
+        return False
+
+    reviews_count = _parse_reviews_count(q.get("reviews_count"))
+    if reviews_count is None:
+        return False
+
+    threshold = reviews_threshold_for_year(release_year)
+    return reviews_count >= threshold
+
+
+def javdb_reviews_skip_reason(item: dict[str, Any]) -> str:
+    """Build skip_reason for a failing reviews gate (query must be ok)."""
+    q = item.get("javdb_query") or {}
+    release_date = q.get("release_date")
+    release_year = parse_release_date_year(release_date)
+    if release_year is None:
+        return "javdb_no_release_date"
+
+    reviews_count = _parse_reviews_count(q.get("reviews_count"))
+    if reviews_count is None:
+        return "javdb_no_reviews_count"
+
+    return f"javdb_reviews_low_{int(reviews_count)}"
+
+
 def javdb_score_ok(
     item: dict[str, Any],
     *,
@@ -798,6 +889,12 @@ def ensure_javdb_score_gate(
     if tag_ok is False:
         excluded = find_excluded_javdb_tag((item.get("javdb_query") or {}).get("tags"))
         item["skip_reason"] = f"javdb_tag_excluded_{excluded}"
+        _clear_download_selection(item)
+        return False
+
+    reviews_ok = javdb_reviews_ok(item)
+    if reviews_ok is False:
+        item["skip_reason"] = javdb_reviews_skip_reason(item)
         _clear_download_selection(item)
         return False
 
@@ -881,7 +978,9 @@ def enrich_matched_javdb(
             continue
         if item.get("javdb_query"):
             q = item["javdb_query"]
-            if q.get("query_status") == "ok" and q.get("score") is None:
+            if q.get("query_status") == "ok" and (
+                q.get("score") is None or q.get("reviews_count") is None
+            ):
                 attach_javdb_query(item, client)
                 queried += 1
             continue

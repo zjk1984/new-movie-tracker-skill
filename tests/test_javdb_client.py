@@ -13,7 +13,10 @@ from javdb_client import (  # noqa: E402
     ensure_javdb_score_gate,
     extract_tag_names,
     find_excluded_javdb_tag,
+    javdb_reviews_ok,
     javdb_tags_ok,
+    parse_release_date_year,
+    reviews_threshold_for_year,
 )
 
 
@@ -36,6 +39,8 @@ class JavDBTagTests(unittest.TestCase):
             "number": "HMN-900",
             "content_type": "jav_censored",
             "content_type_label": "有码",
+            "release_date": "2026-03-01",
+            "reviews_count": 1500,
             "tags": ["巨乳", "人妻"],
             "tag_labels": "巨乳, 人妻",
             "maker_name": "本中",
@@ -45,6 +50,8 @@ class JavDBTagTests(unittest.TestCase):
         report = build_query_report(info)
         self.assertEqual(report["tags"], ["巨乳", "人妻"])
         self.assertEqual(report["tag_labels"], "巨乳, 人妻")
+        self.assertEqual(report["release_date"], "2026-03-01")
+        self.assertEqual(report["reviews_count"], 1500)
         self.assertEqual(report["maker_name"], "本中")
         self.assertEqual(report["series_name"], "人妻系列")
 
@@ -117,9 +124,104 @@ class JavDBTagTests(unittest.TestCase):
                 "query_status": "ok",
                 "number": "HMN-900",
                 "tags": ["巨乳"],
+                "release_date": "2026-01-01",
+                "reviews_count": 200,
                 "score": 4.5,
             },
         }
+        self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
+
+
+class JavDBReviewsGateTests(unittest.TestCase):
+    CURRENT_YEAR = 2026
+
+    def test_parse_release_date_year(self):
+        self.assertEqual(parse_release_date_year("2025-12-31"), 2025)
+        self.assertEqual(parse_release_date_year("2026-01-01"), 2026)
+        self.assertIsNone(parse_release_date_year(""))
+        self.assertIsNone(parse_release_date_year("invalid"))
+
+    def test_reviews_threshold_for_year(self):
+        y = self.CURRENT_YEAR
+        self.assertEqual(reviews_threshold_for_year(y - 1, current_year=y), 1000)
+        self.assertEqual(reviews_threshold_for_year(y, current_year=y), 100)
+        self.assertEqual(reviews_threshold_for_year(y + 1, current_year=y), 100)
+
+    def _item(self, *, release_date: str, reviews_count: int, score: float = 4.5):
+        return {
+            "content_region": "jav_censored",
+            "av_number": "HMN-900",
+            "javdb_query": {
+                "query_status": "ok",
+                "number": "HMN-900",
+                "tags": ["巨乳"],
+                "release_date": release_date,
+                "reviews_count": reviews_count,
+                "score": score,
+            },
+        }
+
+    def test_javdb_reviews_ok_prior_year_needs_1000(self):
+        y = self.CURRENT_YEAR
+        with self.subTest("below threshold"):
+            item = self._item(release_date=f"{y - 1}-06-01", reviews_count=999)
+            self.assertFalse(javdb_reviews_ok(item))
+        with self.subTest("at threshold"):
+            item = self._item(release_date=f"{y - 1}-06-01", reviews_count=1000)
+            self.assertTrue(javdb_reviews_ok(item))
+
+    def test_javdb_reviews_ok_current_year_needs_100(self):
+        y = self.CURRENT_YEAR
+        with self.subTest("below threshold"):
+            item = self._item(release_date=f"{y}-03-01", reviews_count=99)
+            self.assertFalse(javdb_reviews_ok(item))
+        with self.subTest("at threshold"):
+            item = self._item(release_date=f"{y}-03-01", reviews_count=100)
+            self.assertTrue(javdb_reviews_ok(item))
+
+    def test_javdb_reviews_ok_year_boundary_dec31_vs_jan1(self):
+        y = self.CURRENT_YEAR
+        dec31 = self._item(release_date=f"{y - 1}-12-31", reviews_count=500)
+        self.assertFalse(javdb_reviews_ok(dec31))
+        jan1 = self._item(release_date=f"{y}-01-01", reviews_count=500)
+        self.assertTrue(javdb_reviews_ok(jan1))
+
+    def test_javdb_reviews_ok_missing_fields(self):
+        item = {
+            "content_region": "jav_censored",
+            "javdb_query": {
+                "query_status": "ok",
+                "release_date": "2026-01-01",
+            },
+        }
+        self.assertFalse(javdb_reviews_ok(item))
+        item["javdb_query"] = {
+            "query_status": "ok",
+            "reviews_count": 200,
+        }
+        self.assertFalse(javdb_reviews_ok(item))
+
+    def test_ensure_javdb_score_gate_skips_low_reviews(self):
+        item = self._item(release_date=f"{self.CURRENT_YEAR}-02-01", reviews_count=50)
+        item["selected_magnet"] = "magnet:?xt=urn:btih:abc"
+        self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
+        self.assertEqual(item["skip_reason"], "javdb_reviews_low_50")
+        self.assertNotIn("selected_magnet", item)
+
+    def test_ensure_javdb_score_gate_reviews_before_score(self):
+        item = self._item(
+            release_date=f"{self.CURRENT_YEAR - 1}-01-01",
+            reviews_count=10,
+            score=2.0,
+        )
+        self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
+        self.assertEqual(item["skip_reason"], "javdb_reviews_low_10")
+
+    def test_ensure_javdb_score_gate_allows_high_reviews(self):
+        item = self._item(
+            release_date=f"{self.CURRENT_YEAR - 1}-01-01",
+            reviews_count=1200,
+        )
         self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
 
 
