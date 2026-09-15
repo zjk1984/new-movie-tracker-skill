@@ -178,24 +178,98 @@ def select_magnet(item: dict[str, Any], javdb_client=None) -> dict[str, Any] | N
     return None
 
 
-def apply_selection(item: dict[str, Any], javdb_client=None) -> bool:
-    selection = select_magnet(item, javdb_client)
-    if not selection:
-        return False
+def number_from_magnet(magnet: str) -> str | None:
+    """Extract AV number from magnet dn= or URI text."""
+    from javdb_client import extract_av_number
+
+    text = unquote(magnet or "")
+    dn_match = re.search(r"[?&]dn=([^&]+)", text, flags=re.IGNORECASE)
+    if dn_match:
+        num = extract_av_number(unquote(dn_match.group(1)))
+        if num:
+            return num
+    return extract_av_number(text)
+
+
+def build_number_downloads(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """Pair forum links inside one post to distinct AV numbers when possible."""
+    from javdb_client import extract_av_number
+
+    by_number: dict[str, dict[str, Any]] = {}
+
+    def add(num: str | None, payload: dict[str, Any]) -> None:
+        if not num or num in by_number:
+            return
+        by_number[num] = {"av_number": num, **payload}
+
+    for magnet in item.get("magnets") or []:
+        add(number_from_magnet(magnet), {
+            "magnet": magnet,
+            "source": "forum_magnet_dn",
+        })
+
+    for entry in item.get("hash_entries") or []:
+        uri = (entry.get("uri") or "").strip()
+        if not uri:
+            continue
+        num = extract_av_number(entry.get("name") or "") or number_from_magnet(uri)
+        kind = entry.get("kind") or ""
+        source = entry.get("source") or "forum_hash_entry"
+        if kind == "hash_label_btih" or uri.lower().startswith("magnet:"):
+            add(num, {"magnet": uri, "source": source})
+        elif uri.lower().startswith("pikpak://"):
+            add(num, {"pikpak_sha": uri, "source": source})
+        elif uri.lower().startswith("ed2k:"):
+            add(num, {"ed2k": uri, "source": source})
+
+    for ed2k in item.get("ed2k") or []:
+        add(extract_av_number(unquote(ed2k)), {
+            "ed2k": ed2k,
+            "source": "forum_ed2k",
+        })
+
+    for sha in item.get("pikpak_sha") or []:
+        add(extract_av_number(unquote(sha)), {
+            "pikpak_sha": sha,
+            "source": "forum_pikpak_sha",
+        })
+
+    return list(by_number.values())
+
+
+def _apply_download_dict(item: dict[str, Any], selection: dict[str, Any]) -> bool:
     if selection.get("magnet"):
         item["selected_magnet"] = selection["magnet"]
-        item["magnet_source"] = selection["source"]
+        item["magnet_source"] = selection.get("source", "")
         item["selected_download"] = selection["magnet"]
-        item["download_source"] = selection["source"]
+        item["download_source"] = selection.get("source", "")
+        if selection.get("av_number"):
+            item["av_number"] = selection["av_number"]
         return True
     if selection.get("pikpak_sha"):
         item["selected_pikpak_sha"] = selection["pikpak_sha"]
         item["selected_download"] = selection["pikpak_sha"]
-        item["download_source"] = selection["source"]
+        item["download_source"] = selection.get("source", "")
+        if selection.get("av_number"):
+            item["av_number"] = selection["av_number"]
         return True
     if selection.get("ed2k"):
         item["selected_ed2k"] = selection["ed2k"]
         item["selected_download"] = selection["ed2k"]
-        item["download_source"] = selection["source"]
+        item["download_source"] = selection.get("source", "")
+        if selection.get("av_number"):
+            item["av_number"] = selection["av_number"]
         return True
     return False
+
+
+def apply_selection(item: dict[str, Any], javdb_client=None) -> bool:
+    paired = build_number_downloads(item)
+    if paired:
+        item["number_downloads"] = paired
+        return _apply_download_dict(item, paired[0])
+
+    selection = select_magnet(item, javdb_client)
+    if not selection:
+        return False
+    return _apply_download_dict(item, selection)

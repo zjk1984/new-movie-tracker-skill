@@ -7,6 +7,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -313,9 +314,50 @@ def _item_has_non_ed2k_download(item: dict) -> bool:
     return False
 
 
+def _downloads_from_number_entry(nd: dict[str, Any], item: dict) -> dict | None:
+    from pikpak_links import parse_download_link, parse_pikpak_sha
+
+    num = nd.get("av_number") or item.get("av_number") or ""
+    fallback_name = num or item_download_name(item)
+    if nd.get("magnet"):
+        return {
+            "type": "url",
+            "url": nd["magnet"],
+            "uri": nd["magnet"],
+            "name": fallback_name,
+            "source": nd.get("source", ""),
+            "av_number": num,
+        }
+    if nd.get("pikpak_sha"):
+        parsed = parse_pikpak_sha(nd["pikpak_sha"])
+        if parsed:
+            parsed["source"] = nd.get("source", "forum_pikpak_sha")
+            parsed["av_number"] = num
+            parsed.setdefault("name", fallback_name)
+            return parsed
+    if nd.get("ed2k"):
+        parsed = parse_download_link(nd["ed2k"])
+        if parsed:
+            parsed["name"] = fallback_name
+            parsed["source"] = nd.get("source", "forum_ed2k")
+            parsed["av_number"] = num
+            return parsed
+    return None
+
+
 def iter_item_downloads(item: dict) -> list[dict]:
     """Yield download link dicts; ed2k-only posts return every ed2k file."""
     from pikpak_links import parse_download_link
+
+    number_downloads = item.get("number_downloads") or []
+    if number_downloads:
+        rows: list[dict] = []
+        for nd in number_downloads:
+            parsed = _downloads_from_number_entry(nd, item)
+            if parsed:
+                rows.append(parsed)
+        if rows:
+            return rows
 
     if _item_has_non_ed2k_download(item):
         picked = pick_item_download(item)
@@ -374,30 +416,34 @@ def load_downloads_from_result(
     for item in data.get("matched", []):
         if today_only and item.get("date") != today:
             continue
-        if region_filter:
-            apply_region_filter(item, region_filter=True)
-        if region_filter and javdb_score_gate:
-            if not is_submit_eligible(item, javdb_client, query_if_missing=True):
-                skipped_score += 1
-                continue
-        elif region_filter:
-            from content_filter import is_downloadable
-
-            if not is_downloadable(item):
-                continue
-
         downloads = iter_item_downloads(item)
         if not downloads:
             continue
         title = item.get("title", "download")
         for download in downloads:
+            probe = dict(item)
+            probe["av_number"] = download.get("av_number") or item.get("av_number", "")
+            if probe["av_number"] and probe.get("number_downloads"):
+                probe["title"] = f"[有码] {probe['av_number']} {title}"
+            if region_filter:
+                apply_region_filter(probe, region_filter=True)
+            if region_filter and javdb_score_gate:
+                if not is_submit_eligible(probe, javdb_client, query_if_missing=True):
+                    skipped_score += 1
+                    continue
+            elif region_filter:
+                from content_filter import is_downloadable
+
+                if not is_downloadable(probe):
+                    continue
+
             entry = {
-                "name": download.get("name") or item_download_name(item),
+                "name": download.get("name") or item_download_name(probe),
                 "title": title,
                 "type": download["type"],
                 "source": download.get("source", ""),
                 "href": item.get("href", ""),
-                "av_number": item.get("av_number", ""),
+                "av_number": download.get("av_number") or probe.get("av_number", ""),
                 "uri": download.get("uri") or download.get("url") or "",
             }
             if download["type"] == "sha":
