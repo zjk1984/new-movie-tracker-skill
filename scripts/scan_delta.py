@@ -46,7 +46,10 @@ def item_dedup_keys(item: dict[str, Any]) -> set[str]:
     keys: set[str] = set()
     href = (item.get("href") or "").strip()
     if href:
-        keys.add(f"href:{href}")
+        from forum_browser import thread_id_from_href
+
+        tid = thread_id_from_href(href)
+        keys.add(f"href:{tid or href}")
 
     try:
         from javdb_client import extract_av_number
