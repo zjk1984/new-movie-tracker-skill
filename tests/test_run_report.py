@@ -140,6 +140,37 @@ class ScanFunnelStatsTests(unittest.TestCase):
         self.assertEqual(labels[5], "可下载（过滤保留）")
         self.assertIn("PikPak 合计", labels[-1])
 
+    def test_stats_rows_include_submit_funnel_breakdown(self):
+        rows = scan_funnel_stats_rows(
+            {
+                "matched_total": 130,
+                "with_link": 70,
+                "downloadable": 108,
+                "without_link": 38,
+                "skipped_jav_score": 21,
+                "link_totals": {"magnet": 245, "ed2k": 16, "bt": 121},
+                "posts_with": {"magnet": 87, "ed2k": 15, "bt": 13},
+                "submit_funnel": {
+                    "expanded_links": 75,
+                    "multi_link_posts": 2,
+                    "submit_candidates": 75,
+                    "scan_dedup_skipped": 124,
+                    "new_only_skipped": 15,
+                    "submitted_ok": 60,
+                    "submitted_fail": 0,
+                },
+            },
+            {"ok": 60, "failed_count": 0, "total": 60},
+        )
+        labels = [row[0] for row in rows]
+        self.assertIn("待提交链接（展开）", labels)
+        self.assertIn("扫描去重后", labels)
+        self.assertIn("new_only 跳过", labels)
+        expand_row = next(r for r in rows if r[0] == "待提交链接（展开）")
+        self.assertEqual(expand_row[1], "75")
+        skip_row = next(r for r in rows if r[0] == "new_only 跳过")
+        self.assertEqual(skip_row[1], "15")
+
 
 class ReportArchiveTests(unittest.TestCase):
     def test_archive_moves_root_reports_to_backup(self):

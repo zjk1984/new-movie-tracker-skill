@@ -286,3 +286,56 @@ def apply_scan_dedup(
     report["failed_count"] = len(report["failed"])
     report["total"] = report["ok"] + report["failed_count"]
     return scan_stats, report
+
+
+def compute_submit_funnel_stats(
+    matched: list[dict[str, Any]],
+    download_report: dict[str, Any],
+    *,
+    result_path: Path | str,
+    output_dir: Path | str,
+) -> dict[str, int]:
+    """Break down 有链接帖 → URI 条数 → scan dedup → new_only → PikPak 提交."""
+    from content_filter import is_downloadable
+    from pikpak_download import iter_item_downloads, load_downloads_from_result, pick_item_download
+
+    expanded_links = 0
+    multi_link_posts = 0
+    for item in matched:
+        if not is_downloadable(item):
+            continue
+        if (item.get("skip_reason") or "").startswith("javdb_"):
+            continue
+        if not pick_item_download(item):
+            continue
+        uris = [
+            (dl.get("uri") or dl.get("url") or "").strip()
+            for dl in iter_item_downloads(item)
+        ]
+        uris = [u for u in uris if u]
+        if not uris:
+            continue
+        if len(uris) > 1:
+            multi_link_posts += 1
+        expanded_links += len(uris)
+
+    all_rows = load_downloads_from_result(
+        Path(result_path),
+        today_only=False,
+        region_filter=True,
+    )
+    candidates, scan_dedup_skipped = filter_new_download_items(all_rows, output_dir)
+    ok = int(download_report.get("ok") or 0)
+    fail = int(download_report.get("failed_count") or 0)
+    submitted = ok + fail
+    new_only_skipped = max(0, len(candidates) - submitted)
+
+    return {
+        "expanded_links": expanded_links,
+        "multi_link_posts": multi_link_posts,
+        "submit_candidates": len(candidates),
+        "scan_dedup_skipped": scan_dedup_skipped,
+        "new_only_skipped": new_only_skipped,
+        "submitted_ok": ok,
+        "submitted_fail": fail,
+    }
