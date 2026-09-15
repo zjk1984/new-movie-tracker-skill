@@ -492,6 +492,9 @@ def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
     if reason.startswith("javdb_score_low_"):
         score = reason.replace("javdb_score_low_", "")
         return f"JavDB 评分 {score} < 4"
+    if reason.startswith("javdb_tag_excluded_"):
+        tag = reason.replace("javdb_tag_excluded_", "")
+        return f"JavDB 标签排除: {tag}"
     labels = {
         "javdb_no_score": "JavDB 无评分",
         "javdb_query_error": "JavDB 查询失败",
