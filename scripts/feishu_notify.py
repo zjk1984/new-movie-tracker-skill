@@ -361,19 +361,19 @@ def build_scan_summary_card(
         if repeat
         else ""
     )
+    link_sum = lt.get("magnet", 0) + lt.get("ed2k", 0) + lt.get("bt", 0)
     md = (
         f"**扫描时间** {format_beijing_time(scan_stats.get('scan_time')) or '（无）'}\n\n"
         f"**扫描板块**\n{forum_lines or '(无)'}\n\n"
-        f"**帖子统计** 匹配 **{scan_stats.get('matched_total', 0)}** 帖{repeat_line}\n"
-        f"• 可下载(过滤保留): **{dl_posts}** 帖\n"
-        f"• 有链接: **{with_link}** 帖 | 无链接: **{without_link}** 帖\n"
-        f"  _(无链接=标题保留 ed2k/国产 但未进帖抓到链接)_\n\n"
-        f"**链接采集**\n"
-        f"• 磁力: **{lt.get('magnet', 0)}** 条 ({pw.get('magnet', 0)} 帖)\n"
-        f"• ed2k: **{lt.get('ed2k', 0)}** 条 ({pw.get('ed2k', 0)} 帖)\n"
-        f"• BT种子: **{lt.get('bt', 0)}** 条 ({pw.get('bt', 0)} 帖)\n\n"
-        f"**PikPak 提交**(按**链接**计) 成功 **{ok}** + 失败 **{fail}** = **{total}** 条\n"
-        f"_(可下载 {dl_posts} 帖 ≠ 提交 {total} 条：{without_link} 帖无链接 + 多文件帖按链接计)_"
+        f"**数据漏斗**{repeat_line}\n"
+        f"1. 匹配帖: **{scan_stats.get('matched_total', 0)}**\n"
+        f"2. 采集链接合计: **{link_sum}** 条 URI"
+        f"（磁力 **{lt.get('magnet', 0)}** / ed2k **{lt.get('ed2k', 0)}** / BT **{lt.get('bt', 0)}**）\n"
+        f"3. 可下载(过滤): **{dl_posts}** 帖\n"
+        f"4. 有链接: **{with_link}** 帖 | 无链接: **{without_link}** 帖\n"
+        f"5. JavDB 低分/无分: **{skipped_score}** 帖\n"
+        f"6. PikPak 提交: 成功 **{ok}** + 失败 **{fail}** = **{total}** 条（按链接计）\n"
+        f"_{link_sum} 条 URI ≠ {total} 条提交：内容过滤 + 无链接 + JavDB 门控 + 去重_"
         f"{jav_lines}{domestic_lines}\n"
         f"**失败原因汇总**\n{_error_summary(download_report.get('failed') or [])}\n"
     )
@@ -586,18 +586,17 @@ def build_scan_done_card(
     ) or "• （无）"
     lt = scan_stats.get("link_totals") or {}
     pw = scan_stats.get("posts_with") or {}
+    link_sum = lt.get("magnet", 0) + lt.get("ed2k", 0) + lt.get("bt", 0)
     md = (
         f"**完成时间** {format_beijing_time(beijing_now(), with_label=True)}\n\n"
         f"**任务类型** {_run_label_title(run_label)}\n\n"
         f"**扫描板块**\n{forum_lines}\n\n"
-        f"**帖子统计** 匹配 **{scan_stats.get('matched_total', 0)}** 帖\n"
-        f"• 可下载: **{scan_stats.get('downloadable', 0)}** 帖\n"
-        f"• 有链接: **{scan_stats.get('with_link', 0)}** 帖"
+        f"**数据漏斗（扫描阶段）**\n"
+        f"1. 匹配帖: **{scan_stats.get('matched_total', 0)}**\n"
+        f"2. 采集链接: **{link_sum}** 条 URI\n"
+        f"3. 可下载: **{scan_stats.get('downloadable', 0)}** 帖\n"
+        f"4. 有链接: **{scan_stats.get('with_link', 0)}** 帖"
         f" | 无链接: **{scan_stats.get('without_link', 0)}** 帖\n\n"
-        f"**链接采集**\n"
-        f"• 磁力: **{lt.get('magnet', 0)}** 条 ({pw.get('magnet', 0)} 帖)\n"
-        f"• ed2k: **{lt.get('ed2k', 0)}** 条 ({pw.get('ed2k', 0)} 帖)\n"
-        f"• BT种子: **{lt.get('bt', 0)}** 条 ({pw.get('bt', 0)} 帖)\n\n"
         f"**下一步** PikPak 提交进行中（若未跳过下载）"
     )
     return {
