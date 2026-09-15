@@ -77,6 +77,45 @@ class FeishuMilestoneCardTests(unittest.TestCase):
         self.assertIn("巨乳", body)
         self.assertIn("中出し", body)
 
+    def test_javdb_tags_card_lines_sorted_by_release_date_desc(self):
+        card = build_scan_summary_card(
+            {
+                "scan_time": "2026-09-15T12:00:00+08:00",
+                "forums": {"forum-142 有码": 2},
+                "matched_total": 2,
+                "downloadable": 2,
+                "with_link": 2,
+                "without_link": 0,
+                "link_totals": {"magnet": 2, "ed2k": 0, "bt": 0},
+                "posts_with": {"magnet": 2, "ed2k": 0, "bt": 0},
+                "matched": [
+                    {
+                        "content_region": "jav_censored",
+                        "av_number": "OLD-111",
+                        "javdb_query": {
+                            "query_status": "ok",
+                            "number": "OLD-111",
+                            "release_date": "2024-01-01",
+                            "tags": ["标签A"],
+                        },
+                    },
+                    {
+                        "content_region": "jav_censored",
+                        "av_number": "NEW-222",
+                        "javdb_query": {
+                            "query_status": "ok",
+                            "number": "NEW-222",
+                            "release_date": "2026-03-15",
+                            "tags": ["标签B"],
+                        },
+                    },
+                ],
+            },
+            {"ok": 0, "failed_count": 0, "total": 0, "succeeded": [], "failed": []},
+        )
+        body = card["elements"][0]["text"]["content"]
+        self.assertLess(body.index("NEW-222"), body.index("OLD-111"))
+
     def test_build_scan_summary_card_omits_tags_when_absent(self):
         card = build_scan_summary_card(
             {
