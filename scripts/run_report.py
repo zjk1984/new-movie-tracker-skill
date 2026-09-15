@@ -355,6 +355,21 @@ JAV_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
 FORUM_SITE_BASE = "https://www.sehuatang.org/"
 
 
+def _item_release_date(item: dict[str, Any]) -> str:
+    q = item.get("javdb_query") or {}
+    return (q.get("release_date") or item.get("release_date") or "").strip()
+
+
+def _item_post_date(item: dict[str, Any]) -> str:
+    """Forum post publish date from scan (YYYY-MM-DD)."""
+    return (item.get("date") or "").strip()
+
+
+def _release_date_desc_sort_key(date: str) -> tuple[int, str]:
+    d = (date or "").strip()
+    return (1, d) if d else (0, "")
+
+
 def _thread_post_url(item: dict[str, Any]) -> str:
     from forum_browser import canonical_thread_href
 
@@ -383,6 +398,30 @@ def _md_table_cell_link(text: str, url: str) -> str:
             f"{html.escape(text)}</a>"
         )
     return html.escape(text)
+
+
+def _success_item_release_date(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]],
+) -> str:
+    base = matched_by_href.get(item.get("href") or "")
+    if base:
+        date = _item_release_date(base)
+        if date:
+            return date
+    return _item_release_date(item)
+
+
+def _success_item_post_date(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]],
+) -> str:
+    base = matched_by_href.get(item.get("href") or "")
+    if base:
+        date = _item_post_date(base)
+        if date:
+            return date
+    return _item_post_date(item)
 
 
 def _success_full_title(
@@ -620,6 +659,7 @@ def _build_undownloaded_entries(
             "title": (item.get("title") or "").replace("\n", " ").strip(),
             "title_zh": translate_title_for_item(item),
             "label": item.get("av_number") or _truncate(item.get("title", ""), 40),
+            "release_date": _item_release_date(item),
             "reason": reason,
             "links": pending,
             "href": href,
@@ -632,10 +672,17 @@ def _build_undownloaded_entries(
             if pending and all(uri in failed_by_uri for _, uri in pending):
                 continue
             entry["subtype"] = item.get("domestic_subtype") or "其他"
+            entry["post_date"] = _item_post_date(item)
             domestic_entries.append(entry)
 
-    jav_entries.sort(key=lambda x: x.get("label", ""))
-    domestic_entries.sort(key=lambda x: (x.get("subtype", ""), x.get("title", "")))
+    jav_entries.sort(
+        key=lambda x: _release_date_desc_sort_key(x.get("release_date", "")),
+        reverse=True,
+    )
+    domestic_entries.sort(
+        key=lambda x: _release_date_desc_sort_key(x.get("post_date", "")),
+        reverse=True,
+    )
     return jav_entries, domestic_entries
 
 
@@ -834,6 +881,10 @@ def _domestic_report_sections(matched: list[dict[str, Any]]) -> str:
     ]
     for subtype, _ in subtype_counts.most_common():
         group = [m for m in items if (m.get("domestic_subtype") or "其他") == subtype]
+        group.sort(
+            key=lambda m: _release_date_desc_sort_key(_item_post_date(m)),
+            reverse=True,
+        )
         rows = [
             [
                 _truncate(m.get("title", ""), 70),
@@ -996,6 +1047,18 @@ def _md_success_sections(
     matched = matched or []
     matched_by_href = {m.get("href"): m for m in matched if m.get("href")}
     jav_items, domestic_items = _split_success_items(succeeded, matched_by_href)
+    jav_items.sort(
+        key=lambda x: _release_date_desc_sort_key(
+            _success_item_release_date(x, matched_by_href),
+        ),
+        reverse=True,
+    )
+    domestic_items.sort(
+        key=lambda x: _release_date_desc_sort_key(
+            _success_item_post_date(x, matched_by_href),
+        ),
+        reverse=True,
+    )
 
     score_lookup = _build_jav_score_lookup(matched)
     _fill_missing_jav_scores(jav_items, score_lookup, matched_by_href)

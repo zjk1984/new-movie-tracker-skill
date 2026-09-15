@@ -340,6 +340,81 @@ class UndownloadedPostsTests(unittest.TestCase):
         self.assertEqual(jav_entries, [])
         self.assertEqual(domestic_entries, [])
 
+    def test_jav_success_sorted_by_release_date_desc(self):
+        matched = [
+            {
+                "href": "thread-old.html",
+                "title": "[有码] AAA-111 old",
+                "content_region": "jav_censored",
+                "av_number": "AAA-111",
+                "javdb_query": {
+                    "query_status": "ok",
+                    "score": 4.5,
+                    "release_date": "2024-06-01",
+                },
+            },
+            {
+                "href": "thread-new.html",
+                "title": "[有码] BBB-222 new",
+                "content_region": "jav_censored",
+                "av_number": "BBB-222",
+                "release_date": "2026-03-15",
+            },
+        ]
+        succeeded = [
+            {
+                "href": "thread-old.html",
+                "name": "AAA-111",
+                "uri": "magnet:?xt=urn:btih:aaa",
+            },
+            {
+                "href": "thread-new.html",
+                "name": "BBB-222",
+                "uri": "magnet:?xt=urn:btih:bbb",
+            },
+        ]
+        with patch("title_translate.translate_title_for_item", side_effect=lambda i: i.get("title", "")):
+            section = _md_success_sections(succeeded, matched)
+        self.assertLess(section.index("BBB-222"), section.index("AAA-111"))
+
+    def test_jav_undownloaded_sorted_by_release_date_desc(self):
+        matched = [
+            {
+                "href": "thread-old.html",
+                "title": "[有码] AAA-111 old",
+                "content_region": "jav_censored",
+                "av_number": "AAA-111",
+                "javdb_query": {
+                    "query_status": "ok",
+                    "score": 4.5,
+                    "release_date": "2024-06-01",
+                },
+                "magnets": ["magnet:?xt=urn:btih:aaa"],
+            },
+            {
+                "href": "thread-new.html",
+                "title": "[有码] BBB-222 new",
+                "content_region": "jav_censored",
+                "av_number": "BBB-222",
+                "release_date": "2026-03-15",
+                "magnets": ["magnet:?xt=urn:btih:bbb"],
+            },
+            {
+                "href": "thread-nodate.html",
+                "title": "[有码] CCC-333 nodate",
+                "content_region": "jav_censored",
+                "av_number": "CCC-333",
+                "javdb_query": {"query_status": "ok", "score": 4.5},
+                "magnets": ["magnet:?xt=urn:btih:ccc"],
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+        jav_entries, _ = _build_undownloaded_entries(matched, download_report)
+        self.assertEqual(
+            [e["label"] for e in jav_entries],
+            ["BBB-222", "AAA-111", "CCC-333"],
+        )
+
     def test_domestic_uses_chinese_title_and_thread_link(self):
         matched = [
             {
@@ -357,6 +432,71 @@ class UndownloadedPostsTests(unittest.TestCase):
         self.assertIn("素人拍摄", section)
         self.assertIn('href="https://www.sehuatang.org/thread-domestic.html"', section)
         self.assertIn("<pre><code>magnet:?xt=urn:btih:pending</code></pre>", section)
+
+    def test_domestic_undownloaded_sorted_by_post_date_desc(self):
+        matched = [
+            {
+                "href": "thread-old.html",
+                "title": "[国产] old post",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "酒店偷拍",
+                "date": "2024-06-01",
+                "magnets": ["magnet:?xt=urn:btih:old"],
+            },
+            {
+                "href": "thread-new.html",
+                "title": "[国产] new post",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "素人",
+                "date": "2026-03-15",
+                "magnets": ["magnet:?xt=urn:btih:new"],
+            },
+            {
+                "href": "thread-nodate.html",
+                "title": "[国产] no date",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "ed2k",
+                "magnets": ["magnet:?xt=urn:btih:nodate"],
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+        _, domestic_entries = _build_undownloaded_entries(matched, download_report)
+        self.assertEqual(
+            [e["href"] for e in domestic_entries],
+            ["thread-new.html", "thread-old.html", "thread-nodate.html"],
+        )
+
+    def test_domestic_success_sorted_by_post_date_desc(self):
+        matched = [
+            {
+                "href": "thread-old.html",
+                "title": "[国产] old post",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "酒店偷拍",
+                "date": "2024-06-01",
+            },
+            {
+                "href": "thread-new.html",
+                "title": "[国产] new post",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "素人",
+                "date": "2026-03-15",
+            },
+            {
+                "href": "thread-nodate.html",
+                "title": "[国产] no date",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "ed2k",
+            },
+        ]
+        succeeded = [
+            {"href": "thread-old.html", "name": "old", "uri": "magnet:?xt=urn:btih:old"},
+            {"href": "thread-new.html", "name": "new", "uri": "magnet:?xt=urn:btih:new"},
+            {"href": "thread-nodate.html", "name": "nodate", "uri": "magnet:?xt=urn:btih:nodate"},
+        ]
+        section = _md_success_sections(succeeded, matched)
+        self.assertLess(section.index("new post"), section.index("old post"))
+        self.assertLess(section.index("old post"), section.index("no date"))
 
 
 class MdTableCellLinkTests(unittest.TestCase):
