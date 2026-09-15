@@ -55,6 +55,14 @@ def run_scan(
         cmd.extend(["--run-label", run_label])
     if args.headless:
         cmd.append("--headless")
+    if not getattr(args, "serial", False):
+        cmd.append("--two-phase")
+        list_workers = getattr(args, "list_workers", None)
+        fetch_workers = getattr(args, "fetch_workers", None)
+        if list_workers is not None:
+            cmd.extend(["--list-workers", str(list_workers)])
+        if fetch_workers is not None:
+            cmd.extend(["--fetch-workers", str(fetch_workers)])
     print("[info] running scan:", " ".join(cmd))
     return subprocess.call(cmd, cwd=str(SKILL_DIR))
 
@@ -228,6 +236,23 @@ def main() -> int:
         "--no-feishu",
         action="store_true",
         help="Disable Feishu notify even if FEISHU_RECEIVE_ID is set",
+    )
+    parser.add_argument(
+        "--serial",
+        action="store_true",
+        help="Disable two-phase parallel scan (default uses parallel two-phase)",
+    )
+    parser.add_argument(
+        "--list-workers",
+        type=int,
+        default=int(os.environ.get("SCAN_LIST_WORKERS", "3")),
+        help="Parallel forum list workers (default: 3)",
+    )
+    parser.add_argument(
+        "--fetch-workers",
+        type=int,
+        default=int(os.environ.get("SCAN_FETCH_WORKERS", "4")),
+        help="Parallel thread-fetch workers (default: 4)",
     )
     args = parser.parse_args()
     if args.no_headless:
