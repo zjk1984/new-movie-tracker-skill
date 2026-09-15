@@ -352,7 +352,6 @@ def _collect_fail_uris(failed: list[dict[str, Any]]) -> list[str]:
 
 
 JAV_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
-DOMESTIC_REGIONS = frozenset({"domestic_leak", "domestic_other"})
 FORUM_SITE_BASE = "https://www.sehuatang.org/"
 
 
