@@ -1,0 +1,10 @@
+[Unit]
+Description=New Movie Tracker daily run at 07:00 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 07:00:00
+Persistent=true
+Unit=new-movie-tracker-daily.service
+
+[Install]
+WantedBy=timers.target
