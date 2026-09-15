@@ -358,10 +358,16 @@ def _javdb_tags_card_lines(
         number = q.get("number") or item.get("av_number") or "?"
         score = q.get("score")
         score_text = f" ({score:.2f})" if score is not None else ""
+        release_date = (q.get("release_date") or "").strip()
+        release_text = f" {release_date}" if release_date else ""
+        reviews_count = q.get("reviews_count")
+        reviews_text = ""
+        if reviews_count is not None:
+            reviews_text = f" · {int(reviews_count)}人评"
         label = ", ".join(tags[:8])
         if len(tags) > 8:
             label += "…"
-        lines.append(f"• **{number}**{score_text}: {label}")
+        lines.append(f"• **{number}**{release_text}{reviews_text}{score_text}: {label}")
         if len(lines) >= limit:
             break
     if not lines:
