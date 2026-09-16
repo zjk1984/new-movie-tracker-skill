@@ -199,7 +199,15 @@ def parse_release_date_year(release_date: str | None) -> int | None:
     return None
 
 
-def is_recent_release(release_date: str | None, *, days: int = 7) -> bool:
+JAVDB_RECENT_RELEASE_DAYS = 30
+JAVDB_RECENT_MIN_REVIEWS = 10
+
+
+def is_recent_release(
+    release_date: str | None,
+    *,
+    days: int = JAVDB_RECENT_RELEASE_DAYS,
+) -> bool:
     """True when release_date is within *days* calendar days of today (Asia/Shanghai)."""
     from env_utils import beijing_now
 
@@ -832,15 +840,18 @@ def javdb_reviews_ok(item: dict[str, Any]) -> bool | None:
         return True
 
     release_date = q.get("release_date")
-    if is_recent_release(release_date):
-        return True
-
-    release_year = parse_release_date_year(release_date)
-    if release_year is None:
+    if parse_release_date(release_date) is None:
         return False
 
     reviews_count = _parse_reviews_count(q.get("reviews_count"))
     if reviews_count is None:
+        return False
+
+    if is_recent_release(release_date):
+        return reviews_count >= JAVDB_RECENT_MIN_REVIEWS
+
+    release_year = parse_release_date_year(release_date)
+    if release_year is None:
         return False
 
     threshold = reviews_threshold_for_year(release_year)
