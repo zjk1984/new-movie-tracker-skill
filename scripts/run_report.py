@@ -508,16 +508,17 @@ def _md_success_item_block(
     phase = _format_phase_status(item.get("phase") or item.get("status") or "ok")
     title, thread_url = _success_display_title(item, matched_by_href, is_jav=is_jav)
 
+    match_reason = _match_reason_label(item, matched_by_href, is_jav=is_jav)
     if is_jav:
         score = _success_item_score(
             item,
             score_lookup=score_lookup,
             matched_by_href=matched_by_href,
         )
-        header = f"#### {label} · {link_type} · {score} · {phase}\n"
+        header = f"#### {label} · {match_reason} · {link_type} · {score} · {phase}\n"
     else:
         subtype = _success_item_subtype(item, matched_by_href)
-        header = f"#### [{subtype}] {label} · {link_type} · {phase}\n"
+        header = f"#### [{subtype}] {label} · {match_reason} · {link_type} · {phase}\n"
 
     lines = [header, _md_title_line(title, thread_url)]
     uri = _item_uri(item)
@@ -534,13 +535,28 @@ def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
     if reason.startswith("javdb_tag_excluded_"):
         tag = reason.replace("javdb_tag_excluded_", "")
         return f"JavDB 标签排除: {tag}"
+    if reason.startswith("javdb_reviews_low_"):
+        count = reason.replace("javdb_reviews_low_", "")
+        return f"JavDB 评论数不足 ({count})"
     labels = {
         "javdb_no_score": "JavDB 无评分",
         "javdb_query_error": "JavDB 查询失败",
         "javdb_no_number": "无番号，未提交",
+        "javdb_no_release_date": "JavDB 无发行日期",
+        "javdb_no_reviews_count": "JavDB 无评论数",
+        "not_eligible": "未通过提交门控",
     }
     if reason in labels:
         return labels[reason]
+    if reason.startswith("excluded_"):
+        region = reason.replace("excluded_", "")
+        region_labels = {
+            "domestic_other": "国产其他（未保留子类）",
+            "western": "欧美",
+            "amateur": "素人番号",
+            "other": "其他类型",
+        }
+        return region_labels.get(region, f"内容过滤排除 ({region})")
     if failed_error:
         if "task_url_resolve_error" in failed_error:
             return "PikPak 无法解析链接"
@@ -548,6 +564,37 @@ def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
     if reason:
         return reason
     return "未成功下载"
+
+
+def _ensure_item_skip_reason(item: dict[str, Any]) -> None:
+    """Populate skip_reason on Japanese items when gate was not run during scan."""
+    region = item.get("content_region") or ""
+    if region not in JAV_REGIONS:
+        return
+    if item.get("skip_reason"):
+        return
+    from javdb_client import is_submit_eligible
+
+    is_submit_eligible(item, query_if_missing=False)
+
+
+def _match_reason_label(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]],
+    *,
+    is_jav: bool,
+) -> str:
+    from submit_gate import build_submit_probe
+
+    probe = build_submit_probe(item, matched_by_href)
+    if is_jav:
+        q = probe.get("javdb_query") or {}
+        score = q.get("score")
+        if score is not None and q.get("query_status") == "ok":
+            return f"JavDB 通过 · {float(score):.2f}"
+        return "JavDB 通过"
+    subtype = _success_item_subtype(item, matched_by_href)
+    return f"匹配: {subtype}"
 
 
 def _collect_post_uris(item: dict[str, Any]) -> list[tuple[str, str]]:
@@ -635,6 +682,9 @@ def _build_undownloaded_entries(
             continue
         if not is_downloadable(item):
             continue
+
+        if region in JAV_REGIONS:
+            _ensure_item_skip_reason(item)
 
         links = _collect_post_uris(item)
         href = (item.get("href") or "").strip()
