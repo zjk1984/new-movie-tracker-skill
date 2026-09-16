@@ -607,6 +607,39 @@ def _md_success_item_block(
     return "".join(lines)
 
 
+ALREADY_SUBMITTED_SKIP_LABEL = "已提交（本次跳过）"
+
+
+def _load_download_state(output_dir: Path | str | None) -> dict[str, Any] | None:
+    if not output_dir:
+        return None
+    from download_state import default_state_path, load_state
+
+    path = default_state_path(output_dir)
+    if not path.exists():
+        return None
+    return load_state(path)
+
+
+def _entry_in_download_state(
+    group_links: list[tuple[str, str]],
+    href: str,
+    state: dict[str, Any] | None,
+) -> bool:
+    if not state:
+        return False
+    from download_state import is_already_submitted
+
+    if group_links:
+        return all(
+            is_already_submitted({"uri": uri, "href": href}, state)
+            for _kind, uri in group_links
+        )
+    if href:
+        return is_already_submitted({"href": href}, state)
+    return False
+
+
 def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
     reason = item.get("skip_reason") or ""
     if reason.startswith("javdb_score_low_"):
@@ -751,6 +784,8 @@ def _index_failed(failed: list[dict[str, Any]]) -> tuple[dict[str, str], dict[st
 def _build_undownloaded_entries(
     matched: list[dict[str, Any]],
     download_report: dict[str, Any],
+    *,
+    output_dir: Path | str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     from content_filter import is_downloadable
 
@@ -765,6 +800,7 @@ def _build_undownloaded_entries(
         if (x.get("href") or "").strip()
     }
     failed_by_uri, failed_by_href = _index_failed(download_report.get("failed") or [])
+    download_state = _load_download_state(output_dir)
 
     jav_entries: list[dict[str, Any]] = []
     domestic_entries: list[dict[str, Any]] = []
@@ -824,6 +860,11 @@ def _build_undownloaded_entries(
             reason = _skip_reason_label(probe, failed_error=failed_error)
             if not group_links and reason == "未成功下载":
                 reason = "链接未抓取"
+            elif (
+                reason == "未成功下载"
+                and _entry_in_download_state(group_links, href, download_state)
+            ):
+                reason = ALREADY_SUBMITTED_SKIP_LABEL
 
             label = (
                 probe.get("av_number")
@@ -879,38 +920,70 @@ def _md_copyable_links(links: list[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def _md_undownloaded_entry_block(entry: dict[str, Any], *, domestic: bool = False) -> str:
+    if domestic:
+        sub = entry.get("subtype") or "其他"
+        header = f"#### [{sub}] {_truncate(entry['label'], 36)} · {entry['reason']}\n"
+    else:
+        header = f"#### {entry['label']} · {entry['reason']}\n"
+    display_title = entry.get("title_zh") or entry["title"]
+    return header + _md_title_line(display_title, entry.get("thread_url", "")) + _md_copyable_links(
+        entry["links"],
+    )
+
+
 def _md_undownloaded_posts(
     matched: list[dict[str, Any]],
     download_report: dict[str, Any],
+    *,
+    output_dir: Path | str | None = None,
 ) -> str:
-    jav_entries, domestic_entries = _build_undownloaded_entries(matched, download_report)
+    jav_entries, domestic_entries = _build_undownloaded_entries(
+        matched,
+        download_report,
+        output_dir=output_dir,
+    )
     total = len(jav_entries) + len(domestic_entries)
     if total == 0:
         return "## 未下载帖子\n\n_（无）_\n"
+
+    skipped = [
+        e
+        for e in jav_entries + domestic_entries
+        if e.get("reason") == ALREADY_SUBMITTED_SKIP_LABEL
+    ]
+    jav_pending = [e for e in jav_entries if e.get("reason") != ALREADY_SUBMITTED_SKIP_LABEL]
+    domestic_pending = [
+        e for e in domestic_entries if e.get("reason") != ALREADY_SUBMITTED_SKIP_LABEL
+    ]
 
     lines = [
         "## 未下载帖子\n",
         "> 每条帖子单独列出；标题链至论坛帖；有链接时选中下方代码块复制（多链接时每行一条，`#` 开头为注释可忽略）。\n",
     ]
 
-    if jav_entries:
-        lines.append(f"### 日本片（{len(jav_entries)} 帖）\n")
-        for entry in jav_entries:
-            lines.append(f"#### {entry['label']} · {entry['reason']}\n")
-            display_title = entry.get("title_zh") or entry["title"]
-            lines.append(_md_title_line(display_title, entry.get("thread_url", "")))
-            lines.append(_md_copyable_links(entry["links"]))
-
-    if domestic_entries:
-        lines.append(f"### 国产（{len(domestic_entries)} 帖）\n")
-        for entry in domestic_entries:
-            sub = entry.get("subtype") or "其他"
+    if skipped:
+        lines.append(f"### 已提交（本次跳过）（{len(skipped)} 帖）\n")
+        lines.append(
+            "> 链接已在 download_state 提交过，本次 new_only 未重复提交 PikPak。\n",
+        )
+        for entry in skipped:
             lines.append(
-                f"#### [{sub}] {_truncate(entry['label'], 36)} · {entry['reason']}\n"
+                _md_undownloaded_entry_block(
+                    entry,
+                    domestic=entry in domestic_entries,
+                ),
             )
-            display_title = entry.get("title_zh") or entry["title"]
-            lines.append(_md_title_line(display_title, entry.get("thread_url", "")))
-            lines.append(_md_copyable_links(entry["links"]))
+
+    if jav_pending:
+        lines.append(f"### 日本片（{len(jav_pending)} 帖）\n")
+        for entry in jav_pending:
+            lines.append(_md_undownloaded_entry_block(entry))
+
+    if domestic_pending:
+        lines.append(f"### 国产（{len(domestic_pending)} 帖）\n")
+        for entry in domestic_pending:
+            lines.append(_md_undownloaded_entry_block(entry, domestic=True))
 
     return "\n".join(lines)
 
@@ -1278,6 +1351,7 @@ def write_run_report(
     download_report: dict[str, Any],
     *,
     reports_dir: Path | None = None,
+    output_dir: Path | str | None = None,
     run_label: str = "run",
 ) -> RunReportResult:
     out_dir = reports_dir or REPORTS_DIR
@@ -1334,7 +1408,7 @@ def write_run_report(
 
 {_md_fail_links(failed_items)}
 
-{_md_undownloaded_posts(scan_stats.get("matched") or [], download_report)}
+{_md_undownloaded_posts(scan_stats.get("matched") or [], download_report, output_dir=output_dir)}
 
 ## 下载成功
 
