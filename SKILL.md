@@ -156,7 +156,7 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 | **AI短剧** | 含「AI短剧」或「AI真人短剧」 |
 | **熟女自拍** | 含「熟女」 |
 | **酒店偷拍** | 含「酒店偷拍」（含乐橙酒店偷拍等） |
-| **ed2k** | 标题含 ed2k/115Ed2k/115eD2k 等，或帖内提取到 `ed2k://` 链接 |
+| **ed2k** | 国产帖：标题含 ed2k/115Ed2k/115eD2k 等，或帖内 `ed2k://`（须命中国产上下文，非 blanket domestic） |
 
 保留帖子的 `selected_download` / 磁力会提交 PikPak；JSON 字段 `domestic_subtype` 标明子类。
 
@@ -167,6 +167,10 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 | 排除原因 | 匹配 |
 |----------|------|
 | **私拍** | 标题含「私拍」 |
+| **厕拍** | 标题含「厕拍」 |
+| **黑人** | 标题含「黑人」 |
+| **情色分享** | 标题含「情色分享」 |
+| **AI增强** | 标题含「AI增强」或「AI 增强」 |
 | **伪JAV番号** | 番号前缀 XJX、JDSY、MDSY、MDSR、JDSC、CNXX、RXAJ、TMW、TMG、YCM 等（如 `XJX-380`、`MDSR-0009-1`） |
 | **OnlyFans** | OnlyFans、HongKongDoll、Hong Kong Doll、玩偶姐姐 |
 
@@ -225,7 +229,7 @@ Optional env: `JAVDB_HOST`, `JAVDB_TOKEN`, `JAVDB_AUTH_FILE`, `JAVDB_DEVICE_UUID
 
 When the user wants **Chinese-subtitled magnets** from forum posts and automatic PikPak download:
 
-**Content filter (default):** Japanese **有码** + **无码破解** + **国产/ed2k**（泄密/流出/AI增强/AI短剧/熟女自拍/酒店偷拍/ed2k；排除私拍/伪番号/OnlyFans）。详见 **§6 国产无码规则**。Western、FC2、素人 JAV 排除。`--all-regions` 关闭全部过滤。
+**Content filter (default):** Japanese **有码** + **无码破解** + **国产/ed2k**（泄密/流出/AI短剧/熟女自拍/酒店偷拍/ed2k；排除私拍/厕拍/黑人/情色分享/AI增强/伪番号/OnlyFans）。详见 **§6 国产无码规则**。Western、FC2、素人 JAV 排除。`--all-regions` 关闭全部过滤。
 
 **Download policy (in order):**
 1. Forum title indicates cnsub (中字/字幕/中文…) and thread has magnets → use forum magnet
