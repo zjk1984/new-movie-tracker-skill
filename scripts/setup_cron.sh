@@ -25,7 +25,7 @@ Install cron job(s) for scripts/daily_run.sh.
 
 Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
-After install, run: sudo service cron restart (required on some VMs).
+After install, attempts to restart the cron daemon automatically (required on some VMs).
 
 Usage:
   ./scripts/setup_cron.sh [--dry-run] [--time HH:MM] [--time HH:MM ...]
@@ -92,6 +92,23 @@ is_tracker_cron_line() {
   [[ "$line" == *"$WRAPPER"* ]] || [[ "$line" == *"$MARK"* ]]
 }
 
+restart_cron_daemon() {
+  if sudo service cron restart 2>/dev/null; then
+    echo "[ok] cron daemon restarted (sudo service cron restart)"
+    return 0
+  fi
+  if sudo systemctl restart cron 2>/dev/null; then
+    echo "[ok] cron daemon restarted (sudo systemctl restart cron)"
+    return 0
+  fi
+  if service cron restart 2>/dev/null; then
+    echo "[ok] cron daemon restarted (service cron restart)"
+    return 0
+  fi
+  echo "[warn] could not restart cron daemon automatically; run manually: sudo service cron restart" >&2
+  return 1
+}
+
 chmod +x "$WRAPPER"
 mkdir -p "$ROOT/data"
 
@@ -135,3 +152,7 @@ done
 echo "     timezone: $TZ_NAME (system TZ should match for correct schedule)"
 echo "     log: $ROOT/data/daily_run.log"
 crontab -l | grep "$MARK" || true
+
+if ! restart_cron_daemon; then
+  echo "[warn] crontab installed but cron may not pick up changes until restart" >&2
+fi

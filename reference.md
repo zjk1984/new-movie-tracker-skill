@@ -307,10 +307,9 @@ One-liner install (recommended):
 
 ```bash
 ./scripts/setup_cron.sh
-sudo service cron restart
 ```
 
-Installs **three** slots (07:00, 13:00, and 20:00 Beijing). Requires system timezone **Asia/Shanghai** (Vixie cron uses system local time for scheduling). **Restart cron with sudo** after install so jobs reload (required on some cloud VMs).
+Installs **three** slots (07:00, 13:00, and 20:00 Beijing). Requires system timezone **Asia/Shanghai** (Vixie cron uses system local time for scheduling). The installer **automatically attempts to restart the cron daemon** after updating crontab (`sudo service cron restart`, then `sudo systemctl restart cron`, then `service cron restart`). If all fail, run **`sudo service cron restart`** manually (required on some cloud VMs).
 
 Equivalent crontab lines:
 
