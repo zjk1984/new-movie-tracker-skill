@@ -207,14 +207,15 @@ Disable with `--no-javdb-query`.
 
 Before PikPak submit, `scripts/javdb_client.py` applies gates in order: **tags** → **reviews_count** → **score** (default min 4.0, `JAVDB_MIN_DOWNLOAD_SCORE`).
 
-**Reviews gate** (`reviews_count` vs release year, Asia/Shanghai calendar):
+**Reviews gate** (`reviews_count` vs release date/year, Asia/Shanghai calendar):
 
-| Release year | Minimum `reviews_count` |
-|--------------|-------------------------|
+| Release timing | Minimum `reviews_count` |
+|----------------|---------------------------|
+| Within 30 calendar days of today | ≥ 10 |
+| Current year (older than 30 days) | ≥ 100 |
 | Prior years | ≥ 1000 |
-| Current year | ≥ 100 |
 
-**Recent-release exception:** if `release_date` is within **7 calendar days** of today (Asia/Shanghai), the reviews gate passes even when `reviews_count` is `0` or missing. Older current-year releases still require ≥ 100.
+Missing `release_date` or `reviews_count` fails (including `0` reviews on recent releases). Constants: `JAVDB_RECENT_RELEASE_DAYS`, `JAVDB_RECENT_MIN_REVIEWS`.
 
 Skip reasons: `javdb_no_release_date`, `javdb_no_reviews_count`, `javdb_reviews_low_{n}`.
 

@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from javdb_client import (  # noqa: E402
+    JAVDB_RECENT_MIN_REVIEWS,
+    JAVDB_RECENT_RELEASE_DAYS,
     build_query_report,
     current_beijing_year,
     ensure_javdb_score_gate,
@@ -305,45 +307,64 @@ class JavDBReviewsGateTests(unittest.TestCase):
             )
             self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
 
-    def test_is_recent_release_within_seven_days(self):
+    def test_is_recent_release_within_thirty_days(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
         today = datetime(2026, 9, 16, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
         with patch("env_utils.beijing_now", return_value=today):
+            self.assertEqual(JAVDB_RECENT_RELEASE_DAYS, 30)
             self.assertTrue(is_recent_release("2026-09-16"))
-            self.assertTrue(is_recent_release("2026-09-09"))
-            self.assertFalse(is_recent_release("2026-09-08"))
+            self.assertTrue(is_recent_release("2026-08-17"))
+            self.assertFalse(is_recent_release("2026-08-16"))
             self.assertFalse(is_recent_release("2026-09-17"))
             self.assertFalse(is_recent_release(""))
 
-    def test_javdb_reviews_ok_recent_release_allows_zero_or_missing(self):
+    def test_javdb_reviews_ok_recent_release_needs_ten(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
         today = datetime(2026, 9, 16, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        release_15_days_ago = "2026-09-01"
         with patch("env_utils.beijing_now", return_value=today):
             with patch("javdb_client.current_beijing_year", return_value=2026):
-                with self.subTest("today zero reviews"):
+                with self.subTest("15 days ago 9 reviews fails"):
                     item = self._item(
-                        release_date="2026-09-16",
-                        reviews_count=0,
-                        av_number="MXGS-1446",
+                        release_date=release_15_days_ago,
+                        reviews_count=9,
+                    )
+                    self.assertFalse(javdb_reviews_ok(item))
+                with self.subTest("15 days ago 10 reviews passes"):
+                    item = self._item(
+                        release_date=release_15_days_ago,
+                        reviews_count=JAVDB_RECENT_MIN_REVIEWS,
                     )
                     self.assertTrue(javdb_reviews_ok(item))
-                with self.subTest("today missing reviews"):
+                with self.subTest("15 days ago zero reviews fails"):
                     item = self._item(
-                        release_date="2026-09-16",
-                        reviews_count=None,
-                        av_number="MXGS-1446",
-                    )
-                    self.assertTrue(javdb_reviews_ok(item))
-                with self.subTest("eight days ago zero reviews"):
-                    item = self._item(
-                        release_date="2026-09-08",
+                        release_date=release_15_days_ago,
                         reviews_count=0,
                     )
                     self.assertFalse(javdb_reviews_ok(item))
+                with self.subTest("15 days ago missing reviews fails"):
+                    item = self._item(
+                        release_date=release_15_days_ago,
+                        reviews_count=None,
+                    )
+                    self.assertFalse(javdb_reviews_ok(item))
+
+    def test_javdb_reviews_ok_past_recent_window_uses_year_threshold(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        today = datetime(2026, 9, 16, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        release_35_days_ago = "2026-08-12"
+        with patch("env_utils.beijing_now", return_value=today):
+            with patch("javdb_client.current_beijing_year", return_value=2026):
+                item = self._item(release_date=release_35_days_ago, reviews_count=10)
+                self.assertFalse(javdb_reviews_ok(item))
+                item = self._item(release_date=release_35_days_ago, reviews_count=100)
+                self.assertTrue(javdb_reviews_ok(item))
 
     def test_javdb_reviews_ok_current_year_old_release_still_needs_100(self):
         from datetime import datetime
