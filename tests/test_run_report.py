@@ -10,7 +10,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from download_state import empty_state, mark_submitted, save_state  # noqa: E402
 from run_report import (  # noqa: E402
+    ALREADY_SUBMITTED_SKIP_LABEL,
     _build_undownloaded_entries,
     _match_reason_label,
     _md_success_sections,
@@ -732,6 +734,90 @@ class BatchSplitByNumberTests(unittest.TestCase):
         self.assertIn("#### MFYD-186 ·", section)
         self.assertIn("magnet:?xt=urn:btih:AAA", section)
         self.assertIn("magnet:?xt=urn:btih:BBB", section)
+
+
+class AlreadySubmittedSkipLabelTests(unittest.TestCase):
+    def _write_state(self, tmp: Path, uri: str, *, href: str = "") -> None:
+        state = empty_state()
+        mark_submitted(state, [{"uri": uri, "href": href, "name": "MXGS-1446"}])
+        save_state(tmp / "download_state.json", state)
+
+    def test_undownloaded_marks_prior_submit_as_skipped(self):
+        magnet = "magnet:?xt=urn:btih:5D241C1F86C5E537F5128B7B6A3369D2412BBC9C"
+        matched = [
+            {
+                "href": "thread-3767014-1-1.html",
+                "title": "[无码] MXGS-1446 office NTR",
+                "content_region": "uncensored",
+                "av_number": "MXGS-1446",
+                "magnets": [magnet],
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            self._write_state(tmp, magnet, href="thread-3767014-1-1.html")
+            with patch("title_translate.translate_title_for_item", return_value="测试"):
+                with patch("run_report._ensure_item_skip_reason"):
+                    jav_entries, _ = _build_undownloaded_entries(
+                        matched,
+                        download_report,
+                        output_dir=tmp,
+                    )
+        self.assertEqual(len(jav_entries), 1)
+        self.assertEqual(jav_entries[0]["reason"], ALREADY_SUBMITTED_SKIP_LABEL)
+
+    def test_md_undownloaded_puts_skipped_in_subsection(self):
+        magnet = "magnet:?xt=urn:btih:5D241C1F86C5E537F5128B7B6A3369D2412BBC9C"
+        matched = [
+            {
+                "href": "thread-3767014-1-1.html",
+                "title": "[无码] MXGS-1446 office NTR",
+                "content_region": "uncensored",
+                "av_number": "MXGS-1446",
+                "magnets": [magnet],
+            },
+            {
+                "href": "thread-low.html",
+                "title": "[有码] LOW-111 test",
+                "content_region": "jav_censored",
+                "av_number": "LOW-111",
+                "skip_reason": "javdb_tag_excluded_淫语",
+                "magnets": ["magnet:?xt=urn:btih:low"],
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            self._write_state(tmp, magnet, href="thread-3767014-1-1.html")
+            with patch("title_translate.translate_title_for_item", return_value="测试"):
+                with patch("run_report._ensure_item_skip_reason"):
+                    section = _md_undownloaded_posts(
+                        matched,
+                        download_report,
+                        output_dir=tmp,
+                    )
+        self.assertIn("### 已提交（本次跳过）（1 帖）", section)
+        self.assertIn("#### MXGS-1446 · 已提交（本次跳过）", section)
+        self.assertIn("### 日本片（1 帖）", section)
+        self.assertIn("LOW-111 · JavDB 标签排除: 淫语", section)
+        self.assertNotIn("MXGS-1446 · 未成功下载", section)
+
+    def test_without_download_state_keeps_unsuccessful_label(self):
+        matched = [
+            {
+                "href": "thread-new.html",
+                "title": "[无码] NEW-001 test",
+                "content_region": "uncensored",
+                "av_number": "NEW-001",
+                "magnets": ["magnet:?xt=urn:btih:new001"],
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+        with patch("title_translate.translate_title_for_item", return_value="测试"):
+            with patch("run_report._ensure_item_skip_reason"):
+                jav_entries, _ = _build_undownloaded_entries(matched, download_report)
+        self.assertEqual(jav_entries[0]["reason"], "未成功下载")
 
 
 class MdTableCellLinkTests(unittest.TestCase):

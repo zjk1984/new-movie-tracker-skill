@@ -491,7 +491,12 @@ def notify_cards(
             f"showing {scan_stats.get('matched_total', 0)} new",
         )
 
-    report_result = write_run_report(scan_stats, download_report, run_label=run_label)
+    report_result = write_run_report(
+        scan_stats,
+        download_report,
+        run_label=run_label,
+        output_dir=output_dir,
+    )
     report_path = report_result.path
     rel = report_path.relative_to(SKILL_DIR)
     report_url: str | None = None
