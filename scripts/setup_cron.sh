@@ -6,6 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WRAPPER="$ROOT/scripts/daily_run.sh"
 MARK="# new-movie-tracker-daily"
+REBOOT_MARK="# new-movie-tracker-daily-reboot"
 TZ_NAME="${DAILY_RUN_TZ:-Asia/Shanghai}"
 TIMES=()
 
@@ -26,6 +27,7 @@ Install cron job(s) for scripts/daily_run.sh.
 Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).
+Also installs an @reboot line to restart cron ~30s after boot (fixes post-reboot missed runs).
 
 Usage:
   ./scripts/setup_cron.sh [--dry-run] [--time HH:MM] [--time HH:MM ...]
@@ -87,9 +89,13 @@ cron_line_for_time() {
   echo "$minute $hour * * * TZ=$TZ_NAME $WRAPPER $MARK"
 }
 
+cron_reboot_line() {
+  echo "@reboot sleep 30 && (sudo service cron restart || sudo systemctl restart cron || service cron restart) $REBOOT_MARK"
+}
+
 is_tracker_cron_line() {
   local line="$1"
-  [[ "$line" == *"$WRAPPER"* ]] || [[ "$line" == *"$MARK"* ]]
+  [[ "$line" == *"$WRAPPER"* ]] || [[ "$line" == *"$MARK"* ]] || [[ "$line" == *"$REBOOT_MARK"* ]]
 }
 
 restart_cron_daemon() {
@@ -112,7 +118,7 @@ restart_cron_daemon() {
 chmod +x "$WRAPPER"
 mkdir -p "$ROOT/data"
 
-lines=()
+lines=("$(cron_reboot_line)")
 for time in "${TIMES[@]}"; do
   lines+=("$(cron_line_for_time "$time")")
 done
@@ -151,7 +157,7 @@ for line in "${lines[@]}"; do
 done
 echo "     timezone: $TZ_NAME (system TZ should match for correct schedule)"
 echo "     log: $ROOT/data/daily_run.log"
-crontab -l | grep "$MARK" || true
+crontab -l | grep -E 'new-movie-tracker-daily' || true
 
 if ! restart_cron_daemon; then
   echo "[warn] crontab installed but cron may not pick up changes until restart" >&2
