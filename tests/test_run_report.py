@@ -605,6 +605,102 @@ class FilterReasonLabelTests(unittest.TestCase):
         self.assertIn("#### [泄密] 泄密 · 匹配: 泄密 · ed2k · 已提交", section)
 
 
+def _mida783_batch_thread() -> dict:
+    """thread-3765040-style BT batch: 5 magnets, 5 distinct AV numbers."""
+    return {
+        "href": "thread-3765040-1-1.html",
+        "title": "[合集资源] 【BT种子】20260915 ★黑客最新發布5部1080P★【AI破解版】",
+        "content_region": "jav_censored",
+        "av_number": "MIDA-783",
+        "javdb_query": {
+            "query_status": "ok",
+            "number": "MIDA-783",
+            "score": 4.2,
+            "title": "MIDA-783 thread title",
+        },
+        "magnets": [
+            "magnet:?xt=urn:btih:AAA&dn=MIDA-783%20最高にエロい",
+            "magnet:?xt=urn:btih:BBB&dn=MFYD-186%20貞淑な地味妻",
+            "magnet:?xt=urn:btih:CCC&dn=PRED-899%20美人上司",
+            "magnet:?xt=urn:btih:DDD&dn=HMN-903%20昔好きだった",
+            "magnet:?xt=urn:btih:EEE&dn=MIKR-122%20小柄な",
+        ],
+    }
+
+
+class BatchSplitByNumberTests(unittest.TestCase):
+    def test_undownloaded_batch_post_splits_into_five_entries(self):
+        matched = [_mida783_batch_thread()]
+        download_report = {"succeeded": [], "failed": []}
+        with patch("title_translate.translate_title_for_item", side_effect=lambda i: i.get("name", "")):
+            with patch("javdb_client.is_submit_eligible", return_value=True):
+                jav_entries, domestic_entries = _build_undownloaded_entries(
+                    matched,
+                    download_report,
+                )
+        self.assertEqual(domestic_entries, [])
+        self.assertEqual(len(jav_entries), 5)
+        self.assertEqual(
+            {e["label"] for e in jav_entries},
+            {"MIDA-783", "MFYD-186", "PRED-899", "HMN-903", "MIKR-122"},
+        )
+        for entry in jav_entries:
+            self.assertEqual(len(entry["links"]), 1)
+
+    def test_undownloaded_single_magnet_post_unchanged(self):
+        matched = [
+            {
+                "href": "thread-single.html",
+                "title": "[有码] ABC-123 single",
+                "content_region": "jav_censored",
+                "av_number": "ABC-123",
+                "magnets": ["magnet:?xt=urn:btih:single&dn=ABC-123%20test"],
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+        with patch("title_translate.translate_title_for_item", return_value="测试"):
+            with patch("javdb_client.is_submit_eligible", return_value=True):
+                jav_entries, _ = _build_undownloaded_entries(matched, download_report)
+        self.assertEqual(len(jav_entries), 1)
+        self.assertEqual(jav_entries[0]["label"], "ABC-123")
+        self.assertEqual(len(jav_entries[0]["links"]), 1)
+
+    def test_md_undownloaded_batch_shows_five_headers(self):
+        matched = [_mida783_batch_thread()]
+        download_report = {"succeeded": [], "failed": []}
+        with patch("title_translate.translate_title_for_item", side_effect=lambda i: i.get("name", "")):
+            with patch("javdb_client.is_submit_eligible", return_value=True):
+                section = _md_undownloaded_posts(matched, download_report)
+        self.assertIn("### 日本片（5 帖）", section)
+        for num in ("MIDA-783", "MFYD-186", "PRED-899", "HMN-903", "MIKR-122"):
+            self.assertIn(f"#### {num} ·", section)
+        self.assertNotIn("# 2 [magnet]", section)
+
+    def test_success_batch_items_use_per_magnet_labels(self):
+        thread = _mida783_batch_thread()
+        matched = [thread]
+        succeeded = [
+            {
+                "href": thread["href"],
+                "name": "MFYD-186 貞淑な地味妻",
+                "uri": thread["magnets"][1],
+                "phase": "PHASE_TYPE_COMPLETE",
+            },
+            {
+                "href": thread["href"],
+                "name": "MIDA-783 最高にエロい",
+                "uri": thread["magnets"][0],
+                "phase": "PHASE_TYPE_COMPLETE",
+            },
+        ]
+        with patch("title_translate.translate_title_for_item", side_effect=lambda i: i.get("name", "")):
+            section = _md_success_sections(succeeded, matched)
+        self.assertIn("#### MIDA-783 ·", section)
+        self.assertIn("#### MFYD-186 ·", section)
+        self.assertIn("magnet:?xt=urn:btih:AAA", section)
+        self.assertIn("magnet:?xt=urn:btih:BBB", section)
+
+
 class MdTableCellLinkTests(unittest.TestCase):
     def test_plain_text_without_url(self):
         self.assertEqual(_md_table_cell_link("hello", ""), "hello")

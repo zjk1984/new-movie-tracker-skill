@@ -339,6 +339,83 @@ def _canonical_uri(uri: str) -> str:
     return text
 
 
+def _link_av_number(kind: str, uri: str, item: dict[str, Any]) -> str | None:
+    """Extract AV number from a single download URI within a post."""
+    from javdb_client import extract_av_number
+    from magnet_select import number_from_magnet
+    from pikpak_links import parse_download_link
+    from urllib.parse import unquote
+
+    canonical = _canonical_uri(uri)
+    if canonical.lower().startswith("magnet:"):
+        return number_from_magnet(canonical)
+    if canonical.lower().startswith("ed2k:"):
+        parsed = parse_download_link(canonical) or {}
+        return extract_av_number(parsed.get("name") or "") or extract_av_number(
+            unquote(canonical),
+        )
+    for entry in item.get("hash_entries") or []:
+        entry_uri = _canonical_uri(entry.get("uri") or "")
+        if entry_uri and entry_uri == canonical:
+            return extract_av_number(entry.get("name") or "") or number_from_magnet(
+                entry_uri,
+            )
+    return extract_av_number(unquote(canonical))
+
+
+def _group_links_by_av_number(
+    links: list[tuple[str, str]],
+    item: dict[str, Any],
+) -> list[tuple[str | None, list[tuple[str, str]]]]:
+    """Split multi-link posts by distinct per-magnet AV numbers when applicable."""
+    if len(links) <= 1:
+        return [(None, links)]
+
+    groups: dict[str | None, list[tuple[str, str]]] = {}
+    order: list[str | None] = []
+    for kind, uri in links:
+        num = _link_av_number(kind, uri, item)
+        key = num.upper() if num else None
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append((kind, uri))
+
+    distinct_numbered = sum(1 for key in order if key is not None)
+    if distinct_numbered <= 1:
+        return [(None, links)]
+    return [(key, groups[key]) for key in order]
+
+
+def _link_display_name(kind: str, uri: str, item: dict[str, Any]) -> str:
+    from pikpak_links import parse_download_link
+
+    parsed = parse_download_link(uri) or {}
+    name = (parsed.get("name") or "").strip()
+    if name:
+        return name
+    num = _link_av_number(kind, uri, item)
+    return num or (item.get("title") or "")[:80]
+
+
+def _report_probe(
+    item: dict[str, Any],
+    matched_by_href: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build submit probe and drop stale thread-level JavDB data for other numbers."""
+    from submit_gate import build_submit_probe
+
+    probe = build_submit_probe(item, matched_by_href)
+    number = (probe.get("av_number") or "").strip().upper()
+    q = probe.get("javdb_query") or {}
+    q_number = (q.get("number") or "").strip().upper()
+    if number and q_number and q_number != number:
+        probe.pop("javdb_query", None)
+        probe.pop("javdb", None)
+        probe.pop("skip_reason", None)
+    return probe
+
+
 def _collect_fail_uris(failed: list[dict[str, Any]]) -> list[str]:
     seen: set[str] = set()
     uris: list[str] = []
@@ -443,10 +520,9 @@ def _success_display_title(
     *,
     is_jav: bool,
 ) -> tuple[str, str]:
-    from submit_gate import build_submit_probe
     from title_translate import translate_title_for_item
 
-    probe = build_submit_probe(item, matched_by_href)
+    probe = _report_probe(item, matched_by_href)
     full_title = _success_full_title(item, matched_by_href)
     thread_url = _thread_post_url(probe if probe.get("href") else item)
     if is_jav:
@@ -471,9 +547,8 @@ def _success_item_label(
     matched_by_href: dict[str, dict[str, Any]],
 ) -> str:
     from javdb_client import extract_av_number
-    from submit_gate import build_submit_probe
 
-    probe = build_submit_probe(item, matched_by_href)
+    probe = _report_probe(item, matched_by_href)
     for key in (
         probe.get("av_number"),
         item.get("name"),
@@ -508,7 +583,12 @@ def _md_success_item_block(
     phase = _format_phase_status(item.get("phase") or item.get("status") or "ok")
     title, thread_url = _success_display_title(item, matched_by_href, is_jav=is_jav)
 
-    match_reason = _match_reason_label(item, matched_by_href, is_jav=is_jav)
+    match_reason = _match_reason_label(
+        item,
+        matched_by_href,
+        is_jav=is_jav,
+        score_lookup=score_lookup,
+    )
     if is_jav:
         score = _success_item_score(
             item,
@@ -583,14 +663,26 @@ def _match_reason_label(
     matched_by_href: dict[str, dict[str, Any]],
     *,
     is_jav: bool,
+    score_lookup: dict[str, float] | None = None,
 ) -> str:
-    from submit_gate import build_submit_probe
+    from javdb_client import extract_av_number
 
-    probe = build_submit_probe(item, matched_by_href)
+    probe = _report_probe(item, matched_by_href)
     if is_jav:
+        number = (
+            probe.get("av_number")
+            or extract_av_number(item.get("name") or "")
+            or extract_av_number(item.get("title") or "")
+        )
+        score = None
+        if number and score_lookup:
+            score = score_lookup.get(number.upper())
         q = probe.get("javdb_query") or {}
-        score = q.get("score")
-        if score is not None and q.get("query_status") == "ok":
+        q_number = (q.get("number") or "").strip().upper()
+        if score is None and q.get("query_status") == "ok":
+            if not number or not q_number or q_number == number.upper():
+                score = q.get("score")
+        if score is not None:
             return f"JavDB 通过 · {float(score):.2f}"
         return "JavDB 通过"
     subtype = _success_item_subtype(item, matched_by_href)
@@ -697,33 +789,67 @@ def _build_undownloaded_entries(
                 continue
             pending = []
 
-        errors = [failed_by_uri.get(uri, "") for _, uri in pending if failed_by_uri.get(uri)]
-        failed_error = errors[0] if errors else failed_by_href.get(href, "")
-        from title_translate import translate_title_for_item
+        link_groups = _group_links_by_av_number(pending, item) if pending else [(None, [])]
+        matched_by_href = {href: item} if href else {}
 
-        reason = _skip_reason_label(item, failed_error=failed_error)
-        if not links and reason == "未成功下载":
-            reason = "链接未抓取"
+        for _group_key, group_links in link_groups:
+            errors = [
+                failed_by_uri.get(uri, "")
+                for _, uri in group_links
+                if failed_by_uri.get(uri)
+            ]
+            failed_error = errors[0] if errors else failed_by_href.get(href, "")
 
-        entry = {
-            "title": (item.get("title") or "").replace("\n", " ").strip(),
-            "title_zh": translate_title_for_item(item),
-            "label": item.get("av_number") or _truncate(item.get("title", ""), 40),
-            "release_date": _item_release_date(item),
-            "reason": reason,
-            "links": pending,
-            "href": href,
-            "thread_url": _thread_post_url(item),
-        }
-        if region in JAV_REGIONS:
-            jav_entries.append(entry)
-        else:
-            # 已在「下载失败」中列出的国产 ed2k 不再重复展示
-            if pending and all(uri in failed_by_uri for _, uri in pending):
-                continue
-            entry["subtype"] = item.get("domestic_subtype") or "其他"
-            entry["post_date"] = _item_post_date(item)
-            domestic_entries.append(entry)
+            if group_links:
+                kind, uri = group_links[0]
+                probe_item = {
+                    **item,
+                    "uri": uri,
+                    "url": uri,
+                    "name": _link_display_name(kind, uri, item),
+                }
+                num = _link_av_number(kind, uri, item)
+                if num:
+                    probe_item["av_number"] = num
+                probe = _report_probe(probe_item, matched_by_href)
+            else:
+                probe = dict(item)
+
+            if region in JAV_REGIONS:
+                _ensure_item_skip_reason(probe)
+
+            from title_translate import translate_title_for_item
+
+            reason = _skip_reason_label(probe, failed_error=failed_error)
+            if not group_links and reason == "未成功下载":
+                reason = "链接未抓取"
+
+            label = (
+                probe.get("av_number")
+                or item.get("av_number")
+                or _truncate(item.get("title", ""), 40)
+            )
+            entry = {
+                "title": (item.get("title") or "").replace("\n", " ").strip(),
+                "title_zh": translate_title_for_item(probe),
+                "label": label,
+                "release_date": _item_release_date(probe) or _item_release_date(item),
+                "reason": reason,
+                "links": group_links,
+                "href": href,
+                "thread_url": _thread_post_url(item),
+            }
+            if region in JAV_REGIONS:
+                jav_entries.append(entry)
+            else:
+                # 已在「下载失败」中列出的国产 ed2k 不再重复展示
+                if group_links and all(uri in failed_by_uri for _, uri in group_links):
+                    continue
+                entry["subtype"] = probe.get("domestic_subtype") or item.get(
+                    "domestic_subtype",
+                ) or "其他"
+                entry["post_date"] = _item_post_date(item)
+                domestic_entries.append(entry)
 
     jav_entries.sort(
         key=lambda x: _release_date_desc_sort_key(x.get("release_date", "")),
@@ -995,9 +1121,8 @@ def _is_jav_success_item(
     matched_by_href: dict[str, dict[str, Any]],
 ) -> bool:
     from javdb_client import item_needs_javdb_score
-    from submit_gate import build_submit_probe
 
-    probe = build_submit_probe(item, matched_by_href)
+    probe = _report_probe(item, matched_by_href)
     return item_needs_javdb_score(probe)
 
 

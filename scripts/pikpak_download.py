@@ -360,6 +360,17 @@ def iter_item_downloads(item: dict) -> list[dict]:
             return rows
 
     if _item_has_non_ed2k_download(item):
+        from magnet_select import build_number_downloads
+
+        paired = build_number_downloads(item)
+        if len(paired) >= 2:
+            rows = []
+            for nd in paired:
+                parsed = _downloads_from_number_entry(nd, item)
+                if parsed:
+                    rows.append(parsed)
+            if rows:
+                return rows
         picked = pick_item_download(item)
         return [picked] if picked else []
 
