@@ -12,13 +12,16 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from javdb_client import (  # noqa: E402
     JAVDB_RECENT_MIN_REVIEWS,
     JAVDB_RECENT_RELEASE_DAYS,
+    JAVDB_ZERO_REVIEWS_DAYS,
     build_query_report,
     current_beijing_year,
+    days_since_release,
     ensure_javdb_score_gate,
     extract_av_number,
     extract_tag_names,
     find_excluded_javdb_tag,
     is_recent_release,
+    is_zero_reviews_ok_release,
     javdb_reviews_ok,
     javdb_tags_ok,
     needs_javdb_query,
@@ -319,6 +322,29 @@ class JavDBReviewsGateTests(unittest.TestCase):
             self.assertFalse(is_recent_release("2026-08-16"))
             self.assertFalse(is_recent_release("2026-09-17"))
             self.assertFalse(is_recent_release(""))
+
+    def test_javdb_reviews_ok_zero_reviews_window_passes(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        today = datetime(2026, 9, 16, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        release_3_days_ago = "2026-09-13"
+        with patch("env_utils.beijing_now", return_value=today):
+            self.assertEqual(JAVDB_ZERO_REVIEWS_DAYS, 7)
+            self.assertEqual(days_since_release(release_3_days_ago), 3)
+            self.assertTrue(is_zero_reviews_ok_release(release_3_days_ago))
+            with self.subTest("day 3 zero reviews passes"):
+                item = self._item(release_date=release_3_days_ago, reviews_count=0)
+                self.assertTrue(javdb_reviews_ok(item))
+            with self.subTest("day 3 missing reviews passes"):
+                item = self._item(release_date=release_3_days_ago, reviews_count=None)
+                self.assertTrue(javdb_reviews_ok(item))
+            with self.subTest("day 7 zero reviews passes"):
+                item = self._item(release_date="2026-09-09", reviews_count=0)
+                self.assertTrue(javdb_reviews_ok(item))
+            with self.subTest("day 8 zero reviews fails"):
+                item = self._item(release_date="2026-09-08", reviews_count=0)
+                self.assertFalse(javdb_reviews_ok(item))
 
     def test_javdb_reviews_ok_recent_release_needs_ten(self):
         from datetime import datetime

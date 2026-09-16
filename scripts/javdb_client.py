@@ -199,8 +199,20 @@ def parse_release_date_year(release_date: str | None) -> int | None:
     return None
 
 
+JAVDB_ZERO_REVIEWS_DAYS = 7
 JAVDB_RECENT_RELEASE_DAYS = 30
 JAVDB_RECENT_MIN_REVIEWS = 10
+
+
+def days_since_release(release_date: str | None) -> int | None:
+    """Calendar days from release_date to today (Asia/Shanghai); None if invalid."""
+    from env_utils import beijing_now
+
+    parsed = parse_release_date(release_date)
+    if parsed is None:
+        return None
+    today = beijing_now().date()
+    return (today - parsed).days
 
 
 def is_recent_release(
@@ -209,13 +221,21 @@ def is_recent_release(
     days: int = JAVDB_RECENT_RELEASE_DAYS,
 ) -> bool:
     """True when release_date is within *days* calendar days of today (Asia/Shanghai)."""
-    from env_utils import beijing_now
-
-    parsed = parse_release_date(release_date)
-    if parsed is None:
+    delta = days_since_release(release_date)
+    if delta is None:
         return False
-    today = beijing_now().date()
-    delta = (today - parsed).days
+    return 0 <= delta <= days
+
+
+def is_zero_reviews_ok_release(
+    release_date: str | None,
+    *,
+    days: int = JAVDB_ZERO_REVIEWS_DAYS,
+) -> bool:
+    """True when release is within *days* calendar days (zero/missing reviews pass tier)."""
+    delta = days_since_release(release_date)
+    if delta is None:
+        return False
     return 0 <= delta <= days
 
 
@@ -843,11 +863,18 @@ def javdb_reviews_ok(item: dict[str, Any]) -> bool | None:
     if parse_release_date(release_date) is None:
         return False
 
+    days = days_since_release(release_date)
+    if days is None:
+        return False
+
+    if is_zero_reviews_ok_release(release_date):
+        return True
+
     reviews_count = _parse_reviews_count(q.get("reviews_count"))
     if reviews_count is None:
         return False
 
-    if is_recent_release(release_date):
+    if days <= JAVDB_RECENT_RELEASE_DAYS:
         return reviews_count >= JAVDB_RECENT_MIN_REVIEWS
 
     release_year = parse_release_date_year(release_date)
@@ -862,9 +889,15 @@ def javdb_reviews_skip_reason(item: dict[str, Any]) -> str:
     """Build skip_reason for a failing reviews gate (query must be ok)."""
     q = item.get("javdb_query") or {}
     release_date = q.get("release_date")
-    release_year = parse_release_date_year(release_date)
-    if release_year is None:
+    if parse_release_date(release_date) is None:
         return "javdb_no_release_date"
+
+    days = days_since_release(release_date)
+    if days is None:
+        return "javdb_no_release_date"
+
+    if is_zero_reviews_ok_release(release_date):
+        return "javdb_no_reviews_count"
 
     reviews_count = _parse_reviews_count(q.get("reviews_count"))
     if reviews_count is None:
