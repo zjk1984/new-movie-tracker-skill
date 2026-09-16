@@ -13,7 +13,7 @@ import os
 import re
 import time
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -171,23 +171,44 @@ def _parse_reviews_count(value: Any) -> int | None:
     return count if count >= 0 else None
 
 
-def parse_release_date_year(release_date: str | None) -> int | None:
-    """Parse JavDB release_date (YYYY-MM-DD) and return calendar year."""
+def parse_release_date(release_date: str | None) -> date | None:
+    """Parse JavDB release_date (YYYY-MM-DD) to a calendar date."""
     text = _any_str(release_date).strip()
     if not text:
         return None
     parts = text.split("-")
     if len(parts) >= 3:
         try:
-            return datetime(int(parts[0]), int(parts[1]), int(parts[2])).year
+            return date(int(parts[0]), int(parts[1]), int(parts[2]))
         except (TypeError, ValueError):
             return None
+    return None
+
+
+def parse_release_date_year(release_date: str | None) -> int | None:
+    """Parse JavDB release_date (YYYY-MM-DD) and return calendar year."""
+    parsed = parse_release_date(release_date)
+    if parsed is not None:
+        return parsed.year
+    text = _any_str(release_date).strip()
     if len(text) >= 4 and text[:4].isdigit():
         try:
             return int(text[:4])
         except ValueError:
             return None
     return None
+
+
+def is_recent_release(release_date: str | None, *, days: int = 7) -> bool:
+    """True when release_date is within *days* calendar days of today (Asia/Shanghai)."""
+    from env_utils import beijing_now
+
+    parsed = parse_release_date(release_date)
+    if parsed is None:
+        return False
+    today = beijing_now().date()
+    delta = (today - parsed).days
+    return 0 <= delta <= days
 
 
 def current_beijing_year() -> int:
@@ -811,6 +832,9 @@ def javdb_reviews_ok(item: dict[str, Any]) -> bool | None:
         return True
 
     release_date = q.get("release_date")
+    if is_recent_release(release_date):
+        return True
+
     release_year = parse_release_date_year(release_date)
     if release_year is None:
         return False
