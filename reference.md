@@ -203,6 +203,21 @@ Each kept 有码/无码 item gets `javdb_query`:
 
 Disable with `--no-javdb-query`.
 
+### JavDB download gates (Japanese items)
+
+Before PikPak submit, `scripts/javdb_client.py` applies gates in order: **tags** → **reviews_count** → **score** (default min 4.0, `JAVDB_MIN_DOWNLOAD_SCORE`).
+
+**Reviews gate** (`reviews_count` vs release year, Asia/Shanghai calendar):
+
+| Release year | Minimum `reviews_count` |
+|--------------|-------------------------|
+| Prior years | ≥ 1000 |
+| Current year | ≥ 100 |
+
+**Recent-release exception:** if `release_date` is within **7 calendar days** of today (Asia/Shanghai), the reviews gate passes even when `reviews_count` is `0` or missing. Older current-year releases still require ≥ 100.
+
+Skip reasons: `javdb_no_release_date`, `javdb_no_reviews_count`, `javdb_reviews_low_{n}`.
+
 ### Environment variables
 
 | Variable | Description |

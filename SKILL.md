@@ -239,6 +239,8 @@ When the user wants **Chinese-subtitled magnets** from forum posts and automatic
 5. No-magnet fallback order: PikPak SHA → ed2k → JavDB cnsub (when `--cnsub-priority`)
 6. Submit `selected_download` (magnet / ed2k / feature code) to PikPak **My Pack** (有码 + 无码 JAV only)
 
+**JavDB download gates (日本有码/无码):** tags → reviews_count → score (≥ 4.0). Reviews threshold by release year (Asia/Shanghai): prior years ≥ 1000, current year ≥ 100. **Exception:** release within the last **7 calendar days** (北京时间) passes even if `reviews_count` is 0 or missing — newly released titles like MXGS-1446 are not blocked while reviews accumulate.
+
 **Save PikPak token once (persisted in skill directory):**
 ```bash
 python scripts/pikpak_login.py login
