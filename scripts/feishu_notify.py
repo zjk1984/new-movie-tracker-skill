@@ -331,64 +331,6 @@ def _submit_funnel_card_lines(scan_stats: dict[str, Any]) -> str:
     )
 
 
-JAV_CARD_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
-
-
-def _javdb_tags_card_lines(
-    matched: list[dict[str, Any]],
-    *,
-    limit: int = 10,
-) -> str:
-    """Compact JavDB tag lines for Japanese items that have javdb_query.tags."""
-    from run_report import _item_release_date, _release_date_desc_sort_key
-
-    candidates: list[dict[str, Any]] = []
-    for item in matched:
-        region = item.get("content_region") or ""
-        if region not in JAV_CARD_REGIONS:
-            continue
-        q = item.get("javdb_query") or {}
-        if q.get("query_status") != "ok":
-            continue
-        tags = q.get("tags") or []
-        if not tags:
-            tag_labels = (q.get("tag_labels") or "").strip()
-            if tag_labels:
-                tags = [t.strip() for t in tag_labels.split(",") if t.strip()]
-        if not tags:
-            continue
-        candidates.append(item)
-
-    candidates.sort(
-        key=lambda x: _release_date_desc_sort_key(_item_release_date(x)),
-        reverse=True,
-    )
-
-    lines: list[str] = []
-    for item in candidates[:limit]:
-        q = item.get("javdb_query") or {}
-        tags = q.get("tags") or []
-        if not tags:
-            tag_labels = (q.get("tag_labels") or "").strip()
-            tags = [t.strip() for t in tag_labels.split(",") if t.strip()]
-        number = q.get("number") or item.get("av_number") or "?"
-        score = q.get("score")
-        score_text = f" ({score:.2f})" if score is not None else ""
-        release_date = (q.get("release_date") or "").strip()
-        release_text = f" {release_date}" if release_date else ""
-        reviews_count = q.get("reviews_count")
-        reviews_text = ""
-        if reviews_count is not None:
-            reviews_text = f" · {int(reviews_count)}人评"
-        label = ", ".join(tags[:8])
-        if len(tags) > 8:
-            label += "…"
-        lines.append(f"• **{number}**{release_text}{reviews_text}{score_text}: {label}")
-    if not lines:
-        return ""
-    return "\n**JavDB 标签**\n" + "\n".join(lines) + "\n"
-
-
 def _submit_funnel_footnote(
     scan_stats: dict[str, Any],
     link_sum: int,
@@ -443,8 +385,6 @@ def build_scan_summary_card(
         sub_text = " | ".join(f"{k} {v}" for k, v in sorted(subtype.items(), key=lambda x: -x[1]))
         domestic_lines = f"\n**国产子类** {sub_text}\n"
 
-    tag_lines = _javdb_tags_card_lines(scan_stats.get("matched") or [])
-
     repeat = scan_stats.get("matched_repeat") or 0
     repeat_line = (
         f"（相对上次扫描隐藏重复 **{repeat}** 条，仅展示新增）\n"
@@ -465,7 +405,7 @@ def build_scan_summary_card(
         f"{_submit_funnel_card_lines(scan_stats)}"
         f"6. PikPak 提交: 成功 **{ok}** + 失败 **{fail}** = **{total}** 条（按链接计）\n"
         f"{_submit_funnel_footnote(scan_stats, link_sum, total)}\n"
-        f"{jav_lines}{domestic_lines}{tag_lines}\n"
+        f"{jav_lines}{domestic_lines}\n"
         f"**失败原因汇总**\n{_error_summary(download_report.get('failed') or [])}\n"
     )
     if report_url:

@@ -12,10 +12,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from run_report import (  # noqa: E402
     _build_undownloaded_entries,
+    _match_reason_label,
     _md_success_sections,
     _md_table_cell_link,
     _md_undownloaded_posts,
     _previous_report_line,
+    _skip_reason_label,
     _success_full_title,
     _success_name_cell,
     archive_reports_to_backup,
@@ -111,7 +113,7 @@ class SuccessNameCellTests(unittest.TestCase):
         ]
         with patch("title_translate.translate_title_for_item", return_value="测试标题"):
             section = _md_success_sections(succeeded, matched)
-        self.assertIn("#### HMN-900 · magnet · 4.14 · 下载中", section)
+        self.assertIn("#### HMN-900 · JavDB 通过 · 4.14 · magnet · 4.14 · 下载中", section)
         self.assertIn("**标题**:", section)
         self.assertIn("测试标题", section)
         self.assertIn("thread-1.html", section)
@@ -309,6 +311,8 @@ class UndownloadedPostsTests(unittest.TestCase):
                 "javdb_query": {
                     "query_status": "ok",
                     "score": 4.5,
+                    "release_date": "2026-01-01",
+                    "reviews_count": 1500,
                     "title": "最高にエロい隣人",
                 },
             },
@@ -497,6 +501,108 @@ class UndownloadedPostsTests(unittest.TestCase):
         section = _md_success_sections(succeeded, matched)
         self.assertLess(section.index("new post"), section.index("old post"))
         self.assertLess(section.index("old post"), section.index("no date"))
+
+
+class FilterReasonLabelTests(unittest.TestCase):
+    def test_skip_reason_javdb_tag_excluded(self):
+        item = {"skip_reason": "javdb_tag_excluded_淫语"}
+        self.assertEqual(_skip_reason_label(item), "JavDB 标签排除: 淫语")
+
+    def test_skip_reason_javdb_reviews_low(self):
+        item = {"skip_reason": "javdb_reviews_low_50"}
+        self.assertEqual(_skip_reason_label(item), "JavDB 评论数不足 (50)")
+
+    def test_skip_reason_javdb_score_low(self):
+        item = {"skip_reason": "javdb_score_low_3.50"}
+        self.assertEqual(_skip_reason_label(item), "JavDB 评分 3.50 < 4")
+
+    def test_skip_reason_no_link_fallback(self):
+        item = {"content_region": "jav_censored"}
+        self.assertEqual(_skip_reason_label(item), "未成功下载")
+
+    def test_match_reason_jav_shows_score(self):
+        matched = {
+            "thread-1.html": {
+                "href": "thread-1.html",
+                "content_region": "jav_censored",
+                "javdb_query": {"query_status": "ok", "score": 4.25},
+            },
+        }
+        item = {"href": "thread-1.html", "name": "HMN-900"}
+        reason = _match_reason_label(item, matched, is_jav=True)
+        self.assertEqual(reason, "JavDB 通过 · 4.25")
+
+    def test_match_reason_domestic_shows_subtype(self):
+        matched = {
+            "thread-2.html": {
+                "href": "thread-2.html",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "泄密",
+            },
+        }
+        item = {"href": "thread-2.html", "name": "leak-post"}
+        reason = _match_reason_label(item, matched, is_jav=False)
+        self.assertEqual(reason, "匹配: 泄密")
+
+    def test_undownloaded_jav_shows_skip_reason_after_number(self):
+        matched = [
+            {
+                "href": "thread-low.html",
+                "title": "[有码] LOW-111 test",
+                "content_region": "jav_censored",
+                "av_number": "LOW-111",
+                "skip_reason": "javdb_tag_excluded_淫语",
+                "magnets": ["magnet:?xt=urn:btih:low"],
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+        with patch("title_translate.translate_title_for_item", return_value="测试"):
+            section = _md_undownloaded_posts(matched, download_report)
+        self.assertIn("LOW-111 · JavDB 标签排除: 淫语", section)
+
+    def test_success_jav_shows_match_reason_after_number(self):
+        matched = [
+            {
+                "href": "thread-1.html",
+                "title": "[有码] HMN-900 テスト",
+                "content_region": "jav_censored",
+                "javdb_query": {
+                    "query_status": "ok",
+                    "score": 4.14,
+                    "number": "HMN-900",
+                },
+            },
+        ]
+        succeeded = [
+            {
+                "href": "thread-1.html",
+                "name": "HMN-900",
+                "uri": "magnet:?xt=urn:btih:abc",
+                "phase": "PHASE_TYPE_RUNNING",
+            },
+        ]
+        with patch("title_translate.translate_title_for_item", return_value="测试标题"):
+            section = _md_success_sections(succeeded, matched)
+        self.assertIn("#### HMN-900 · JavDB 通过 · 4.14 · magnet · 4.14 · 下载中", section)
+
+    def test_success_domestic_shows_match_reason(self):
+        matched = [
+            {
+                "href": "thread-dom.html",
+                "title": "[国产] 泄密视频",
+                "content_region": "domestic_leak",
+                "domestic_subtype": "泄密",
+            },
+        ]
+        succeeded = [
+            {
+                "href": "thread-dom.html",
+                "name": "泄密",
+                "uri": "ed2k://file|abc|/",
+            },
+        ]
+        section = _md_success_sections(succeeded, matched)
+        self.assertIn("#### [泄密] 泄密 · 匹配: 泄密 · ed2k · 已提交", section)
 
 
 class MdTableCellLinkTests(unittest.TestCase):
