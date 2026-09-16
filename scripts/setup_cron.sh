@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install daily_run cron jobs (07:00 + 13:00 Asia/Shanghai by default).
+# Install daily_run cron jobs (07:00 + 13:00 + 20:00 Asia/Shanghai by default).
 # Usage: ./scripts/setup_cron.sh [--dry-run] [--time HH:MM] [--time HH:MM ...]
 set -euo pipefail
 
@@ -23,18 +23,19 @@ while [[ $# -gt 0 ]]; do
       cat <<EOF
 Install cron job(s) for scripts/daily_run.sh.
 
-Default schedule: 07:00 and 13:00 Asia/Shanghai (Beijing time).
+Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
+After install, run: sudo service cron restart (required on some VMs).
 
 Usage:
   ./scripts/setup_cron.sh [--dry-run] [--time HH:MM] [--time HH:MM ...]
 
   Repeat --time to override defaults, e.g.:
-    ./scripts/setup_cron.sh --time 07:00 --time 13:00
+    ./scripts/setup_cron.sh --time 07:00 --time 13:00 --time 20:00
 
 Environment overrides:
   DAILY_RUN_TZ=Asia/Shanghai
-  DAILY_RUN_TIMES=07:00,13:00
+  DAILY_RUN_TIMES=07:00,13:00,20:00
 EOF
       exit 0
       ;;
@@ -47,7 +48,7 @@ done
 
 if [[ ${#TIMES[@]} -eq 0 ]]; then
   # shellcheck disable=SC2206
-  TIMES=(${DAILY_RUN_TIMES:-07:00,13:00})
+  TIMES=(${DAILY_RUN_TIMES:-07:00,13:00,20:00})
 fi
 
 # Normalize comma-separated env values and dedupe while preserving order.
