@@ -211,11 +211,12 @@ Before PikPak submit, `scripts/javdb_client.py` applies gates in order: **tags**
 
 | Release timing | Minimum `reviews_count` |
 |----------------|---------------------------|
-| Within 30 calendar days of today | ≥ 10 |
+| Within 7 calendar days of release | 0 or missing (pass) |
+| 8–30 calendar days after release | ≥ 10 |
 | Current year (older than 30 days) | ≥ 100 |
 | Prior years | ≥ 1000 |
 
-Missing `release_date` or `reviews_count` fails (including `0` reviews on recent releases). Constants: `JAVDB_RECENT_RELEASE_DAYS`, `JAVDB_RECENT_MIN_REVIEWS`.
+Missing `release_date` fails. Missing `reviews_count` fails for releases older than 7 days. Constants: `JAVDB_ZERO_REVIEWS_DAYS`, `JAVDB_RECENT_RELEASE_DAYS`, `JAVDB_RECENT_MIN_REVIEWS`.
 
 Skip reasons: `javdb_no_release_date`, `javdb_no_reviews_count`, `javdb_reviews_low_{n}`.
 
