@@ -12,7 +12,10 @@ if [[ ! -x "$SCRIPT" ]]; then
 fi
 
 "$SCRIPT" --dry-run | grep -q 'would install cron line(s):'
+"$SCRIPT" --dry-run | grep -q '@reboot sleep 30'
+"$SCRIPT" --dry-run | grep -q 'new-movie-tracker-daily-reboot'
 "$SCRIPT" --help | grep -qi 'restart'
+"$SCRIPT" --help | grep -qi '@reboot'
 
 # Restart attempts must appear in priority order.
 grep -Fq 'sudo service cron restart' "$SCRIPT"

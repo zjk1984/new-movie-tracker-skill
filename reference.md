@@ -326,11 +326,12 @@ One-liner install (recommended):
 ./scripts/setup_cron.sh
 ```
 
-Installs **three** slots (07:00, 13:00, and 20:00 Beijing). Requires system timezone **Asia/Shanghai** (Vixie cron uses system local time for scheduling). The installer **automatically attempts to restart the cron daemon** after updating crontab (`sudo service cron restart`, then `sudo systemctl restart cron`, then `service cron restart`). If all fail, run **`sudo service cron restart`** manually (required on some cloud VMs).
+Installs **three** slots (07:00, 13:00, and 20:00 Beijing) plus an **`@reboot`** line that waits 30s then restarts the cron daemon (fixes VMs where cron starts before user crontabs load after reboot). Requires system timezone **Asia/Shanghai** (Vixie cron uses system local time for scheduling). The installer **automatically attempts to restart the cron daemon** after updating crontab (`sudo service cron restart`, then `sudo systemctl restart cron`, then `service cron restart`). If all fail, run **`sudo service cron restart`** manually (required on some cloud VMs).
 
 Equivalent crontab lines:
 
 ```cron
+@reboot sleep 30 && (sudo service cron restart || sudo systemctl restart cron || service cron restart) # new-movie-tracker-daily-reboot
 0 7 * * * TZ=Asia/Shanghai /path/to/new-movie-tracker-skill/scripts/daily_run.sh # new-movie-tracker-daily
 0 13 * * * TZ=Asia/Shanghai /path/to/new-movie-tracker-skill/scripts/daily_run.sh # new-movie-tracker-daily
 0 20 * * * TZ=Asia/Shanghai /path/to/new-movie-tracker-skill/scripts/daily_run.sh # new-movie-tracker-daily
