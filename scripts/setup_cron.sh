@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Install daily_run cron job (07:00 Asia/Shanghai).
-# Usage: ./scripts/setup_cron.sh [--dry-run] [--time HH:MM]
+# Install daily_run cron jobs (07:00 + 13:00 Asia/Shanghai by default).
+# Usage: ./scripts/setup_cron.sh [--dry-run] [--time HH:MM] [--time HH:MM ...]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WRAPPER="$ROOT/scripts/daily_run.sh"
 MARK="# new-movie-tracker-daily"
 TZ_NAME="${DAILY_RUN_TZ:-Asia/Shanghai}"
-TIME="${DAILY_RUN_TIME:-07:00}"
+TIMES=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -16,22 +16,25 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --time)
-      TIME="${2:?missing value for --time}"
+      TIMES+=("${2:?missing value for --time}")
       shift 2
       ;;
     -h|--help)
       cat <<EOF
-Install cron job for scripts/daily_run.sh.
+Install cron job(s) for scripts/daily_run.sh.
 
-Default schedule: 07:00 Asia/Shanghai (Beijing time).
-Cron expression: 0 7 * * * (with TZ=Asia/Shanghai)
+Default schedule: 07:00 and 13:00 Asia/Shanghai (Beijing time).
+Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 
 Usage:
-  ./scripts/setup_cron.sh [--dry-run] [--time HH:MM]
+  ./scripts/setup_cron.sh [--dry-run] [--time HH:MM] [--time HH:MM ...]
+
+  Repeat --time to override defaults, e.g.:
+    ./scripts/setup_cron.sh --time 07:00 --time 13:00
 
 Environment overrides:
   DAILY_RUN_TZ=Asia/Shanghai
-  DAILY_RUN_TIME=07:00
+  DAILY_RUN_TIMES=07:00,13:00
 EOF
       exit 0
       ;;
@@ -42,26 +45,65 @@ EOF
   esac
 done
 
-if ! [[ "$TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
-  echo "[err] invalid --time '$TIME' (expected HH:MM, 24h)" >&2
-  exit 1
+if [[ ${#TIMES[@]} -eq 0 ]]; then
+  # shellcheck disable=SC2206
+  TIMES=(${DAILY_RUN_TIMES:-07:00,13:00})
 fi
 
-HOUR="${TIME%%:*}"
-MINUTE="${TIME#*:}"
-HOUR="${HOUR#0}"
-HOUR="${HOUR:-0}"
-MINUTE="${MINUTE#0}"
-MINUTE="${MINUTE:-0}"
+# Normalize comma-separated env values and dedupe while preserving order.
+normalize_times() {
+  local raw joined="" time seen="|"
+  for raw in "${TIMES[@]}"; do
+    joined="${joined},${raw}"
+  done
+  joined="${joined#,}"
+  joined="${joined//,/ }"
+  TIMES=()
+  for time in $joined; do
+    time="${time// /}"
+    [[ -z "$time" ]] && continue
+    if [[ "$seen" != *"|$time|"* ]]; then
+      TIMES+=("$time")
+      seen="${seen}${time}|"
+    fi
+  done
+}
 
-LINE="$MINUTE $HOUR * * * TZ=$TZ_NAME $WRAPPER $MARK"
+normalize_times
+
+cron_line_for_time() {
+  local time="$1"
+  if ! [[ "$time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+    echo "[err] invalid time '$time' (expected HH:MM, 24h)" >&2
+    return 1
+  fi
+  local hour="${time%%:*}"
+  local minute="${time#*:}"
+  hour="${hour#0}"
+  hour="${hour:-0}"
+  minute="${minute#0}"
+  minute="${minute:-0}"
+  echo "$minute $hour * * * TZ=$TZ_NAME $WRAPPER $MARK"
+}
+
+is_tracker_cron_line() {
+  local line="$1"
+  [[ "$line" == *"$WRAPPER"* ]] || [[ "$line" == *"$MARK"* ]]
+}
 
 chmod +x "$WRAPPER"
 mkdir -p "$ROOT/data"
 
+lines=()
+for time in "${TIMES[@]}"; do
+  lines+=("$(cron_line_for_time "$time")")
+done
+
 if [[ "${DRY_RUN:-0}" == 1 ]]; then
-  echo "[dry-run] would install cron line:"
-  echo "  $LINE"
+  echo "[dry-run] would install cron line(s):"
+  for line in "${lines[@]}"; do
+    echo "  $line"
+  done
   echo "  log: $ROOT/data/daily_run.log"
   exit 0
 fi
@@ -72,12 +114,23 @@ if ! command -v crontab >/dev/null 2>&1; then
 fi
 
 TMP="$(mktemp)"
-crontab -l 2>/dev/null | grep -v "$MARK" > "$TMP" || true
-echo "$LINE" >> "$TMP"
+while IFS= read -r line || [[ -n "$line" ]]; do
+  if is_tracker_cron_line "$line"; then
+    continue
+  fi
+  printf '%s\n' "$line"
+done < <(crontab -l 2>/dev/null || true) > "$TMP"
+
+for line in "${lines[@]}"; do
+  echo "$line" >> "$TMP"
+done
 crontab "$TMP"
 rm -f "$TMP"
 
-echo "[ok] cron installed: $LINE"
-echo "     timezone: $TZ_NAME"
+echo "[ok] cron installed (${#lines[@]} slot(s)):"
+for line in "${lines[@]}"; do
+  echo "     $line"
+done
+echo "     timezone: $TZ_NAME (system TZ should match for correct schedule)"
 echo "     log: $ROOT/data/daily_run.log"
 crontab -l | grep "$MARK" || true

@@ -280,9 +280,11 @@ python scripts/pikpak_download.py --sha 'PikPak://file.mkv|123456789|GCID40CHARH
 
 **Feature code (特征码):** `PikPak://文件名|字节大小|GCID` — instant cloud add when PikPak already has the file. Forum scans also extract `pikpak_sha`; selection order: magnet → JavDB cnsub → PikPak SHA → ed2k.
 
-### 10. Daily Schedule (7:00 AM, incremental download)
+### 10. Daily Schedule (07:00 + 13:00 Beijing, incremental download)
 
-Run every morning at **07:00 Asia/Shanghai (北京时间)** to scan recent forum posts and submit **only new magnets** since the last run (tracked in `download_state.json`). Install with `scripts/setup_cron.sh` (Linux) or `scripts/setup_windows_task.ps1` (Windows).
+Run twice daily at **07:00 and 13:00 Asia/Shanghai (北京时间)** to scan recent forum posts and submit **only new magnets** since the last run (tracked in `download_state.json`). Install with `scripts/setup_cron.sh` (Linux) or `scripts/setup_windows_task.ps1` (Windows).
+
+**Linux cron:** `./scripts/setup_cron.sh` installs both slots. System timezone should be **Asia/Shanghai** so cron wall-clock matches Beijing time.
 
 **One-time setup**
 1. Save PikPak token: `python scripts/pikpak_login.py login` (stored in `pikpak_auth.json`).

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Daily scan + incremental PikPak download.
-# Install cron: scripts/setup_cron.sh  (default 07:00 Asia/Shanghai)
+# Install cron: scripts/setup_cron.sh  (default 07:00 + 13:00 Asia/Shanghai)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

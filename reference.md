@@ -234,7 +234,7 @@ python scripts/scan.py --days 3 --fetch-magnets
 
 If a Cloudflare challenge appears, complete it manually in the opened window. The script waits up to 90s. After success, cookies are saved in `chrome_profile/` inside the output directory.
 
-## Daily Schedule (07:00 Asia/Shanghai, incremental download)
+## Daily Schedule (07:00 + 13:00 Asia/Shanghai, incremental download)
 
 `scripts/daily_run.py` scans **forum-2 / forum-95 / forum-142** (今日下载链接) + forum-103 + forum-37, applies cnsub-first + content filter, then submits **only new downloads** to PikPak (dedup via `download_state.json` in the output directory).
 
@@ -301,7 +301,7 @@ Arguments: scripts\daily_run.py --headless
 Start in: C:\path\to\new-movie-tracker-skill
 ```
 
-### Linux cron (07:00 Asia/Shanghai)
+### Linux cron (07:00 + 13:00 Asia/Shanghai)
 
 One-liner install (recommended):
 
@@ -309,11 +309,16 @@ One-liner install (recommended):
 ./scripts/setup_cron.sh
 ```
 
-Equivalent crontab line:
+Installs **two** slots (07:00 and 13:00 Beijing). Requires system timezone **Asia/Shanghai** (Vixie cron uses system local time for scheduling).
+
+Equivalent crontab lines:
 
 ```cron
 0 7 * * * TZ=Asia/Shanghai /path/to/new-movie-tracker-skill/scripts/daily_run.sh # new-movie-tracker-daily
+0 13 * * * TZ=Asia/Shanghai /path/to/new-movie-tracker-skill/scripts/daily_run.sh # new-movie-tracker-daily
 ```
+
+Custom slots: `./scripts/setup_cron.sh --time 07:00 --time 13:00` or `DAILY_RUN_TIMES=07:00,13:00 ./scripts/setup_cron.sh`
 
 Verify: `crontab -l | grep new-movie-tracker-daily` · Log: `data/daily_run.log` · Dry-run: `./scripts/setup_cron.sh --dry-run`
 
