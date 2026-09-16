@@ -13,13 +13,55 @@ from javdb_client import (  # noqa: E402
     build_query_report,
     current_beijing_year,
     ensure_javdb_score_gate,
+    extract_av_number,
     extract_tag_names,
     find_excluded_javdb_tag,
     javdb_reviews_ok,
     javdb_tags_ok,
+    needs_javdb_query,
     parse_release_date_year,
     reviews_threshold_for_year,
 )
+
+
+class AvNumberExtractionTests(unittest.TestCase):
+    def test_extract_pred_899_from_title_and_magnet(self):
+        self.assertEqual(extract_av_number("PRED-899 美人上司"), "PRED-899")
+        self.assertEqual(
+            extract_av_number("magnet:?xt=urn:btih:CCC&dn=PRED-899%20美人上司"),
+            "PRED-899",
+        )
+
+    def test_extract_pred899_without_hyphen_not_matched(self):
+        self.assertIsNone(extract_av_number("PRED899"))
+
+
+class NeedsJavdbQueryTests(unittest.TestCase):
+    def test_needs_query_when_thread_query_is_for_other_number(self):
+        item = {
+            "av_number": "PRED-899",
+            "javdb_query": {
+                "query_status": "ok",
+                "number": "MIDA-783",
+                "score": 4.2,
+            },
+        }
+        self.assertTrue(needs_javdb_query(item))
+
+    def test_no_query_needed_when_number_matches(self):
+        item = {
+            "av_number": "PRED-899",
+            "javdb_query": {
+                "query_status": "ok",
+                "number": "PRED-899",
+                "score": 4.34,
+            },
+        }
+        self.assertFalse(needs_javdb_query(item))
+
+    def test_needs_query_when_missing(self):
+        item = {"av_number": "PRED-899"}
+        self.assertTrue(needs_javdb_query(item))
 
 
 class JavDBTagTests(unittest.TestCase):
