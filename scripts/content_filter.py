@@ -41,6 +41,7 @@ ONLYFANS_RE = re.compile(
     r"OnlyFans|HongKongDoll|Hong Kong Doll|玩偶姐姐",
     re.IGNORECASE,
 )
+DOMESTIC_EXCLUDED_KEYWORDS = ("私拍", "厕拍", "黑人", "情色分享")
 ED2K_TITLE_RE = re.compile(
     r"ed2k://|115\s*[eE]?\s*[dD]2[kK]|[eE][dD]2[kK]",
     re.IGNORECASE,
@@ -71,7 +72,7 @@ def is_domestic_excluded(title: str, number: str = "") -> bool:
     text = title or ""
     if title_has_ai_enhanced(text):
         return True
-    if "私拍" in text:
+    if any(kw in text for kw in DOMESTIC_EXCLUDED_KEYWORDS):
         return True
     if ONLYFANS_RE.search(text):
         return True
@@ -84,8 +85,22 @@ def title_has_ed2k(title: str) -> bool:
     return bool(ED2K_TITLE_RE.search(title or ""))
 
 
-def domestic_keep_reason(title: str, number: str = "", *, has_ed2k: bool = False) -> str | None:
-    """Return keep label for domestic/ed2k posts (excludes 私拍/伪番号/OnlyFans)."""
+def is_domestic_context(title: str) -> bool:
+    """Title suggests domestic/国产 content (distinct from Japanese JAV)."""
+    text = title or ""
+    if is_domestic_uncensored(text):
+        return True
+    if any(kw in text for kw in ("AI短剧", "AI真人短剧", "熟女", "酒店偷拍", "泄密", "泄露")):
+        return True
+    if DOMESTIC_LEAK_OUT_RE.search(text):
+        return True
+    if title_has_ed2k(text):
+        return True
+    return False
+
+
+def _domestic_keyword_subtype(title: str, number: str = "") -> str | None:
+    """Domestic keep label from title keywords (not ed2k-only fallback)."""
     text = title or ""
     num = (number or extract_av_number(text) or "").upper()
     if is_domestic_excluded(text, num):
@@ -100,8 +115,39 @@ def domestic_keep_reason(title: str, number: str = "", *, has_ed2k: bool = False
         return "泄密"
     if DOMESTIC_LEAK_OUT_RE.search(text):
         return "流出"
-    if title_has_ed2k(text) or has_ed2k:
+    return None
+
+
+def domestic_keep_reason(title: str, number: str = "", *, has_ed2k: bool = False) -> str | None:
+    """Return keep label for domestic posts (excludes 私拍/厕拍/黑人/情色分享/伪番号/OnlyFans)."""
+    subtype = _domestic_keyword_subtype(title, number)
+    if subtype:
+        return subtype
+    text = title or ""
+    num = (number or extract_av_number(text) or "").upper()
+    if is_domestic_excluded(text, num):
+        return None
+    if (title_has_ed2k(text) or has_ed2k) and is_domestic_context(text):
         return "ed2k"
+    return None
+
+
+def _classify_jav_region(title: str, number: str) -> str | None:
+    """Return JAV region when title/number indicate Japanese studio content."""
+    if is_domestic_uncensored(title):
+        return None
+    if any(m in title for m in UNCENSORED_MARKERS):
+        return "uncensored"
+    if "无码" in title or "無碼" in title:
+        return "uncensored"
+    if number:
+        prefix = number.split("-", 1)[0]
+        if prefix in AMATEUR_PREFIXES or AMATEUR_NUM_RE.match(number):
+            return "amateur"
+        if STUDIO_NUM_RE.match(number):
+            return "jav_censored"
+    if "[有码" in title or "[有碼" in title:
+        return "jav_censored"
     return None
 
 
@@ -115,6 +161,7 @@ def resolve_domestic_subtype(item: dict[str, Any], number: str = "") -> str | No
 def classify_region(item: dict[str, Any]) -> str:
     title = item.get("title") or ""
     number = (item.get("av_number") or extract_av_number(title) or "").upper()
+    has_ed2k = bool(item.get("ed2k"))
 
     if WESTERN_RE.search(title):
         return "western"
@@ -123,27 +170,22 @@ def classify_region(item: dict[str, Any]) -> str:
     if HEYZO_RE.search(title) or number.startswith("HEYZO"):
         return "uncensored"
 
-    # Domestic / ed2k — must be checked before generic 无码 markers
-    keep = domestic_keep_reason(title, number, has_ed2k=bool(item.get("ed2k")))
+    # Domestic keywords (泄密/流出/熟女/…) before JAV — 国产标签优先于番号
+    keep = _domestic_keyword_subtype(title, number)
     if keep:
         return "domestic_leak"
-    if is_domestic_uncensored(title):
+
+    # ed2k 日本片 — JAV number / 有码 / 无码 markers beat body-only ed2k links
+    jav_region = _classify_jav_region(title, number)
+    if jav_region:
+        return jav_region
+
+    # ed2k 国产片 — body/title ed2k only when domestic context, not blanket domestic
+    keep = domestic_keep_reason(title, number, has_ed2k=has_ed2k)
+    if keep:
+        return "domestic_leak"
+    if is_domestic_excluded(title, number) or is_domestic_uncensored(title):
         return "domestic_other"
-
-    if any(m in title for m in UNCENSORED_MARKERS):
-        return "uncensored"
-    if "无码" in title or "無碼" in title:
-        return "uncensored"
-
-    if number:
-        prefix = number.split("-", 1)[0]
-        if prefix in AMATEUR_PREFIXES or AMATEUR_NUM_RE.match(number):
-            return "amateur"
-        if STUDIO_NUM_RE.match(number):
-            return "jav_censored"
-
-    if "[有码" in title or "[有碼" in title:
-        return "jav_censored"
 
     return "other"
 

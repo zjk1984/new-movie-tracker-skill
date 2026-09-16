@@ -11,7 +11,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from submit_gate import (  # noqa: E402
     build_submit_probe,
+    collect_gated_downloads,
     filter_download_report,
+    iter_download_rows_from_thread,
+    iter_ed2k_from_thread,
     iter_magnets_from_thread,
 )
 from download_state import empty_state, is_already_submitted, mark_submitted  # noqa: E402
@@ -109,6 +112,92 @@ class IterMagnetsTests(unittest.TestCase):
         rows = iter_magnets_from_thread(thread)
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["av_number"], "FC2-PPV-123")
+
+    def test_expands_ed2k_rows(self):
+        ed2k = "ed2k://|file|sample.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"
+        thread = {
+            "href": "thread-ed2k.html",
+            "title": "[国产] 泄密 115ed2k",
+            "ed2k": [ed2k],
+            "selected_ed2k": ed2k,
+        }
+        rows = iter_ed2k_from_thread(thread)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["link_type"], "ed2k")
+        self.assertEqual(rows[0]["uri"], ed2k)
+
+    def test_download_rows_include_ed2k(self):
+        ed2k = "ed2k://|file|sample.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"
+        thread = {
+            "href": "thread-ed2k.html",
+            "title": "[国产] 泄密",
+            "ed2k": [ed2k],
+        }
+        rows = iter_download_rows_from_thread(thread)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["link_type"], "ed2k")
+
+
+class Ed2kDomesticGateTests(unittest.TestCase):
+    @patch("submit_gate.ensure_javdb_score_gate", return_value=True)
+    def test_excluded_ed2k_thread_skipped(self, _mock_score):
+        ed2k = "ed2k://|file|sample.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"
+        thread = {
+            "href": "thread-cepai.html",
+            "title": "[国产] 厕拍 某女",
+            "ed2k": [ed2k],
+            "selected_ed2k": ed2k,
+            "content_region": "domestic_other",
+        }
+        eligible, skipped = collect_gated_downloads([thread], matched_by_href={})
+        self.assertEqual(eligible, [])
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]["skip_reason"], "excluded_domestic_other")
+
+    @patch("submit_gate.ensure_javdb_score_gate", return_value=True)
+    def test_allowed_domestic_ed2k_thread_eligible(self, _mock_score):
+        ed2k = "ed2k://|file|sample.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"
+        thread = {
+            "href": "thread-leak.html",
+            "title": "[国产] 泄密 115ed2k",
+            "ed2k": [ed2k],
+            "selected_ed2k": ed2k,
+        }
+        eligible, skipped = collect_gated_downloads([thread], matched_by_href={})
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(eligible), 1)
+        self.assertEqual(eligible[0]["link_type"], "ed2k")
+        self.assertEqual(eligible[0]["content_region"], "domestic_leak")
+        self.assertEqual(eligible[0]["domestic_subtype"], "泄密")
+
+    @patch("submit_gate.ensure_javdb_score_gate", return_value=True)
+    def test_jav_ed2k_thread_uses_javdb_gate(self, mock_score):
+        ed2k = "ed2k://|file|SSIS-123.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"
+        thread = {
+            "href": "thread-jav-ed2k.html",
+            "title": "[有码] SSIS-123 115ed2k",
+            "ed2k": [ed2k],
+            "selected_ed2k": ed2k,
+        }
+        eligible, skipped = collect_gated_downloads([thread], matched_by_href={})
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(eligible), 1)
+        self.assertEqual(eligible[0]["content_region"], "jav_censored")
+        mock_score.assert_called()
+
+    @patch("submit_gate.ensure_javdb_score_gate", return_value=False)
+    def test_jav_ed2k_thread_skipped_by_javdb_gate(self, _mock_score):
+        ed2k = "ed2k://|file|SSIS-123.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"
+        thread = {
+            "href": "thread-jav-ed2k.html",
+            "title": "[有码] SSIS-123 115ed2k",
+            "ed2k": [ed2k],
+            "selected_ed2k": ed2k,
+        }
+        eligible, skipped = collect_gated_downloads([thread], matched_by_href={})
+        self.assertEqual(eligible, [])
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]["content_region"], "jav_censored")
 
 
 if __name__ == "__main__":

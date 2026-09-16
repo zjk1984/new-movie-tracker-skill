@@ -29,6 +29,84 @@ class TitleHasAiEnhancedTests(unittest.TestCase):
         self.assertFalse(title_has_ai_enhanced("国产泄密 某女"))
 
 
+class DomesticKeywordExclusionTests(unittest.TestCase):
+    @staticmethod
+    def _ed2k_item(title: str) -> dict:
+        return {
+            "title": title,
+            "ed2k": ["ed2k://|file|sample.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"],
+        }
+
+    def test_cepai_excluded_even_with_ed2k(self):
+        title = "[国产] 厕拍 某女 115ed2k"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title, has_ed2k=True))
+        item = self._ed2k_item(title)
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+        self.assertNotIn("selected_ed2k", item)
+
+    def test_heiren_excluded_even_with_ed2k(self):
+        title = "[国产] 黑人 泄密 ed2k"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title, has_ed2k=True))
+
+    def test_qingsefenxiang_excluded_even_with_ed2k(self):
+        title = "[国产] 情色分享 流出"
+        self.assertTrue(is_domestic_excluded(title))
+        item = self._ed2k_item(title)
+        apply_region_filter(item)
+        self.assertFalse(is_downloadable(item))
+
+    def test_sipai_still_excluded(self):
+        title = "[国产] 私拍 某女"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
+
+    def test_clean_domestic_ed2k_still_kept(self):
+        title = "[国产] 泄密 115ed2k"
+        item = self._ed2k_item(title)
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_leak")
+        self.assertEqual(item.get("domestic_subtype"), "泄密")
+        self.assertTrue(is_downloadable(item))
+
+    def test_ed2k_only_subtype_when_no_keyword(self):
+        title = "[国产无码] 某女 115ed2k"
+        item = self._ed2k_item(title)
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_leak")
+        self.assertEqual(item.get("domestic_subtype"), "ed2k")
+
+    def test_jav_ed2k_classified_as_jav_not_domestic(self):
+        title = "[有码] SSIS-123 中文字幕 115ed2k"
+        ed2k = "ed2k://|file|SSIS-123.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"
+        item = {"title": title, "ed2k": [ed2k]}
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "jav_censored")
+        self.assertNotIn("domestic_subtype", item)
+        self.assertTrue(is_downloadable(item))
+
+    def test_jav_number_ed2k_body_only_not_domestic(self):
+        title = "MIDA-749 4K 115Ed2k"
+        item = {
+            "title": title,
+            "ed2k": ["ed2k://|file|MIDA-749.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"],
+        }
+        self.assertEqual(classify_region(item), "jav_censored")
+
+    def test_orphan_ed2k_body_not_domestic(self):
+        title = "某资源合集"
+        item = {
+            "title": title,
+            "ed2k": ["ed2k://|file|sample.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"],
+        }
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "other")
+        self.assertFalse(is_downloadable(item))
+
+
 class DomesticAiEnhancedExclusionTests(unittest.TestCase):
     def test_ai_enhanced_only_not_kept(self):
         self.assertIsNone(domestic_keep_reason("[国产] 某女 AI增强 4K"))

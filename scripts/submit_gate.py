@@ -66,6 +66,60 @@ def is_download_row_eligible(
     )
 
 
+def _is_ed2k_uri(value: str) -> bool:
+    text = (value or "").strip().lower()
+    return text.startswith("ed2k:") or text.startswith("ed2k://")
+
+
+def iter_ed2k_from_thread(thread: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expand a refetched thread into per-ed2k download rows."""
+    from pikpak_links import parse_download_link
+
+    href = thread.get("href") or ""
+    title = thread.get("title") or ""
+    ed2k_links: list[str] = list(thread.get("ed2k") or [])
+    selected = thread.get("selected_ed2k") or thread.get("selected_download") or ""
+    if _is_ed2k_uri(selected) and selected not in ed2k_links:
+        ed2k_links.insert(0, selected)
+
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for ed2k in ed2k_links:
+        if not ed2k or ed2k in seen:
+            continue
+        seen.add(ed2k)
+        parsed = parse_download_link(ed2k) or {}
+        dn = (parsed.get("name") or "").strip()
+        uri = parsed.get("uri") or ed2k
+        number = extract_av_number(dn) or extract_av_number(unquote(ed2k))
+        rows.append({
+            "name": dn or number or title[:60] or "ed2k",
+            "title": title,
+            "href": href,
+            "uri": uri,
+            "url": uri,
+            "ed2k": ed2k,
+            "link_type": "ed2k",
+            "source": thread.get("download_source") or "forum_ed2k",
+            "av_number": number,
+        })
+    return rows
+
+
+def iter_download_rows_from_thread(thread: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expand a refetched thread into per-link download rows (magnets + ed2k)."""
+    rows = iter_magnets_from_thread(thread)
+    seen = {row.get("uri") for row in rows if row.get("uri")}
+    for row in iter_ed2k_from_thread(thread):
+        uri = row.get("uri") or ""
+        if uri and uri in seen:
+            continue
+        if uri:
+            seen.add(uri)
+        rows.append(row)
+    return rows
+
+
 def iter_magnets_from_thread(thread: dict[str, Any]) -> list[dict[str, Any]]:
     """Expand a refetched thread into per-magnet download rows."""
     from pikpak_links import parse_download_link
@@ -116,7 +170,7 @@ def collect_gated_downloads(
     eligible: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for thread in threads:
-        for row in iter_magnets_from_thread(thread):
+        for row in iter_download_rows_from_thread(thread):
             probe = build_submit_probe(row, matched_by_href)
             if is_download_row_eligible(
                 row,
@@ -136,6 +190,8 @@ def collect_gated_downloads(
             else:
                 skip = dict(row)
                 skip["skip_reason"] = probe.get("skip_reason") or "not_eligible"
+                if probe.get("content_region"):
+                    skip["content_region"] = probe["content_region"]
                 skipped.append(skip)
     return eligible, skipped
 
