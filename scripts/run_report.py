@@ -620,6 +620,7 @@ def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
         return f"JavDB 评论数不足 ({count})"
     labels = {
         "javdb_no_score": "JavDB 无评分",
+        "javdb_not_queried": "JavDB 未查询",
         "javdb_query_error": "JavDB 查询失败",
         "javdb_no_number": "无番号，未提交",
         "javdb_no_release_date": "JavDB 无发行日期",
@@ -653,9 +654,9 @@ def _ensure_item_skip_reason(item: dict[str, Any]) -> None:
         return
     if item.get("skip_reason"):
         return
-    from javdb_client import is_submit_eligible
+    from javdb_client import is_submit_eligible, needs_javdb_query
 
-    is_submit_eligible(item, query_if_missing=False)
+    is_submit_eligible(item, query_if_missing=needs_javdb_query(item))
 
 
 def _match_reason_label(

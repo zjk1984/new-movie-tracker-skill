@@ -676,6 +676,39 @@ class BatchSplitByNumberTests(unittest.TestCase):
             self.assertIn(f"#### {num} ·", section)
         self.assertNotIn("# 2 [magnet]", section)
 
+    def test_batch_split_queries_javdb_for_each_number(self):
+        matched = [_mida783_batch_thread()]
+        download_report = {"succeeded": [], "failed": []}
+
+        def fake_attach(item, _client):
+            number = (item.get("av_number") or "").upper()
+            scores = {
+                "MIDA-783": 4.2,
+                "MFYD-186": 4.1,
+                "PRED-899": 4.34,
+                "HMN-903": 4.5,
+                "MIKR-122": 3.9,
+            }
+            score = scores.get(number)
+            item["javdb_query"] = {
+                "query_status": "ok",
+                "number": number,
+                "score": score,
+                "release_date": "2026-09-15",
+                "reviews_count": 1200,
+            }
+            if score is not None and score < 4:
+                item["skip_reason"] = f"javdb_score_low_{score:.2f}"
+
+        with patch("title_translate.translate_title_for_item", side_effect=lambda i: i.get("name", "")):
+            with patch("javdb_client.attach_javdb_query", side_effect=fake_attach):
+                jav_entries, _ = _build_undownloaded_entries(matched, download_report)
+
+        by_label = {entry["label"]: entry for entry in jav_entries}
+        self.assertNotIn("JavDB 无评分", by_label["PRED-899"]["reason"])
+        self.assertNotIn("JavDB 未查询", by_label["PRED-899"]["reason"])
+        self.assertIn("JavDB 评分 3.90 < 4", by_label["MIKR-122"]["reason"])
+
     def test_success_batch_items_use_per_magnet_labels(self):
         thread = _mida783_batch_thread()
         matched = [thread]

@@ -855,6 +855,22 @@ def javdb_score_ok(
     return float(score) >= min_score
 
 
+def needs_javdb_query(item: dict[str, Any]) -> bool:
+    """True when the item has an AV number but no JavDB query for that number."""
+    number = (
+        item.get("av_number")
+        or extract_av_number(item.get("title") or item.get("name") or "")
+        or ""
+    ).strip().upper()
+    if not number:
+        return False
+    q = item.get("javdb_query") or {}
+    q_number = (q.get("number") or "").strip().upper()
+    if not q or not q_number:
+        return True
+    return q_number != number
+
+
 def ensure_javdb_score_gate(
     item: dict[str, Any],
     client: JavDBClient | None = None,
@@ -905,7 +921,9 @@ def ensure_javdb_score_gate(
         if q.get("query_status") == "error":
             item["skip_reason"] = "javdb_query_error"
         elif score is None:
-            item["skip_reason"] = "javdb_no_score"
+            item["skip_reason"] = (
+                "javdb_not_queried" if not item.get("javdb_query") else "javdb_no_score"
+            )
         else:
             item["skip_reason"] = f"javdb_score_low_{score:.2f}"
         _clear_download_selection(item)
