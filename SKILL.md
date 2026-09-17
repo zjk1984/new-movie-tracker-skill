@@ -286,7 +286,7 @@ python scripts/pikpak_download.py --sha 'PikPak://file.mkv|123456789|GCID40CHARH
 
 Run three times daily at **07:00, 13:00, and 20:00 Asia/Shanghai (北京时间)** to scan recent forum posts and submit **only new magnets** since the last run (tracked in `download_state.json`). Install with `scripts/setup_cron.sh` (Linux) or `scripts/setup_windows_task.ps1` (Windows).
 
-**Linux cron:** `./scripts/setup_cron.sh` installs all three slots plus an `@reboot` cron restart (post-reboot safety). System timezone should be **Asia/Shanghai** so cron wall-clock matches Beijing time. The installer also restarts cron after install; if that fails, run **`sudo service cron restart`** manually.
+**Linux cron:** `./scripts/setup_cron.sh` installs all three slots, a root `/etc/cron.d` reboot reload hook, and checks `systemctl enable cron`. System timezone should be **Asia/Shanghai** so cron wall-clock matches Beijing time. The installer also restarts cron after install; if that fails, run **`sudo service cron restart`** manually.
 
 **One-time setup**
 1. Save PikPak token: `python scripts/pikpak_login.py login` (stored in `pikpak_auth.json`).
