@@ -326,12 +326,17 @@ One-liner install (recommended):
 ./scripts/setup_cron.sh
 ```
 
-Installs **three** slots (07:00, 13:00, and 20:00 Beijing) plus an **`@reboot`** line that waits 30s then restarts the cron daemon (fixes VMs where cron starts before user crontabs load after reboot). Requires system timezone **Asia/Shanghai** (Vixie cron uses system local time for scheduling). The installer **automatically attempts to restart the cron daemon** after updating crontab (`sudo service cron restart`, then `sudo systemctl restart cron`, then `service cron restart`). If all fail, run **`sudo service cron restart`** manually (required on some cloud VMs).
+Installs **three** user-crontab slots (07:00, 13:00, and 20:00 Beijing), a **root `/etc/cron.d/new-movie-tracker-reboot`** hook (`scripts/cron_reboot_reload.sh` — sleep 30s, restart cron, log to `data/cron_reboot.log`), and verifies **`systemctl enable cron`** so the daemon starts at boot. Requires system timezone **Asia/Shanghai** (Vixie cron uses system local time for scheduling). The installer **automatically attempts to restart the cron daemon** after updating crontab. If that fails, run **`sudo service cron restart`** manually (required on some cloud VMs).
 
-Equivalent crontab lines:
+**Why not user `@reboot` + sudo?** Cron jobs run without a TTY and minimal `PATH`; `sudo service cron restart` often fails silently (`use_pty`, missing `/usr/sbin`). If cron is not enabled at boot, the daemon may start hours late — user `@reboot` only runs when cron finally starts, missing earlier slots.
+
+Equivalent lines:
 
 ```cron
-@reboot sleep 30 && (sudo service cron restart || sudo systemctl restart cron || service cron restart) # new-movie-tracker-daily-reboot
+# /etc/cron.d/new-movie-tracker-reboot (root, installed by setup_cron.sh)
+@reboot root /path/to/new-movie-tracker-skill/scripts/cron_reboot_reload.sh
+
+# user crontab
 0 7 * * * TZ=Asia/Shanghai /path/to/new-movie-tracker-skill/scripts/daily_run.sh # new-movie-tracker-daily
 0 13 * * * TZ=Asia/Shanghai /path/to/new-movie-tracker-skill/scripts/daily_run.sh # new-movie-tracker-daily
 0 20 * * * TZ=Asia/Shanghai /path/to/new-movie-tracker-skill/scripts/daily_run.sh # new-movie-tracker-daily
