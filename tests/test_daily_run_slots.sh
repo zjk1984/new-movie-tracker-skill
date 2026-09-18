@@ -181,6 +181,8 @@ SUP="$ROOT/scripts/daily_run_supervisor.sh"
 [[ -x "$SUP" ]] || chmod +x "$SUP"
 grep -Fq 'daily_run_slot_ran_today' "$SUP"
 grep -Fq 'seconds_until_next_slot_start' "$SUP"
+grep -Fq 'daily_run_supervisor_idle_sleep_until_next_slot' "$SUP"
+grep -Fq 'DAILY_RUN_SUPERVISOR_IDLE_CHUNK_SEC' "$SUP"
 grep -Fq 'ensure_cron_running' "$SUP"
 grep -Fq 'tmux' "$SUP"
 
