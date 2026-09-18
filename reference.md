@@ -338,7 +338,29 @@ Installs **three** user-crontab slots (07:00, 13:00, and 20:00 Beijing), two **r
 
 **Why `@reboot` failed on container VMs (2026-09-18):** Cloud Agent / container VMs often use **`/tini` as PID 1**, not full systemd. Cron may start **hours after VM boot** (e.g. boot 02:44, cron 09:10). `@reboot` jobs only fire when the **cron daemon starts**, not when the VM boots — so the 07:00 slot is missed and `cron_reboot.log` is never created until cron finally starts. **`systemctl enable cron` alone does not help** when systemd is offline.
 
-**Fix for late-start containers:** add a **startup hook outside cron**:
+**Fix for late-start / dying cron on containers:** cron and its health watchdog are **best-effort only** — if the cron daemon dies, jobs inside cron never fire. Use an **external supervisor** that runs outside cron:
+
+```bash
+# After ./scripts/setup_cron.sh — keep running in tmux on the cron VM
+tmux new-session -d -s daily-supervisor -c /path/to/new-movie-tracker-skill \
+  './scripts/daily_run_supervisor.sh'
+```
+
+| File | Purpose |
+|------|---------|
+| `scripts/daily_run_supervisor.sh` | Long-running loop (default 5 min): `ensure_cron_running.sh` + slot-aware `daily_run.sh` trigger |
+| `scripts/lib/daily_run_slots.sh` | Detects whether 07/13/20 Beijing slot already logged in `data/daily_run.log` today |
+| `data/supervisor.log` | Supervisor actions and ensure-cron output |
+
+Slot windows (Beijing date, idempotent — no double-run per slot):
+
+| Slot | Window (local hour) | Log match |
+|------|---------------------|-----------|
+| 07:00 | 07–12 | `daily_run.sh start` timestamp in window |
+| 13:00 | 13–19 | same |
+| 20:00 | 20–23 | same (late catch-up e.g. 21:43 counts) |
+
+Optional **startup hook** (still recommended alongside supervisor):
 
 ```json
 {
@@ -346,7 +368,9 @@ Installs **three** user-crontab slots (07:00, 13:00, and 20:00 Beijing), two **r
 }
 ```
 
-(in Cloud Agent `environment.json`, after `./scripts/setup_cron.sh` in install). The health job (every **15 min** during 06:00–21:59 Beijing) then keeps cron healthy for later slots (13:00, 20:00) once cron is up.
+(in Cloud Agent `environment.json`, after `./scripts/setup_cron.sh` in install). Optional **Cursor `subscribe_timer`** wake at 07:00/13:00/20:00 — see project doc `daily-run-external-schedule.md`.
+
+Supervisor one-shot check (no loop): `./scripts/daily_run_supervisor.sh --once`
 
 **Root vs install-user crontab (2026-09-18):** Daily jobs live in the **install user's** crontab (`ubuntu` on Cloud Agent VMs), not root's. The health watchdog must run `ensure_cron_running.sh` **as that user** (or read `data/cron_install_user` and check with `crontab -u`). Running as root caused false "tracker crontab missing" warnings and warn-only behavior missed repairs before 13:00.
 
