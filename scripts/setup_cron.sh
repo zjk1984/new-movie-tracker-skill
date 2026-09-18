@@ -13,6 +13,7 @@ REBOOT_CRON_D="/etc/cron.d/new-movie-tracker-reboot"
 HEALTH_CRON_D="/etc/cron.d/new-movie-tracker-health"
 CRON_ENSURE_UNIT="new-movie-tracker-cron-ensure"
 CRON_ENSURE_SERVICE="/etc/systemd/system/${CRON_ENSURE_UNIT}.service"
+CRON_USER_FILE="$ROOT/data/cron_install_user"
 TZ_NAME="${DAILY_RUN_TZ:-Asia/Shanghai}"
 TIMES=()
 
@@ -24,6 +25,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ensure-only)
       ENSURE_ONLY=1
+      shift
+      ;;
+    --repair-crontab)
+      REPAIR_CRONTAB=1
       shift
       ;;
     --time)
@@ -39,9 +44,10 @@ Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).
 Also installs root /etc/cron.d hooks:
   - @reboot reload (when cron starts)
-  - */30 health watchdog (ensure daemon + crontab while cron is running)
+  - health watchdog (ensure daemon + install-user crontab; every 15 min 06:00–21:59 Beijing)
 Ensures cron starts at boot via systemctl/service and optional systemd oneshot unit.
-Use --ensure-only for idempotent health checks (safe from @hourly watchdog).
+Use --ensure-only for idempotent health checks (auto-fixes missing crontab / stopped cron).
+Use --repair-crontab to reinstall daily slots for the install user only (internal / watchdog).
 
 Usage:
   ./scripts/setup_cron.sh [--dry-run] [--ensure-only] [--time HH:MM] [--time HH:MM ...]
@@ -91,6 +97,28 @@ normalize_times() {
 }
 
 normalize_times
+
+resolve_cron_install_user() {
+  if [[ -f "$CRON_USER_FILE" ]]; then
+    tr -d '[:space:]' < "$CRON_USER_FILE"
+    return 0
+  fi
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]]; then
+    echo "$SUDO_USER"
+    return 0
+  fi
+  if [[ "$(id -u)" -ne 0 ]]; then
+    id -un
+    return 0
+  fi
+  echo "${CRON_INSTALL_USER:-ubuntu}"
+}
+
+save_cron_install_user() {
+  local user="$1"
+  mkdir -p "$ROOT/data"
+  printf '%s\n' "$user" > "$CRON_USER_FILE"
+}
 
 cron_line_for_time() {
   local time="$1"
@@ -181,11 +209,16 @@ EOF
 }
 
 health_cron_d_content() {
+  local user
+  user="$(resolve_cron_install_user)"
   cat <<EOF
 # Installed by scripts/setup_cron.sh — watchdog while cron is running.
+# Runs as the install user ($user) so crontab checks target the correct account.
+# Requires system timezone Asia/Shanghai for 06:00–21:59 active window.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-*/30 * * * * root $ROOT/scripts/setup_cron.sh --ensure-only
+*/15 6-21 * * * $user $ENSURE_SCRIPT
+0,30 0-5,22-23 * * * $user $ENSURE_SCRIPT
 EOF
 }
 
@@ -220,7 +253,7 @@ install_reboot_cron_d() {
 
 install_health_cron_d() {
   chmod +x "$ENSURE_SCRIPT"
-  install_cron_d_file "$HEALTH_CRON_D" "$(health_cron_d_content)" "*/30 health watchdog"
+  install_cron_d_file "$HEALTH_CRON_D" "$(health_cron_d_content)" "*/15 (06–21h) health watchdog"
 }
 
 install_cron_ensure_systemd() {
@@ -268,9 +301,55 @@ install_cron_ensure_systemd() {
 run_ensure_only() {
   chmod +x "$ENSURE_SCRIPT"
   "$ENSURE_SCRIPT"
+  save_cron_install_user "$(resolve_cron_install_user)"
   install_health_cron_d || true
   ensure_cron_boot_enabled || true
   install_cron_ensure_systemd || true
+}
+
+install_user_crontab() {
+  local install_user="$1"
+  shift
+  local lines=( "$@" )
+
+  if ! command -v crontab >/dev/null 2>&1; then
+    echo "[err] crontab not installed. Install cron (e.g. apt install cron) first." >&2
+    return 1
+  fi
+
+  save_cron_install_user "$install_user"
+
+  local tmp
+  tmp="$(mktemp)"
+  if [[ "$(id -un)" == "$install_user" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if is_tracker_cron_line "$line"; then
+        continue
+      fi
+      printf '%s\n' "$line"
+    done < <(crontab -l 2>/dev/null || true) > "$tmp"
+    for line in "${lines[@]}"; do
+      echo "$line" >> "$tmp"
+    done
+    crontab "$tmp"
+  elif [[ "$(id -u)" -eq 0 ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if is_tracker_cron_line "$line"; then
+        continue
+      fi
+      printf '%s\n' "$line"
+    done < <(crontab -u "$install_user" -l 2>/dev/null || true) > "$tmp"
+    for line in "${lines[@]}"; do
+      echo "$line" >> "$tmp"
+    done
+    crontab -u "$install_user" "$tmp"
+  else
+    rm -f "$tmp"
+    echo "[err] cannot install crontab for $install_user (run as $install_user or root)" >&2
+    return 1
+  fi
+  rm -f "$tmp"
+  return 0
 }
 
 restart_cron_daemon() {
@@ -318,6 +397,23 @@ for time in "${TIMES[@]}"; do
   lines+=("$(cron_line_for_time "$time")")
 done
 
+if [[ "${REPAIR_CRONTAB:-0}" == 1 ]]; then
+  install_user="$(resolve_cron_install_user)"
+  if [[ "${DRY_RUN:-0}" == 1 ]]; then
+    echo "[dry-run] would repair crontab for $install_user (${#lines[@]} slot(s))"
+    for line in "${lines[@]}"; do
+      echo "  $line"
+    done
+    exit 0
+  fi
+  if ! install_user_crontab "$install_user" "${lines[@]}"; then
+    exit 1
+  fi
+  echo "[ok] crontab repaired for $install_user (${#lines[@]} slot(s))"
+  restart_cron_daemon || true
+  exit 0
+fi
+
 if [[ "${DRY_RUN:-0}" == 1 ]]; then
   echo "[dry-run] would install cron line(s):"
   for line in "${lines[@]}"; do
@@ -331,26 +427,12 @@ if [[ "${DRY_RUN:-0}" == 1 ]]; then
   exit 0
 fi
 
-if ! command -v crontab >/dev/null 2>&1; then
-  echo "[err] crontab not installed. Install cron (e.g. apt install cron) first."
+install_user="$(resolve_cron_install_user)"
+if ! install_user_crontab "$install_user" "${lines[@]}"; then
   exit 1
 fi
 
-TMP="$(mktemp)"
-while IFS= read -r line || [[ -n "$line" ]]; do
-  if is_tracker_cron_line "$line"; then
-    continue
-  fi
-  printf '%s\n' "$line"
-done < <(crontab -l 2>/dev/null || true) > "$TMP"
-
-for line in "${lines[@]}"; do
-  echo "$line" >> "$TMP"
-done
-crontab "$TMP"
-rm -f "$TMP"
-
-echo "[ok] cron installed (${#lines[@]} slot(s)):"
+echo "[ok] cron installed for $install_user (${#lines[@]} slot(s)):"
 for line in "${lines[@]}"; do
   echo "     $line"
 done

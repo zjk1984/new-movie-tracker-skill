@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Ensure cron daemon is running and tracker crontab is loaded.
+# Ensure cron daemon is running and tracker crontab is loaded for the install user.
 # Safe to run at container boot (before cron exists), from setup_cron.sh --ensure-only,
-# or from the /etc/cron.d health watchdog.
+# or from the /etc/cron.d health watchdog (runs as the install user, not root).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="$ROOT/data/cron_health.log"
-WRAPPER="$ROOT/scripts/daily_run.sh"
+SETUP="$ROOT/scripts/setup_cron.sh"
 MARK="# new-movie-tracker-daily"
+CRON_USER_FILE="$ROOT/data/cron_install_user"
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 TZ_NAME="${DAILY_RUN_TZ:-Asia/Shanghai}"
 
@@ -15,6 +16,22 @@ mkdir -p "$ROOT/data"
 
 log_line() {
   printf '%s %s\n' "$(date -Is)" "$*"
+}
+
+resolve_cron_install_user() {
+  if [[ -f "$CRON_USER_FILE" ]]; then
+    tr -d '[:space:]' < "$CRON_USER_FILE"
+    return 0
+  fi
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]]; then
+    echo "$SUDO_USER"
+    return 0
+  fi
+  if [[ "$(id -u)" -ne 0 ]]; then
+    id -un
+    return 0
+  fi
+  echo "${CRON_INSTALL_USER:-ubuntu}"
 }
 
 cron_service_unit() {
@@ -87,8 +104,56 @@ start_cron_daemon() {
   return 1
 }
 
+restart_cron_daemon() {
+  if run_privileged service cron restart; then
+    log_line "[ok] cron daemon restarted (service cron restart)"
+    return 0
+  fi
+  if run_privileged systemctl restart cron; then
+    log_line "[ok] cron daemon restarted (systemctl restart cron)"
+    return 0
+  fi
+  if run_privileged service crond restart; then
+    log_line "[ok] cron daemon restarted (service crond restart)"
+    return 0
+  fi
+  if run_privileged systemctl restart crond; then
+    log_line "[ok] cron daemon restarted (systemctl restart crond)"
+    return 0
+  fi
+  log_line "[warn] could not restart cron daemon automatically"
+  return 1
+}
+
 tracker_crontab_present() {
-  crontab -l 2>/dev/null | grep -Fq "$MARK"
+  local user="$1"
+  if [[ "$(id -u)" -eq 0 ]]; then
+    crontab -u "$user" -l 2>/dev/null | grep -Fq "$MARK"
+    return $?
+  fi
+  if [[ "$(id -un)" == "$user" ]]; then
+    crontab -l 2>/dev/null | grep -Fq "$MARK"
+    return $?
+  fi
+  return 1
+}
+
+repair_tracker_crontab() {
+  local user="$1"
+  log_line "[warn] tracker crontab missing for $user; attempting repair"
+  if [[ "$(id -un)" == "$user" ]]; then
+    "$SETUP" --repair-crontab
+    return $?
+  fi
+  if [[ "$(id -u)" -eq 0 ]]; then
+    sudo -u "$user" "$SETUP" --repair-crontab
+    return $?
+  fi
+  if sudo -n -u "$user" "$SETUP" --repair-crontab; then
+    return 0
+  fi
+  log_line "[err] cannot repair crontab for $user (need root or run as $user)"
+  return 1
 }
 
 upcoming_slot_note() {
@@ -105,12 +170,20 @@ upcoming_slot_note() {
 }
 
 {
-  log_line "=== ensure_cron_running start (pid $$) ==="
+  log_line "=== ensure_cron_running start (pid $$, user $(id -un)) ==="
+
+  install_user="$(resolve_cron_install_user)"
+  log_line "[info] cron install user: $install_user"
+
+  cron_was_down=0
+  cron_restarted=0
+  crontab_repaired=0
 
   if cron_daemon_active; then
     log_line "[ok] cron daemon active"
   else
     log_line "[warn] cron daemon not running; attempting start"
+    cron_was_down=1
     start_cron_daemon || true
     if cron_daemon_active; then
       log_line "[ok] cron daemon active after start"
@@ -119,13 +192,28 @@ upcoming_slot_note() {
     fi
   fi
 
-  if tracker_crontab_present; then
-    log_line "[ok] tracker crontab loaded ($MARK)"
+  if tracker_crontab_present "$install_user"; then
+    log_line "[ok] tracker crontab loaded for $install_user ($MARK)"
   else
-    log_line "[warn] tracker crontab missing; run ./scripts/setup_cron.sh"
+    if repair_tracker_crontab "$install_user"; then
+      crontab_repaired=1
+      if tracker_crontab_present "$install_user"; then
+        log_line "[ok] tracker crontab repaired for $install_user"
+      else
+        log_line "[err] tracker crontab repair did not load $MARK for $install_user"
+      fi
+    else
+      log_line "[err] tracker crontab repair failed for $install_user"
+    fi
+  fi
+
+  if [[ "$cron_was_down" -eq 1 || "$crontab_repaired" -eq 1 ]]; then
+    if restart_cron_daemon; then
+      cron_restarted=1
+    fi
   fi
 
   upcoming_slot_note
 
-  log_line "=== ensure_cron_running done ==="
+  log_line "=== ensure_cron_running done (cron_restarted=$cron_restarted crontab_repaired=$crontab_repaired) ==="
 } >>"$LOG" 2>&1
