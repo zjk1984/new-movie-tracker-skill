@@ -10,14 +10,18 @@ A small Python script fetches the latest articles from [CNBeta RSS](https://rss.
 flowchart LR
   RSS[CNBeta RSS feed] --> Fetch[scripts/cnbeta_rss.py]
   Fetch --> Parse[Parse RSS items]
-  Parse --> State[data/cnbeta_rss_state.json]
-  Parse --> Feishu[Feishu app bot or webhook]
+  Prev[update/*.md latest] --> Dedupe[Dedupe by URL/guid]
+  Parse --> Dedupe
+  Dedupe --> Update[update/YYYY-MM-DD_HHMM.md]
+  Dedupe --> Feishu[Feishu app bot or webhook]
+  Update --> Backup[update/backup/]
 ```
 
 1. **Fetch** one or more RSS feeds (default: main CNBeta feed).
 2. **Parse** title, link, publish time, category (from URL path), and summary.
-3. **Dedupe** against a local state file of seen article links.
-4. **Send** up to `CNBETA_RSS_MAX_ITEMS` new articles to Feishu as an interactive card (or plain text).
+3. **Dedupe** against the latest `update/*.md` (article URL / guid) and optional JSON state.
+4. **Write** a timestamped markdown file under `update/` with new articles only; link to the previous file (moved to `update/backup/`).
+5. **Send** up to `CNBETA_RSS_MAX_ITEMS` (default **20**) new articles to Feishu as an interactive card (or plain text).
 
 ## Feishu delivery
 
@@ -54,6 +58,8 @@ python scripts/cnbeta_rss.py --ping-feishu   # verify Feishu credentials
 | `scripts/cnbeta_rss.py` | Fetch, parse, dedupe, notify |
 | `scripts/feishu_notify.py` | Shared Feishu app bot client (tenant token + IM send) |
 | `scripts/env_utils.py` | Shared `.env.local` loader |
+| `update/` | Per-run markdown news snapshots (`YYYY-MM-DD_HHMM.md`) |
+| `update/backup/` | Previous update files archived after each run |
 | `data/cnbeta_rss_state.json` | Runtime state (gitignored via `data/`) |
 | `docs/feishu-setup.md` | Feishu app + webhook configuration |
 | `tests/test_cnbeta_rss.py` | RSS parsing and message tests |

@@ -7,6 +7,10 @@ reports/*.md
 reports/backup/*.md
 !reports/.gitkeep
 !reports/backup/.gitkeep
+update/*.md
+update/backup/*.md
+!update/.gitkeep
+!update/backup/.gitkeep
 
 # Local scan artifacts
 scan-*/

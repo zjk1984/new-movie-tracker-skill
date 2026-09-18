@@ -55,7 +55,7 @@ FEISHU_APP_ID=cli_xxxxxxxx
 FEISHU_APP_SECRET=xxxxxxxx
 FEISHU_RECEIVE_ID=oc_xxxxxxxx
 FEISHU_RECEIVE_ID_TYPE=chat_id
-CNBETA_RSS_MAX_ITEMS=10
+CNBETA_RSS_MAX_ITEMS=20
 ```
 
 ### 4. Verify credentials
@@ -106,7 +106,8 @@ python scripts/cnbeta_rss.py --ping-feishu
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CNBETA_RSS_FEEDS` | `https://rss.cnbeta.com.tw` | Comma-separated feed URLs |
-| `CNBETA_RSS_MAX_ITEMS` | `10` | Max new items per run |
+| `CNBETA_RSS_MAX_ITEMS` | `20` | Max new items per run |
+| `CNBETA_RSS_UPDATE_DIR` | `update` | Directory for per-run markdown snapshots |
 | `CNBETA_RSS_STATE_PATH` | `data/cnbeta_rss_state.json` | Seen-item state file |
 | `CNBETA_RSS_VERIFY_SSL` | `auto` | Set `false` if SSL verification fails for the RSS host |
 
@@ -130,10 +131,16 @@ Preview the message without sending:
 python scripts/cnbeta_rss.py --dry-run --reset-state
 ```
 
-Send new items to Feishu:
+Send new items to Feishu (also writes `update/YYYY-MM-DD_HHMM.md`):
 
 ```bash
 python scripts/cnbeta_rss.py
+```
+
+Skip markdown output (Feishu only):
+
+```bash
+python scripts/cnbeta_rss.py --skip-update-md
 ```
 
 Plain text instead of interactive card:
@@ -148,7 +155,7 @@ python scripts/cnbeta_rss.py --text
 0 * * * * cd /path/to/repo && /usr/bin/python3 scripts/cnbeta_rss.py >> logs/cnbeta_rss.log 2>&1
 ```
 
-Seen article links are stored in `data/cnbeta_rss_state.json` so repeat runs only notify on new items.
+Each run writes a timestamped markdown file under `update/` with new articles only. The previous `update/*.md` is moved to `update/backup/` and linked from the new file. Dedup keys come from the latest update file (article URL / guid). `data/cnbeta_rss_state.json` also tracks seen IDs across runs.
 
 ## Troubleshooting
 
