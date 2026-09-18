@@ -250,6 +250,47 @@ def resolve_webhook_secret() -> str:
     return (os.environ.get("FEISHU_WEBHOOK_SECRET") or "").strip()
 
 
+def resolve_app_credentials() -> tuple[str, str]:
+    app_id = (os.environ.get("FEISHU_APP_ID") or "").strip()
+    app_secret = (os.environ.get("FEISHU_APP_SECRET") or "").strip()
+    if not app_id or not app_secret:
+        raise RuntimeError(
+            "missing FEISHU_APP_ID / FEISHU_APP_SECRET in .env.local or environment"
+        )
+    return app_id, app_secret
+
+
+def resolve_app_receive_target() -> tuple[str, str]:
+    receive_id = (
+        (os.environ.get("FEISHU_RECEIVE_ID") or os.environ.get("FEISHU_CHAT_ID") or "")
+        .strip()
+    )
+    if not receive_id:
+        raise RuntimeError(
+            "missing FEISHU_RECEIVE_ID or FEISHU_CHAT_ID "
+            "(chat_id / open_id / user_id of target chat)"
+        )
+    receive_id_type = (os.environ.get("FEISHU_RECEIVE_ID_TYPE") or "chat_id").strip()
+    return receive_id, receive_id_type
+
+
+def resolve_auth_mode() -> str:
+    forced = (os.environ.get("FEISHU_AUTH_MODE") or "").strip().lower()
+    if forced in ("webhook", "app"):
+        return forced
+
+    app_id = (os.environ.get("FEISHU_APP_ID") or "").strip()
+    app_secret = (os.environ.get("FEISHU_APP_SECRET") or "").strip()
+    if app_id and app_secret:
+        return "app"
+    if resolve_webhook_url():
+        return "webhook"
+    raise RuntimeError(
+        "no Feishu credentials configured: set FEISHU_APP_ID + FEISHU_APP_SECRET "
+        "(app mode) or FEISHU_WEBHOOK_URL (webhook mode)"
+    )
+
+
 def send_feishu_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     webhook_url = resolve_webhook_url()
     if not webhook_url:
@@ -273,7 +314,24 @@ def send_feishu_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def send_feishu_app(items: list[NewsItem], *, feed_count: int, use_card: bool) -> dict[str, Any]:
+    from feishu_notify import send_interactive_card, send_text as send_app_text
+
+    resolve_app_credentials()
+    receive_id, receive_id_type = resolve_app_receive_target()
+    kwargs = {"receive_id": receive_id, "receive_id_type": receive_id_type}
+    if use_card:
+        card = build_interactive_card(items, feed_count=feed_count)
+        return send_interactive_card(card, **kwargs)
+    text = build_text_message(items, feed_count=feed_count)
+    return send_app_text(text, **kwargs)
+
+
 def send_items_to_feishu(items: list[NewsItem], *, feed_count: int, use_card: bool) -> dict[str, Any]:
+    mode = resolve_auth_mode()
+    if mode == "app":
+        return send_feishu_app(items, feed_count=feed_count, use_card=use_card)
+
     if use_card:
         payload = {
             "msg_type": "interactive",
@@ -366,9 +424,47 @@ def main() -> int:
         action="store_true",
         help="Send plain text instead of an interactive card",
     )
+    parser.add_argument(
+        "--ping-feishu",
+        action="store_true",
+        help="Verify Feishu credentials and send a test message",
+    )
     args = parser.parse_args()
 
     try:
+        if args.ping_feishu:
+            mode = resolve_auth_mode()
+            if mode == "app":
+                from feishu_notify import get_tenant_access_token, send_text as send_app_text
+
+                token = get_tenant_access_token(force=True)
+                print(f"[ok] app mode: tenant_access_token acquired ({token[:12]}...)")
+                try:
+                    receive_id, receive_id_type = resolve_app_receive_target()
+                except RuntimeError as exc:
+                    print(f"[warn] {exc}", file=sys.stderr)
+                    print(
+                        "[info] token fetch succeeded; set FEISHU_RECEIVE_ID or "
+                        "FEISHU_CHAT_ID to complete the send test",
+                        file=sys.stderr,
+                    )
+                    return 0
+                send_app_text(
+                    "CNBeta RSS Feishu app bot test OK",
+                    receive_id=receive_id,
+                    receive_id_type=receive_id_type,
+                )
+                print("[ok] test message sent via app bot")
+            else:
+                send_feishu_webhook(
+                    {
+                        "msg_type": "text",
+                        "content": {"text": "CNBeta RSS Feishu webhook test OK"},
+                    }
+                )
+                print("[ok] test message sent via webhook")
+            return 0
+
         run(
             max_items=max(1, args.max_items),
             dry_run=args.dry_run,

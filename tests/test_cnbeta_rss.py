@@ -15,6 +15,7 @@ from cnbeta_rss import (  # noqa: E402
     build_interactive_card,
     build_text_message,
     parse_feed,
+    resolve_auth_mode,
     select_new_items,
 )
 
@@ -69,6 +70,26 @@ class CnbetaRssTests(unittest.TestCase):
         card = build_interactive_card([item], feed_count=1)
         self.assertIn("测试标题", text)
         self.assertIn("测试标题", card["elements"][0]["text"]["content"])
+
+    @patch.dict(
+        "os.environ",
+        {
+            "FEISHU_APP_ID": "cli_test",
+            "FEISHU_APP_SECRET": "secret",
+            "FEISHU_WEBHOOK_URL": "https://example.com/hook",
+        },
+        clear=False,
+    )
+    def test_resolve_auth_mode_prefers_app(self):
+        self.assertEqual(resolve_auth_mode(), "app")
+
+    @patch.dict(
+        "os.environ",
+        {"FEISHU_WEBHOOK_URL": "https://example.com/hook"},
+        clear=True,
+    )
+    def test_resolve_auth_mode_webhook_only(self):
+        self.assertEqual(resolve_auth_mode(), "webhook")
 
     @patch("cnbeta_rss.fetch_feed")
     def test_run_fetch_only(self, mock_fetch):
