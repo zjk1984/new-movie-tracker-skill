@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Long-running supervisor for daily_run on container VMs where cron daemon dies randomly.
-# Does NOT depend on cron staying alive for scheduling — polls every 5 min and triggers
-# daily_run.sh during each Beijing slot window when that slot has not logged a run today.
+# Does NOT depend on cron staying alive for scheduling — sleeps between Beijing slot starts
+# (07:00, 13:00, 20:00), polls every 5 min only during each pending slot window, and waits
+# while daily_run.sh is already running.
 #
 # Start in tmux (recommended on cron VM bc-d4fb1f8c):
 #   tmux new-session -d -s daily-supervisor -c /workspace \
 #     '/workspace/scripts/daily_run_supervisor.sh'
 #
-# Still runs ensure_cron_running.sh every cycle so cron remains best-effort backup.
+# Still runs ensure_cron_running.sh each poll cycle so cron remains best-effort backup.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,6 +31,12 @@ supervisor_log() {
 
 daily_run_in_progress() {
   pgrep -f '[/ ]scripts/daily_run\.(sh|py)' >/dev/null 2>&1
+}
+
+wait_for_daily_run() {
+  while daily_run_in_progress; do
+    sleep 10
+  done
 }
 
 run_ensure_cron() {
@@ -61,13 +68,54 @@ trigger_slot() {
   fi
 }
 
-maybe_trigger_due_slots() {
+find_pending_poll_slot() {
   local slot
   for slot in "${DAILY_RUN_SLOTS[@]}"; do
-    if daily_run_slot_pending_in_window "$slot" "$RUN_LOG"; then
-      trigger_slot "$slot" || true
+    if daily_run_slot_pending_for_poll "$slot" "$RUN_LOG"; then
+      echo "$slot"
+      return 0
     fi
   done
+  return 1
+}
+
+maybe_trigger_due_slots() {
+  local slot
+  slot="$(find_pending_poll_slot || true)"
+  if [[ -n "$slot" ]]; then
+    trigger_slot "$slot" || true
+  fi
+}
+
+sleep_until_next_slot() {
+  local wait_sec
+  wait_sec="$(seconds_until_next_slot_start)"
+  supervisor_log "[info] idle until next slot start; sleeping ${wait_sec}s"
+  sleep "$wait_sec"
+}
+
+supervisor_cycle() {
+  if daily_run_in_progress; then
+    supervisor_log "[info] daily_run in progress; waiting for completion"
+    wait_for_daily_run
+    supervisor_log "[info] daily_run finished"
+    return 0
+  fi
+
+  local pending_slot
+  pending_slot="$(find_pending_poll_slot || true)"
+  if [[ -n "$pending_slot" ]]; then
+    run_ensure_cron
+    maybe_trigger_due_slots
+    if daily_run_in_progress; then
+      return 0
+    fi
+    supervisor_log "[info] slot $pending_slot: poll window active; sleeping ${POLL_SEC}s"
+    sleep "$POLL_SEC"
+    return 0
+  fi
+
+  sleep_until_next_slot
 }
 
 acquire_lock() {
@@ -99,9 +147,7 @@ main_loop() {
   supervisor_log "=== daily_run_supervisor start (pid $$, poll=${POLL_SEC}s, TZ=$TZ_NAME) ==="
 
   while true; do
-    run_ensure_cron
-    maybe_trigger_due_slots
-    sleep "$POLL_SEC"
+    supervisor_cycle
   done
 }
 
@@ -112,8 +158,17 @@ case "${1:-run}" in
   --once)
     acquire_lock
     supervisor_log "=== daily_run_supervisor --once (pid $$) ==="
-    run_ensure_cron
-    maybe_trigger_due_slots
+    if daily_run_in_progress; then
+      supervisor_log "[info] daily_run in progress; waiting for completion"
+      wait_for_daily_run
+    elif find_pending_poll_slot >/dev/null; then
+      run_ensure_cron
+      maybe_trigger_due_slots
+    else
+      local wait_sec
+      wait_sec="$(seconds_until_next_slot_start)"
+      supervisor_log "[info] no pending slot in poll window; next slot in ${wait_sec}s"
+    fi
     release_lock
     trap - EXIT
     ;;
@@ -121,13 +176,14 @@ case "${1:-run}" in
     cat <<EOF
 Usage: $(basename "$0") [run|--once|-h]
 
-Long-running loop (default) that every ${POLL_SEC}s:
-  1. Runs scripts/ensure_cron_running.sh (best-effort cron repair)
-  2. During each Beijing slot window (07–12, 13–19, 20–23), triggers daily_run.sh
-     if data/daily_run.log has no start entry for that slot today.
+Long-running loop that:
+  1. Sleeps until the next Beijing slot start (07:00, 13:00, 20:00) when idle
+  2. During each pending slot window, every ${POLL_SEC}s runs ensure_cron_running.sh and
+     triggers daily_run.sh if data/daily_run.log has no start entry for that slot today
+  3. While daily_run.sh is running, waits for completion (no further checks)
 
 Environment:
-  DAILY_RUN_SUPERVISOR_POLL_SEC  Poll interval (default 300)
+  DAILY_RUN_SUPERVISOR_POLL_SEC  Poll interval during active slot windows (default 300)
   DAILY_RUN_TZ / DAILY_RUN_SLOT_TZ  Asia/Shanghai
 
 Start in tmux on cron VM:

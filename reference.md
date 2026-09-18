@@ -348,17 +348,19 @@ tmux new-session -d -s daily-supervisor -c /path/to/new-movie-tracker-skill \
 
 | File | Purpose |
 |------|---------|
-| `scripts/daily_run_supervisor.sh` | Long-running loop (default 5 min): `ensure_cron_running.sh` + slot-aware `daily_run.sh` trigger |
-| `scripts/lib/daily_run_slots.sh` | Detects whether 07/13/20 Beijing slot already logged in `data/daily_run.log` today |
+| `scripts/daily_run_supervisor.sh` | Sleeps between slot starts; polls every 5 min during each pending slot window; waits while `daily_run.sh` runs |
+| `scripts/lib/daily_run_slots.sh` | Slot log detection + `seconds_until_next_slot_start()` for supervisor sleep/poll timing |
 | `data/supervisor.log` | Supervisor actions and ensure-cron output |
 
-Slot windows (Beijing date, idempotent — no double-run per slot):
+Supervisor poll windows (Beijing, from slot start until next slot start):
 
-| Slot | Window (local hour) | Log match |
-|------|---------------------|-----------|
-| 07:00 | 07–12 | `daily_run.sh start` timestamp in window |
-| 13:00 | 13–19 | same |
-| 20:00 | 20–23 | same (late catch-up e.g. 21:43 counts) |
+| Slot | Poll from | Poll until | Log match (idempotent) |
+|------|-----------|------------|------------------------|
+| 07:00 | 07:00 | 13:00 | `daily_run.sh start` with hour 07–12 |
+| 13:00 | 13:00 | 20:00 | hour 13–19 |
+| 20:00 | 20:00 | 07:00 next day | hour 20–23 (late catch-up e.g. 21:43 counts) |
+
+Between poll windows the supervisor sleeps until the next slot start (e.g. 06:50 → sleep until 07:00; after 07:00 slot logged → sleep until 13:00).
 
 Optional **startup hook** (still recommended alongside supervisor):
 

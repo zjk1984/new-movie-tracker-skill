@@ -295,7 +295,7 @@ tmux new-session -d -s daily-supervisor -c /path/to/repo \
   './scripts/daily_run_supervisor.sh'
 ```
 
-Every 5 min it runs `ensure_cron_running.sh` (belt-and-suspenders) and, during each Beijing slot window (07–12, 13–19, 20–23), triggers `daily_run.sh` when `data/daily_run.log` has no start entry for that slot today (idempotent). Also add `"start": "./scripts/ensure_cron_running.sh"` to Cloud Agent `environment.json` if you use a start hook. System timezone should be **Asia/Shanghai**. Logs: `data/daily_run.log`, `data/cron_health.log`, `data/supervisor.log`. If restart fails after install, run **`sudo service cron restart`** manually. See [reference.md](reference.md) and project doc `daily-run-external-schedule.md` for Cursor `subscribe_timer` as an optional third layer.
+Between Beijing slot starts it **sleeps** (no 24/7 polling). From each slot time (07:00, 13:00, 20:00) it polls every 5 min, runs `ensure_cron_running.sh` (belt-and-suspenders), and triggers `daily_run.sh` when `data/daily_run.log` has no start entry for that slot today (idempotent). While `daily_run.sh` is running it waits for completion, then sleeps until the next slot. Also add `"start": "./scripts/ensure_cron_running.sh"` to Cloud Agent `environment.json` if you use a start hook. System timezone should be **Asia/Shanghai**. Logs: `data/daily_run.log`, `data/cron_health.log`, `data/supervisor.log`. If restart fails after install, run **`sudo service cron restart`** manually. See [reference.md](reference.md) and project doc `daily-run-external-schedule.md` for Cursor `subscribe_timer` as an optional third layer.
 
 **One-time setup**
 1. Save PikPak token: `python scripts/pikpak_login.py login` (stored in `pikpak_auth.json`).
