@@ -12,7 +12,8 @@ flowchart LR
   Fetch --> Parse[Parse RSS items]
   Prev[update/*.md or backup/*.md latest] --> Dedupe[Dedupe by URL/guid + state]
   State[data/cnbeta_rss_state.json] --> Dedupe
-  Parse --> Dedupe
+  Parse --> Window[Filter last N days]
+  Window --> Dedupe
   Dedupe --> Update[update/YYYYMMDD-HHMMSS.md]
   Dedupe --> Feishu[Feishu app bot or webhook]
   Update --> Backup[update/backup/]
@@ -20,9 +21,10 @@ flowchart LR
 
 1. **Fetch** one or more RSS feeds (default: main CNBeta feed).
 2. **Parse** title, link, publish time, category (from URL path), and summary.
-3. **Dedupe** against article URLs already in `data/cnbeta_rss_state.json` and the latest `update/*.md` (or `update/backup/*.md` when `update/` is empty).
-4. **Send** up to `CNBETA_RSS_MAX_ITEMS` (default **20**) new articles to Feishu as an interactive card (or plain text).
-5. **Archive** each batch to `update/YYYYMMDD-HHMMSS.md`; move the previous file to `update/backup/` and link via `上一批: [filename](backup/filename)`.
+3. **Filter** to articles published within the last `CNBETA_RSS_LOOKBACK_DAYS` (default **2**). Older feed entries are ignored even if unseen — no backlog backfill.
+4. **Dedupe** the in-window items against article URLs already in `data/cnbeta_rss_state.json` and the latest `update/*.md` (or `update/backup/*.md` when `update/` is empty).
+5. **Send** up to `CNBETA_RSS_MAX_ITEMS` (default **20**) new in-window articles to Feishu as an interactive card (or plain text). If nothing qualifies, log `no new CNBeta items`, skip Feishu, and do not write a new markdown snapshot.
+6. **Archive** each non-empty batch to `update/YYYYMMDD-HHMMSS.md`; move the previous file to `update/backup/` and link via `上一批: [filename](backup/filename)`.
 
 ## Feishu delivery
 

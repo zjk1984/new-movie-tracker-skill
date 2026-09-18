@@ -11,17 +11,21 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from datetime import datetime, timezone
+
 from cnbeta_rss import (  # noqa: E402
     NewsItem,
     build_interactive_card,
     build_text_message,
     build_update_markdown,
+    filter_by_lookback,
     find_latest_dedup_md,
     find_latest_update_md,
     load_seen_ids,
     parse_feed,
     parse_item_ids_from_update_md,
     resolve_auth_mode,
+    resolve_lookback_days,
     resolve_max_items,
     save_state,
     select_new_items,
@@ -120,6 +124,35 @@ class CnbetaRssTests(unittest.TestCase):
     def test_resolve_max_items_defaults_to_20(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(resolve_max_items(), 20)
+
+    def test_resolve_lookback_days_defaults_to_2(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(resolve_lookback_days(), 2)
+
+    def test_filter_by_lookback_keeps_recent_items(self):
+        now = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+        items = [
+            NewsItem(
+                item_id="recent",
+                title="Recent",
+                link="https://example.com/recent",
+                published="2026-09-17T10:00:00+00:00",
+                category="tech",
+                summary="",
+                feed_url="https://rss.cnbeta.com.tw",
+            ),
+            NewsItem(
+                item_id="old",
+                title="Old",
+                link="https://example.com/old",
+                published="2026-09-10T10:00:00+00:00",
+                category="tech",
+                summary="",
+                feed_url="https://rss.cnbeta.com.tw",
+            ),
+        ]
+        filtered = filter_by_lookback(items, lookback_days=2, now=now)
+        self.assertEqual([item.item_id for item in filtered], ["recent"])
 
     def test_parse_item_ids_from_update_md(self):
         md = """# CNBeta 新闻更新
@@ -321,6 +354,92 @@ class CnbetaRssTests(unittest.TestCase):
         self.assertEqual(len(first_ids), 20)
         self.assertGreater(len(second_ids), 0)
         self.assertFalse(first_ids & second_ids)
+
+    @patch("cnbeta_rss.beijing_now")
+    @patch("cnbeta_rss.fetch_feed")
+    def test_run_all_items_older_than_lookback_pushes_zero(
+        self, mock_fetch, mock_beijing_now
+    ):
+        mock_fetch.return_value = FIXTURE.read_text(encoding="utf-8")
+        mock_beijing_now.return_value = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+        from cnbeta_rss import run
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            update_dir = tmp_path / "update"
+            state_path = tmp_path / "state.json"
+            update_dir.mkdir()
+            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
+                    with patch("cnbeta_rss.send_items_to_feishu") as mock_send:
+                        result = run(
+                            max_items=20,
+                            dry_run=False,
+                            fetch_only=False,
+                            reset_state=True,
+                            use_card=True,
+                        )
+        self.assertEqual(result["new_count"], 0)
+        self.assertEqual(result["within_window_total"], 0)
+        self.assertFalse(result["sent"])
+        mock_send.assert_not_called()
+
+    @patch("cnbeta_rss.fetch_all_feeds")
+    def test_run_mix_old_and_new_only_pushes_recent_unseen(self, mock_fetch_all):
+        now = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+        recent_unseen = NewsItem(
+            item_id="https://example.com/recent-unseen",
+            title="Recent unseen",
+            link="https://example.com/recent-unseen",
+            published="2026-09-18T08:00:00+00:00",
+            category="tech",
+            summary="",
+            feed_url="https://rss.cnbeta.com.tw",
+        )
+        recent_seen = NewsItem(
+            item_id="https://example.com/recent-seen",
+            title="Recent seen",
+            link="https://example.com/recent-seen",
+            published="2026-09-18T07:00:00+00:00",
+            category="tech",
+            summary="",
+            feed_url="https://rss.cnbeta.com.tw",
+        )
+        old_unseen = NewsItem(
+            item_id="https://example.com/old-unseen",
+            title="Old unseen",
+            link="https://example.com/old-unseen",
+            published="2026-09-01T08:00:00+00:00",
+            category="tech",
+            summary="",
+            feed_url="https://rss.cnbeta.com.tw",
+        )
+        mock_fetch_all.return_value = [recent_unseen, recent_seen, old_unseen]
+        from cnbeta_rss import run
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            update_dir = tmp_path / "update"
+            state_path = tmp_path / "state.json"
+            update_dir.mkdir()
+            save_state(state_path, [recent_seen.item_id])
+            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
+                    with patch("cnbeta_rss.beijing_now", return_value=now):
+                        with patch("cnbeta_rss.send_items_to_feishu") as mock_send:
+                            result = run(
+                                max_items=20,
+                                dry_run=False,
+                                fetch_only=False,
+                                reset_state=False,
+                                use_card=True,
+                            )
+        self.assertEqual(result["new_count"], 1)
+        self.assertEqual(result["items"][0]["item_id"], recent_unseen.item_id)
+        self.assertTrue(result["sent"])
+        mock_send.assert_called_once()
+        sent_items = mock_send.call_args.args[0]
+        self.assertEqual([item.item_id for item in sent_items], [recent_unseen.item_id])
 
     @patch("cnbeta_rss.fetch_feed")
     def test_run_dedupes_when_only_backup_md_exists(self, mock_fetch):

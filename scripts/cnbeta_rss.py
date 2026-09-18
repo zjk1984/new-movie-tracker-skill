@@ -11,7 +11,7 @@ import re
 import sys
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
 from pathlib import Path
@@ -20,13 +20,14 @@ from xml.etree import ElementTree as ET
 
 import requests
 
-from env_utils import beijing_now, format_beijing_time, load_env_local
+from env_utils import beijing_now, format_beijing_time, load_env_local, parse_datetime
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_FEEDS = ("https://rss.cnbeta.com.tw",)
 DEFAULT_STATE_PATH = SKILL_DIR / "data" / "cnbeta_rss_state.json"
 DEFAULT_UPDATE_DIR = SKILL_DIR / "update"
 DEFAULT_MAX_ITEMS = 20
+DEFAULT_LOOKBACK_DAYS = 2
 UPDATE_NAME_RE = re.compile(r"^(\d{8}-\d{6})(?:_\d+)?\.md$")
 UPDATE_LINK_LINE_RE = re.compile(r"^\s*-\s*\*\*链接\*\*:\s*(\S+)\s*$", re.MULTILINE)
 UPDATE_LINK_RE = re.compile(r"\[[^\]]*\]\((https?://[^)]+)\)")
@@ -80,6 +81,16 @@ def resolve_max_items() -> int:
         return max(1, int(raw))
     except ValueError:
         return DEFAULT_MAX_ITEMS
+
+
+def resolve_lookback_days() -> int:
+    raw = (
+        os.environ.get("CNBETA_RSS_LOOKBACK_DAYS") or str(DEFAULT_LOOKBACK_DAYS)
+    ).strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return DEFAULT_LOOKBACK_DAYS
 
 
 def _update_sort_key(path: Path) -> tuple[str, str]:
@@ -372,6 +383,31 @@ def save_state(path: Path, seen_ids: list[str]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def filter_by_lookback(
+    items: list[NewsItem],
+    *,
+    lookback_days: int,
+    now: datetime | None = None,
+) -> list[NewsItem]:
+    """Keep items published within the last `lookback_days` (inclusive of cutoff day)."""
+    if lookback_days <= 0:
+        return list(items)
+    now = now or beijing_now()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    cutoff = now.astimezone(timezone.utc) - timedelta(days=lookback_days)
+    filtered: list[NewsItem] = []
+    for item in items:
+        published = parse_datetime(item.published)
+        if published is None:
+            continue
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        if published.astimezone(timezone.utc) >= cutoff:
+            filtered.append(item)
+    return filtered
+
+
 def select_new_items(items: list[NewsItem], seen_ids: set[str]) -> list[NewsItem]:
     fresh = [item for item in items if item.item_id not in seen_ids]
     fresh.sort(key=lambda item: item.published or "", reverse=True)
@@ -543,6 +579,7 @@ def run(
     feed_urls = resolve_feed_urls()
     state_path = resolve_state_path()
     update_dir = resolve_update_dir()
+    lookback_days = resolve_lookback_days()
     seen_ids, previous_md, dedup_md = load_seen_ids(
         update_dir=update_dir,
         state_path=state_path,
@@ -550,11 +587,14 @@ def run(
     )
 
     all_items = fetch_all_feeds(feed_urls)
-    new_items = select_new_items(all_items, seen_ids)[:max_items]
+    recent_items = filter_by_lookback(all_items, lookback_days=lookback_days)
+    new_items = select_new_items(recent_items, seen_ids)[:max_items]
 
     result = {
         "feeds": feed_urls,
         "fetched_total": len(all_items),
+        "lookback_days": lookback_days,
+        "within_window_total": len(recent_items),
         "new_count": len(new_items),
         "sent": False,
         "dry_run": dry_run,

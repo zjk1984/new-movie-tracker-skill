@@ -107,6 +107,7 @@ python scripts/cnbeta_rss.py --ping-feishu
 |----------|---------|-------------|
 | `CNBETA_RSS_FEEDS` | `https://rss.cnbeta.com.tw` | Comma-separated feed URLs |
 | `CNBETA_RSS_MAX_ITEMS` | `20` | Max new items per run |
+| `CNBETA_RSS_LOOKBACK_DAYS` | `2` | Only consider articles published within this many days; no backlog backfill |
 | `CNBETA_RSS_UPDATE_DIR` | `update` | Directory for per-run markdown snapshots |
 | `CNBETA_RSS_STATE_PATH` | `data/cnbeta_rss_state.json` | Seen-item state file |
 | `CNBETA_RSS_VERIFY_SSL` | `auto` | Set `false` if SSL verification fails for the RSS host |
