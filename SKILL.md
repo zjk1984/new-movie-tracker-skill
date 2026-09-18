@@ -286,7 +286,16 @@ python scripts/pikpak_download.py --sha 'PikPak://file.mkv|123456789|GCID40CHARH
 
 Run three times daily at **07:00, 13:00, and 20:00 Asia/Shanghai (北京时间)** to scan recent forum posts and submit **only new magnets** since the last run (tracked in `download_state.json`). Install with `scripts/setup_cron.sh` (Linux) or `scripts/setup_windows_task.ps1` (Windows).
 
-**Linux cron:** `./scripts/setup_cron.sh` installs all three slots in the **install user's** crontab (saved in `data/cron_install_user`), root `/etc/cron.d` reboot hook, and a health watchdog that runs `ensure_cron_running.sh` **as that user** every 15 min (06:00–21:59 Beijing). The watchdog auto-starts cron and reinstalls a missing crontab. On **container VMs** (PID 1 = tini), also add `"start": "./scripts/ensure_cron_running.sh"` to Cloud Agent `environment.json` — `@reboot` only runs when cron finally starts, not at VM boot. System timezone should be **Asia/Shanghai**. Logs: `data/daily_run.log`, `data/cron_health.log`. If restart fails after install, run **`sudo service cron restart`** manually.
+**Linux cron (best-effort):** `./scripts/setup_cron.sh` installs all three slots in the **install user's** crontab (saved in `data/cron_install_user`), root `/etc/cron.d` reboot hook, and a health watchdog that runs `ensure_cron_running.sh` **as that user** every 15 min (06:00–21:59 Beijing). The watchdog auto-starts cron and reinstalls a missing crontab — but **only while cron itself is alive**; if the daemon dies, nothing inside cron can self-heal.
+
+**Container VMs (recommended):** On Cloud Agent / tini PID 1 hosts, run the **external supervisor** in tmux — it does not depend on cron staying up:
+
+```bash
+tmux new-session -d -s daily-supervisor -c /path/to/repo \
+  './scripts/daily_run_supervisor.sh'
+```
+
+Every 5 min it runs `ensure_cron_running.sh` (belt-and-suspenders) and, during each Beijing slot window (07–12, 13–19, 20–23), triggers `daily_run.sh` when `data/daily_run.log` has no start entry for that slot today (idempotent). Also add `"start": "./scripts/ensure_cron_running.sh"` to Cloud Agent `environment.json` if you use a start hook. System timezone should be **Asia/Shanghai**. Logs: `data/daily_run.log`, `data/cron_health.log`, `data/supervisor.log`. If restart fails after install, run **`sudo service cron restart`** manually. See [reference.md](reference.md) and project doc `daily-run-external-schedule.md` for Cursor `subscribe_timer` as an optional third layer.
 
 **One-time setup**
 1. Save PikPak token: `python scripts/pikpak_login.py login` (stored in `pikpak_auth.json`).

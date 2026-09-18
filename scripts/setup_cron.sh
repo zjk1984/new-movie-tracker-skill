@@ -59,8 +59,10 @@ Environment overrides:
   DAILY_RUN_TZ=Asia/Shanghai
   DAILY_RUN_TIMES=07:00,13:00,20:00
 
-Container / Cloud Agent VMs (PID 1 is tini, cron starts hours late):
-  Add to environment.json "start": "./scripts/ensure_cron_running.sh"
+Container / Cloud Agent VMs (PID 1 is tini, cron may start late or die):
+  Cron is best-effort. Run the external supervisor in tmux (recommended):
+    tmux new-session -d -s daily-supervisor -c $ROOT '$ROOT/scripts/daily_run_supervisor.sh'
+  Optionally add environment.json "start": "./scripts/ensure_cron_running.sh"
   @reboot only fires when cron finally starts — it cannot fix a missed 07:00 slot.
 EOF
       exit 0
