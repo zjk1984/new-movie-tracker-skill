@@ -1,0 +1,13 @@
+[Unit]
+Description=Ensure cron daemon running for New Movie Tracker
+After=local-fs.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%i
+ExecStart=%i/scripts/ensure_cron_running.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
