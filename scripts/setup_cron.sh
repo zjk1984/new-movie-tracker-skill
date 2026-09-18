@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Install daily_run cron jobs (07:00 + 13:00 + 20:00 Asia/Shanghai by default).
-# Usage: ./scripts/setup_cron.sh [--dry-run] [--time HH:MM] [--time HH:MM ...]
+# Usage: ./scripts/setup_cron.sh [--dry-run] [--ensure-only] [--time HH:MM] [--time HH:MM ...]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WRAPPER="$ROOT/scripts/daily_run.sh"
 REBOOT_SCRIPT="$ROOT/scripts/cron_reboot_reload.sh"
+ENSURE_SCRIPT="$ROOT/scripts/ensure_cron_running.sh"
 MARK="# new-movie-tracker-daily"
 REBOOT_MARK="# new-movie-tracker-daily-reboot"
 REBOOT_CRON_D="/etc/cron.d/new-movie-tracker-reboot"
+HEALTH_CRON_D="/etc/cron.d/new-movie-tracker-health"
+CRON_ENSURE_UNIT="new-movie-tracker-cron-ensure"
+CRON_ENSURE_SERVICE="/etc/systemd/system/${CRON_ENSURE_UNIT}.service"
 TZ_NAME="${DAILY_RUN_TZ:-Asia/Shanghai}"
 TIMES=()
 
@@ -16,6 +20,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)
       DRY_RUN=1
+      shift
+      ;;
+    --ensure-only)
+      ENSURE_ONLY=1
       shift
       ;;
     --time)
@@ -29,11 +37,14 @@ Install cron job(s) for scripts/daily_run.sh.
 Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).
-Also installs a root /etc/cron.d @reboot reload hook (no sudo in the job) and
-ensures the cron service is enabled at boot.
+Also installs root /etc/cron.d hooks:
+  - @reboot reload (when cron starts)
+  - */30 health watchdog (ensure daemon + crontab while cron is running)
+Ensures cron starts at boot via systemctl/service and optional systemd oneshot unit.
+Use --ensure-only for idempotent health checks (safe from @hourly watchdog).
 
 Usage:
-  ./scripts/setup_cron.sh [--dry-run] [--time HH:MM] [--time HH:MM ...]
+  ./scripts/setup_cron.sh [--dry-run] [--ensure-only] [--time HH:MM] [--time HH:MM ...]
 
   Repeat --time to override defaults, e.g.:
     ./scripts/setup_cron.sh --time 07:00 --time 13:00 --time 20:00
@@ -41,6 +52,10 @@ Usage:
 Environment overrides:
   DAILY_RUN_TZ=Asia/Shanghai
   DAILY_RUN_TIMES=07:00,13:00,20:00
+
+Container / Cloud Agent VMs (PID 1 is tini, cron starts hours late):
+  Add to environment.json "start": "./scripts/ensure_cron_running.sh"
+  @reboot only fires when cron finally starts — it cannot fix a missed 07:00 slot.
 EOF
       exit 0
       ;;
@@ -109,7 +124,7 @@ cron_service_unit() {
 
 ensure_cron_boot_enabled() {
   if ! command -v systemctl >/dev/null 2>&1; then
-    echo "[info] systemctl not available; ensure cron starts at boot via your init system"
+    echo "[info] systemctl not available; run ensure_cron_running.sh from your container start hook"
     return 0
   fi
 
@@ -134,14 +149,18 @@ ensure_cron_boot_enabled() {
     disabled|disabled-by-failure|generated|indirect|not-found|unknown)
       echo "[warn] $unit service not enabled at boot (is-enabled: $state)" >&2
       if [[ "${DRY_RUN:-0}" == 1 ]]; then
-        echo "[dry-run] would run: sudo systemctl enable $unit"
+        echo "[dry-run] would run: sudo systemctl enable --now $unit"
+        return 0
+      fi
+      if sudo -n systemctl enable --now "$unit" 2>/dev/null; then
+        echo "[ok] enabled and started $unit at boot"
         return 0
       fi
       if sudo -n systemctl enable "$unit" 2>/dev/null; then
         echo "[ok] enabled $unit service at boot"
         return 0
       fi
-      echo "[warn] run manually: sudo systemctl enable $unit" >&2
+      echo "[warn] run manually: sudo systemctl enable --now $unit" >&2
       return 1
       ;;
     *)
@@ -153,36 +172,105 @@ ensure_cron_boot_enabled() {
 
 reboot_cron_d_content() {
   cat <<EOF
-# Installed by scripts/setup_cron.sh — reload cron after boot so user crontabs apply.
+# Installed by scripts/setup_cron.sh — reload cron when the daemon starts (@reboot).
+# On container VMs cron may start hours after VM boot; use ensure_cron_running.sh at start.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 @reboot root $REBOOT_SCRIPT
 EOF
 }
 
-install_reboot_cron_d() {
-  local content
-  content="$(reboot_cron_d_content)"
+health_cron_d_content() {
+  cat <<EOF
+# Installed by scripts/setup_cron.sh — watchdog while cron is running.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/30 * * * * root $ROOT/scripts/setup_cron.sh --ensure-only
+EOF
+}
+
+install_cron_d_file() {
+  local dest="$1"
+  local content="$2"
+  local label="$3"
 
   if [[ "${DRY_RUN:-0}" == 1 ]]; then
-    echo "[dry-run] would install $REBOOT_CRON_D:"
+    echo "[dry-run] would install $dest:"
     while IFS= read -r line; do
       echo "  $line"
     done <<<"$content"
     return 0
   fi
 
-  chmod +x "$REBOOT_SCRIPT"
-
   if ! sudo -n test -d /etc/cron.d 2>/dev/null; then
-    echo "[warn] /etc/cron.d not writable; install root reboot hook manually:" >&2
+    echo "[warn] /etc/cron.d not writable; install $label manually:" >&2
     echo "$content" >&2
     return 1
   fi
 
-  echo "$content" | sudo tee "$REBOOT_CRON_D" >/dev/null
-  sudo chmod 644 "$REBOOT_CRON_D"
-  echo "[ok] installed $REBOOT_CRON_D (root @reboot reload, no sudo in job)"
+  echo "$content" | sudo tee "$dest" >/dev/null
+  sudo chmod 644 "$dest"
+  echo "[ok] installed $dest ($label)"
+}
+
+install_reboot_cron_d() {
+  chmod +x "$REBOOT_SCRIPT"
+  install_cron_d_file "$REBOOT_CRON_D" "$(reboot_cron_d_content)" "root @reboot reload"
+}
+
+install_health_cron_d() {
+  chmod +x "$ENSURE_SCRIPT"
+  install_cron_d_file "$HEALTH_CRON_D" "$(health_cron_d_content)" "*/30 health watchdog"
+}
+
+install_cron_ensure_systemd() {
+  local src="$ROOT/scripts/systemd/${CRON_ENSURE_UNIT}.service"
+  if [[ ! -f "$src" ]]; then
+    return 1
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ "$(systemctl is-system-running 2>/dev/null || echo unknown)" == "offline" ]]; then
+    echo "[info] systemd offline (container/tini); skip ${CRON_ENSURE_UNIT}.service"
+    return 0
+  fi
+
+  local tmp
+  tmp="$(mktemp)"
+  sed "s|%i|$ROOT|g" "$src" > "$tmp"
+
+  if [[ "${DRY_RUN:-0}" == 1 ]]; then
+    echo "[dry-run] would install $CRON_ENSURE_SERVICE and enable --now ${CRON_ENSURE_UNIT}.service"
+    rm -f "$tmp"
+    return 0
+  fi
+
+  if [[ "$(id -u)" -ne 0 ]] && ! sudo -n true 2>/dev/null; then
+    echo "[warn] install boot ensure unit manually: sudo cp $src $CRON_ENSURE_SERVICE && sudo systemctl enable --now ${CRON_ENSURE_UNIT}.service" >&2
+    rm -f "$tmp"
+    return 1
+  fi
+
+  if [[ "$(id -u)" -eq 0 ]]; then
+    install -m 644 "$tmp" "$CRON_ENSURE_SERVICE"
+    systemctl daemon-reload
+    systemctl enable --now "${CRON_ENSURE_UNIT}.service"
+  else
+    sudo install -m 644 "$tmp" "$CRON_ENSURE_SERVICE"
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now "${CRON_ENSURE_UNIT}.service"
+  fi
+  rm -f "$tmp"
+  echo "[ok] enabled ${CRON_ENSURE_UNIT}.service (boot ensure hook)"
+}
+
+run_ensure_only() {
+  chmod +x "$ENSURE_SCRIPT"
+  "$ENSURE_SCRIPT"
+  install_health_cron_d || true
+  ensure_cron_boot_enabled || true
+  install_cron_ensure_systemd || true
 }
 
 restart_cron_daemon() {
@@ -210,6 +298,18 @@ restart_cron_daemon() {
   return 1
 }
 
+if [[ "${ENSURE_ONLY:-0}" == 1 ]]; then
+  if [[ "${DRY_RUN:-0}" == 1 ]]; then
+    echo "[dry-run] would run: $ENSURE_SCRIPT"
+    install_health_cron_d
+    ensure_cron_boot_enabled || true
+    install_cron_ensure_systemd || true
+    exit 0
+  fi
+  run_ensure_only
+  exit 0
+fi
+
 chmod +x "$WRAPPER"
 mkdir -p "$ROOT/data"
 
@@ -225,7 +325,9 @@ if [[ "${DRY_RUN:-0}" == 1 ]]; then
   done
   echo "  log: $ROOT/data/daily_run.log"
   install_reboot_cron_d
+  install_health_cron_d
   ensure_cron_boot_enabled || true
+  install_cron_ensure_systemd || true
   exit 0
 fi
 
@@ -257,7 +359,10 @@ echo "     log: $ROOT/data/daily_run.log"
 crontab -l | grep -E 'new-movie-tracker-daily' || true
 
 install_reboot_cron_d || true
+install_health_cron_d || true
 ensure_cron_boot_enabled || true
+install_cron_ensure_systemd || true
+run_ensure_only
 
 if ! restart_cron_daemon; then
   echo "[warn] crontab installed but cron may not pick up changes until restart" >&2
