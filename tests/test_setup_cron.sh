@@ -29,16 +29,31 @@ echo "$DRY" | grep -q 'new-movie-tracker-daily'
 echo "$DRY" | grep -q '/etc/cron.d/new-movie-tracker-reboot'
 echo "$DRY" | grep -q '/etc/cron.d/new-movie-tracker-health'
 echo "$DRY" | grep -q 'cron_reboot_reload.sh'
-echo "$DRY" | grep -q 'ensure_cron_running.sh\|--ensure-only\|health watchdog'
+echo "$DRY" | grep -q 'ensure_cron_running.sh\|health watchdog'
 "$SCRIPT" --help | grep -qi 'restart'
 "$SCRIPT" --help | grep -qi 'cron.d'
 "$SCRIPT" --help | grep -qi 'starts at boot\|enabled at boot'
 "$SCRIPT" --help | grep -qi 'ensure-only'
+"$SCRIPT" --help | grep -qi 'repair-crontab'
 "$SCRIPT" --help | grep -qi 'tini\|container'
 
 ENSURE_DRY="$("$SCRIPT" --ensure-only --dry-run 2>/dev/null)"
 echo "$ENSURE_DRY" | grep -q 'would run:.*ensure_cron_running.sh'
 echo "$ENSURE_DRY" | grep -q 'new-movie-tracker-health'
+
+# Health watchdog must run as install user (not root) and use ensure_cron_running.sh directly.
+HEALTH_BLOCK="$(echo "$DRY" | sed -n '/new-movie-tracker-health/,/^$/p')"
+echo "$HEALTH_BLOCK" | grep -q 'ensure_cron_running.sh'
+echo "$HEALTH_BLOCK" | grep -q '\*/15 6-21'
+echo "$HEALTH_BLOCK" | grep -q '0,30 0-5,22-23'
+if echo "$HEALTH_BLOCK" | grep -q '\*/30 \* \* \* \* root.*setup_cron.sh --ensure-only'; then
+  echo "[err] health cron.d still runs setup_cron.sh --ensure-only as root every 30 min" >&2
+  exit 1
+fi
+if echo "$HEALTH_BLOCK" | grep -q ' root .*ensure_cron_running'; then
+  echo "[err] health cron.d still runs ensure_cron_running.sh as root" >&2
+  exit 1
+fi
 
 # User crontab must NOT use sudo @reboot (fails under cron: no TTY, minimal PATH).
 if echo "$DRY" | grep -q '@reboot.*sudo'; then
@@ -71,5 +86,10 @@ grep -Fq 'install_health_cron_d' "$SCRIPT"
 grep -Fq 'ensure_cron_running.sh' "$SCRIPT"
 grep -Fq 'new-movie-tracker-cron-ensure' "$SCRIPT"
 grep -Fq 'cron_health.log' "$ENSURE_SCRIPT"
+grep -Fq 'cron_install_user' "$SCRIPT"
+grep -Fq 'cron_install_user' "$ENSURE_SCRIPT"
+grep -Fq 'repair_tracker_crontab' "$ENSURE_SCRIPT"
+grep -Fq -- '--repair-crontab' "$ENSURE_SCRIPT"
+grep -Fq 'crontab -u' "$ENSURE_SCRIPT"
 
 echo "[ok] setup_cron validation passed"

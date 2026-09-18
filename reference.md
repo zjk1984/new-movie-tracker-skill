@@ -331,8 +331,9 @@ Installs **three** user-crontab slots (07:00, 13:00, and 20:00 Beijing), two **r
 | File | Purpose |
 |------|---------|
 | `/etc/cron.d/new-movie-tracker-reboot` | `@reboot` → `scripts/cron_reboot_reload.sh` (reload when cron starts; log `data/cron_reboot.log`) |
-| `/etc/cron.d/new-movie-tracker-health` | `*/30` → `scripts/setup_cron.sh --ensure-only` (watchdog while cron is running; log `data/cron_health.log`) |
-| `scripts/ensure_cron_running.sh` | Start cron if down; verify crontab loaded — **run at container boot** |
+| `/etc/cron.d/new-movie-tracker-health` | `*/15` (06:00–21:59) + `0,30` otherwise → `scripts/ensure_cron_running.sh` **as install user** (auto-fix; log `data/cron_health.log`) |
+| `data/cron_install_user` | Username whose crontab holds the daily slots (written by `setup_cron.sh`) |
+| `scripts/ensure_cron_running.sh` | Start/restart cron if down; verify **install user's** crontab; auto-repair — **run at container boot** |
 | `new-movie-tracker-cron-ensure.service` | Optional systemd oneshot at boot (full systemd hosts only) |
 
 **Why `@reboot` failed on container VMs (2026-09-18):** Cloud Agent / container VMs often use **`/tini` as PID 1**, not full systemd. Cron may start **hours after VM boot** (e.g. boot 02:44, cron 09:10). `@reboot` jobs only fire when the **cron daemon starts**, not when the VM boots — so the 07:00 slot is missed and `cron_reboot.log` is never created until cron finally starts. **`systemctl enable cron` alone does not help** when systemd is offline.
@@ -345,7 +346,9 @@ Installs **three** user-crontab slots (07:00, 13:00, and 20:00 Beijing), two **r
 }
 ```
 
-(in Cloud Agent `environment.json`, after `./scripts/setup_cron.sh` in install). The `*/30` health job then keeps cron healthy for later slots (13:00, 20:00) once cron is up.
+(in Cloud Agent `environment.json`, after `./scripts/setup_cron.sh` in install). The health job (every **15 min** during 06:00–21:59 Beijing) then keeps cron healthy for later slots (13:00, 20:00) once cron is up.
+
+**Root vs install-user crontab (2026-09-18):** Daily jobs live in the **install user's** crontab (`ubuntu` on Cloud Agent VMs), not root's. The health watchdog must run `ensure_cron_running.sh` **as that user** (or read `data/cron_install_user` and check with `crontab -u`). Running as root caused false "tracker crontab missing" warnings and warn-only behavior missed repairs before 13:00.
 
 **Why not user `@reboot` + sudo?** Cron jobs run without a TTY and minimal `PATH`; `sudo service cron restart` often fails silently (`use_pty`, missing `/usr/sbin`).
 
@@ -355,8 +358,9 @@ Equivalent lines:
 # /etc/cron.d/new-movie-tracker-reboot (root, installed by setup_cron.sh)
 @reboot root /path/to/new-movie-tracker-skill/scripts/cron_reboot_reload.sh
 
-# /etc/cron.d/new-movie-tracker-health (root watchdog — only runs while cron is alive)
-*/30 * * * * root /path/to/new-movie-tracker-skill/scripts/setup_cron.sh --ensure-only
+# /etc/cron.d/new-movie-tracker-health (runs as install user — checks correct crontab)
+*/15 6-21 * * * ubuntu /path/to/new-movie-tracker-skill/scripts/ensure_cron_running.sh
+0,30 0-5,22-23 * * * ubuntu /path/to/new-movie-tracker-skill/scripts/ensure_cron_running.sh
 
 # user crontab
 0 7 * * * TZ=Asia/Shanghai /path/to/new-movie-tracker-skill/scripts/daily_run.sh # new-movie-tracker-daily
@@ -366,7 +370,7 @@ Equivalent lines:
 
 Custom slots: `./scripts/setup_cron.sh --time 07:00 --time 13:00 --time 20:00` or `DAILY_RUN_TIMES=07:00,13:00,20:00 ./scripts/setup_cron.sh`
 
-Verify: `crontab -l | grep new-movie-tracker-daily` · Logs: `data/daily_run.log`, `data/cron_health.log`, `data/cron_reboot.log` · Dry-run: `./scripts/setup_cron.sh --dry-run` · Health check: `./scripts/setup_cron.sh --ensure-only`
+Verify: `crontab -l | grep new-movie-tracker-daily` · Logs: `data/daily_run.log`, `data/cron_health.log`, `data/cron_reboot.log` · Dry-run: `./scripts/setup_cron.sh --dry-run` · Health check / auto-fix: `./scripts/setup_cron.sh --ensure-only` or `./scripts/ensure_cron_running.sh`
 
 ### GitHub Actions schedule (07:00 Asia/Shanghai, optional)
 
