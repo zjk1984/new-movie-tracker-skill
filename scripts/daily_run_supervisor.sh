@@ -14,6 +14,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/daily_run_slots.sh
 source "$ROOT/scripts/lib/daily_run_slots.sh"
+# shellcheck source=lib/daily_run_supervisor_idle.sh
+source "$ROOT/scripts/lib/daily_run_supervisor_idle.sh"
 
 ENSURE="$ROOT/scripts/ensure_cron_running.sh"
 DAILY_RUN="$ROOT/scripts/daily_run.sh"
@@ -88,10 +90,9 @@ maybe_trigger_due_slots() {
 }
 
 sleep_until_next_slot() {
-  local wait_sec
-  wait_sec="$(seconds_until_next_slot_start)"
-  supervisor_log "[info] idle until next slot start; sleeping ${wait_sec}s"
-  sleep "$wait_sec"
+  DAILY_RUN_SUPERVISOR_IDLE_LOG=supervisor_log
+  export DAILY_RUN_SUPERVISOR_IDLE_LOG
+  daily_run_supervisor_idle_sleep_until_next_slot
 }
 
 supervisor_cycle() {
@@ -183,8 +184,9 @@ Long-running loop that:
   3. While daily_run.sh is running, waits for completion (no further checks)
 
 Environment:
-  DAILY_RUN_SUPERVISOR_POLL_SEC  Poll interval during active slot windows (default 300)
-  DAILY_RUN_TZ / DAILY_RUN_SLOT_TZ  Asia/Shanghai
+  DAILY_RUN_SUPERVISOR_POLL_SEC       Poll interval during active slot windows (default 300)
+  DAILY_RUN_SUPERVISOR_IDLE_CHUNK_SEC Max idle sleep chunk between slot recomputes (default 60)
+  DAILY_RUN_TZ / DAILY_RUN_SLOT_TZ      Asia/Shanghai
 
 Start in tmux on cron VM:
   tmux new-session -d -s daily-supervisor -c $ROOT '$ROOT/scripts/daily_run_supervisor.sh'
