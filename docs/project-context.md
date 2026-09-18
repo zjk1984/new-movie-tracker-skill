@@ -10,7 +10,8 @@ A small Python script fetches the latest articles from [CNBeta RSS](https://rss.
 flowchart LR
   RSS[CNBeta RSS feed] --> Fetch[scripts/cnbeta_rss.py]
   Fetch --> Parse[Parse RSS items]
-  Prev[update/*.md latest] --> Dedupe[Dedupe by URL/guid]
+  Prev[update/*.md or backup/*.md latest] --> Dedupe[Dedupe by URL/guid + state]
+  State[data/cnbeta_rss_state.json] --> Dedupe
   Parse --> Dedupe
   Dedupe --> Update[update/YYYYMMDD-HHMMSS.md]
   Dedupe --> Feishu[Feishu app bot or webhook]
@@ -19,7 +20,7 @@ flowchart LR
 
 1. **Fetch** one or more RSS feeds (default: main CNBeta feed).
 2. **Parse** title, link, publish time, category (from URL path), and summary.
-3. **Dedupe** against article links in the latest `update/*.md` (first run has no prior file).
+3. **Dedupe** against article URLs already in `data/cnbeta_rss_state.json` and the latest `update/*.md` (or `update/backup/*.md` when `update/` is empty).
 4. **Send** up to `CNBETA_RSS_MAX_ITEMS` (default **20**) new articles to Feishu as an interactive card (or plain text).
 5. **Archive** each batch to `update/YYYYMMDD-HHMMSS.md`; move the previous file to `update/backup/` and link via `上一批: [filename](backup/filename)`.
 

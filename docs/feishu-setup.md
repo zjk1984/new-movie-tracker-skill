@@ -155,7 +155,7 @@ python scripts/cnbeta_rss.py --text
 0 * * * * cd /path/to/repo && /usr/bin/python3 scripts/cnbeta_rss.py >> logs/cnbeta_rss.log 2>&1
 ```
 
-Each run writes a timestamped markdown file under `update/` with new articles only. The previous `update/*.md` is moved to `update/backup/` and linked from the new file. Dedup keys come from the latest update file (article URL / guid). `data/cnbeta_rss_state.json` also tracks seen IDs across runs.
+Each run writes a timestamped markdown file under `update/` with new articles only. The previous `update/*.md` is moved to `update/backup/` and linked from the new file. Dedup merges article URLs from `data/cnbeta_rss_state.json` and the latest markdown snapshot (`update/*.md`, or `update/backup/*.md` when no current file exists). A second run against an unchanged feed therefore skips items already sent and only pushes the next unseen batch (or none when everything in the feed was already delivered).
 
 ## Troubleshooting
 

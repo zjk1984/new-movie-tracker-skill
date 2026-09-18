@@ -16,11 +16,14 @@ from cnbeta_rss import (  # noqa: E402
     build_interactive_card,
     build_text_message,
     build_update_markdown,
+    find_latest_dedup_md,
     find_latest_update_md,
+    load_seen_ids,
     parse_feed,
     parse_item_ids_from_update_md,
     resolve_auth_mode,
     resolve_max_items,
+    save_state,
     select_new_items,
     write_update_markdown,
 )
@@ -182,6 +185,71 @@ class CnbetaRssTests(unittest.TestCase):
             self.assertIn("上一批: [20250918-140000.md](backup/20250918-140000.md)", text)
             self.assertIn("- **链接**: https://www.cnbeta.com.tw/articles/tech/2.htm", text)
 
+    def test_find_latest_dedup_md_falls_back_to_backup(self):
+        item = NewsItem(
+            item_id="https://www.cnbeta.com.tw/articles/tech/9.htm",
+            title="备份条目",
+            link="https://www.cnbeta.com.tw/articles/tech/9.htm",
+            published="2026-09-18T12:00:00+00:00",
+            category="tech",
+            summary="",
+            feed_url="https://rss.cnbeta.com.tw",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            update_dir = Path(tmp) / "update"
+            update_dir.mkdir()
+            backup_dir = update_dir / "backup"
+            backup_dir.mkdir()
+            backup_md = backup_dir / "20250918-140000.md"
+            backup_md.write_text(
+                build_update_markdown([item], feed_count=1, previous_filename=None),
+                encoding="utf-8",
+            )
+            self.assertIsNone(find_latest_update_md(update_dir))
+            self.assertEqual(find_latest_dedup_md(update_dir), backup_md)
+
+    def test_load_seen_ids_merges_state_and_markdown(self):
+        item = NewsItem(
+            item_id="https://example.com/state-only",
+            title="State",
+            link="https://example.com/state-only",
+            published="2026-09-18T10:00:00+00:00",
+            category="tech",
+            summary="",
+            feed_url="https://rss.cnbeta.com.tw",
+        )
+        md_item = NewsItem(
+            item_id="https://example.com/md-only",
+            title="MD",
+            link="https://example.com/md-only",
+            published="2026-09-18T11:00:00+00:00",
+            category="tech",
+            summary="",
+            feed_url="https://rss.cnbeta.com.tw",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            update_dir = tmp_path / "update"
+            state_path = tmp_path / "state.json"
+            update_dir.mkdir()
+            md_path = update_dir / "20250918-150000.md"
+            md_path.write_text(
+                build_update_markdown([md_item], feed_count=1, previous_filename=None),
+                encoding="utf-8",
+            )
+            save_state(state_path, [item.item_id])
+            seen_ids, previous_md, dedup_md = load_seen_ids(
+                update_dir=update_dir,
+                state_path=state_path,
+                reset_state=False,
+            )
+        self.assertEqual(previous_md, md_path)
+        self.assertEqual(dedup_md, md_path)
+        self.assertEqual(
+            seen_ids,
+            {"https://example.com/state-only", "https://example.com/md-only"},
+        )
+
     @patch("cnbeta_rss.fetch_feed")
     def test_run_dedupes_against_previous_update_md(self, mock_fetch):
         mock_fetch.return_value = FIXTURE.read_text(encoding="utf-8")
@@ -210,6 +278,83 @@ class CnbetaRssTests(unittest.TestCase):
                         skip_update_md=False,
                     )
         self.assertNotIn(first_id, [item["item_id"] for item in result["items"]])
+
+    @patch("cnbeta_rss.fetch_feed")
+    def test_run_second_pass_has_no_overlap_with_first(self, mock_fetch):
+        mock_fetch.return_value = FIXTURE.read_text(encoding="utf-8")
+        from cnbeta_rss import parse_feed, run
+
+        items = parse_feed(mock_fetch.return_value, feed_url="https://rss.cnbeta.com.tw")
+        first_batch = items[:20]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            update_dir = tmp_path / "update"
+            state_path = tmp_path / "state.json"
+            update_dir.mkdir()
+            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
+                    with patch("cnbeta_rss.send_items_to_feishu"):
+                        with patch(
+                            "cnbeta_rss.update_filename_for_now",
+                            return_value="20250918-140000.md",
+                        ):
+                            first = run(
+                                max_items=20,
+                                dry_run=False,
+                                fetch_only=False,
+                                reset_state=True,
+                                use_card=True,
+                            )
+                        with patch(
+                            "cnbeta_rss.update_filename_for_now",
+                            return_value="20250918-150000.md",
+                        ):
+                            second = run(
+                                max_items=20,
+                                dry_run=False,
+                                fetch_only=False,
+                                reset_state=False,
+                                use_card=True,
+                            )
+        first_ids = {item["item_id"] for item in first["items"]}
+        second_ids = {item["item_id"] for item in second["items"]}
+        self.assertEqual(len(first_ids), 20)
+        self.assertGreater(len(second_ids), 0)
+        self.assertFalse(first_ids & second_ids)
+
+    @patch("cnbeta_rss.fetch_feed")
+    def test_run_dedupes_when_only_backup_md_exists(self, mock_fetch):
+        mock_fetch.return_value = FIXTURE.read_text(encoding="utf-8")
+        from cnbeta_rss import parse_feed, run
+
+        items = parse_feed(mock_fetch.return_value, feed_url="https://rss.cnbeta.com.tw")
+        first_batch = items[:20]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            update_dir = tmp_path / "update"
+            state_path = tmp_path / "state.json"
+            backup_dir = update_dir / "backup"
+            backup_dir.mkdir(parents=True)
+            backup_md = backup_dir / "20250918-140000.md"
+            backup_md.write_text(
+                build_update_markdown(first_batch, feed_count=1, previous_filename=None),
+                encoding="utf-8",
+            )
+            save_state(state_path, [item.item_id for item in first_batch])
+            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
+                    result = run(
+                        max_items=20,
+                        dry_run=False,
+                        fetch_only=True,
+                        reset_state=False,
+                        use_card=True,
+                    )
+        overlap = {item["item_id"] for item in result["items"]} & {
+            item.item_id for item in first_batch
+        }
+        self.assertFalse(overlap)
+        self.assertEqual(result["dedup_source"], backup_md.name)
 
 
 if __name__ == "__main__":

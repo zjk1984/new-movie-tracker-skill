@@ -101,6 +101,35 @@ def find_latest_update_md(update_dir: Path) -> Path | None:
     return files[0] if files else None
 
 
+def find_latest_dedup_md(update_dir: Path) -> Path | None:
+    """Return the newest markdown snapshot used for dedup (update/ then backup/)."""
+    latest = find_latest_update_md(update_dir)
+    if latest is not None:
+        return latest
+    backup_dir = update_dir / "backup"
+    files = list_update_md_files(backup_dir)
+    return files[0] if files else None
+
+
+def load_seen_ids(
+    *,
+    update_dir: Path,
+    state_path: Path,
+    reset_state: bool,
+) -> tuple[set[str], Path | None, Path | None]:
+    """Merge seen IDs from state file and the latest update/backup markdown."""
+    if reset_state:
+        return set(), None, None
+
+    state = load_state(state_path)
+    seen_ids = set(state.get("seen_ids") or [])
+    dedup_md = find_latest_dedup_md(update_dir)
+    if dedup_md is not None:
+        seen_ids.update(parse_item_ids_from_update_md(dedup_md))
+    previous_md = find_latest_update_md(update_dir)
+    return seen_ids, previous_md, dedup_md
+
+
 def parse_item_ids_from_update_md(path: Path) -> set[str]:
     if not path.exists():
         return set()
@@ -514,18 +543,14 @@ def run(
     feed_urls = resolve_feed_urls()
     state_path = resolve_state_path()
     update_dir = resolve_update_dir()
-    state = load_state(state_path)
-    seen_ids = set() if reset_state else set(state.get("seen_ids") or [])
-
-    previous_md = None if reset_state else find_latest_update_md(update_dir)
-    md_seen_ids = (
-        set()
-        if reset_state or previous_md is None
-        else parse_item_ids_from_update_md(previous_md)
+    seen_ids, previous_md, dedup_md = load_seen_ids(
+        update_dir=update_dir,
+        state_path=state_path,
+        reset_state=reset_state,
     )
 
     all_items = fetch_all_feeds(feed_urls)
-    new_items = select_new_items(all_items, md_seen_ids)[:max_items]
+    new_items = select_new_items(all_items, seen_ids)[:max_items]
 
     result = {
         "feeds": feed_urls,
@@ -534,6 +559,8 @@ def run(
         "sent": False,
         "dry_run": dry_run,
         "previous_update": previous_md.name if previous_md else None,
+        "dedup_source": dedup_md.name if dedup_md else None,
+        "seen_count": len(seen_ids),
         "update_path": None,
         "items": [asdict(item) for item in new_items],
     }
@@ -575,7 +602,11 @@ def run(
         seen_ids.add(item.item_id)
     save_state(state_path, list(seen_ids))
     if update_path:
-        print(f"[ok] wrote {update_path.relative_to(SKILL_DIR)}")
+        try:
+            shown_path = update_path.relative_to(SKILL_DIR)
+        except ValueError:
+            shown_path = update_path
+        print(f"[ok] wrote {shown_path}")
     print(f"[ok] sent {len(new_items)} item(s) to Feishu")
     return result
 
