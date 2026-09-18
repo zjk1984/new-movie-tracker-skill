@@ -27,7 +27,8 @@ DEFAULT_FEEDS = ("https://rss.cnbeta.com.tw",)
 DEFAULT_STATE_PATH = SKILL_DIR / "data" / "cnbeta_rss_state.json"
 DEFAULT_UPDATE_DIR = SKILL_DIR / "update"
 DEFAULT_MAX_ITEMS = 20
-UPDATE_NAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}_\d{4})\.md$")
+UPDATE_NAME_RE = re.compile(r"^(\d{8}-\d{6})(?:_\d+)?\.md$")
+UPDATE_LINK_LINE_RE = re.compile(r"^\s*-\s*\*\*链接\*\*:\s*(\S+)\s*$", re.MULTILINE)
 UPDATE_LINK_RE = re.compile(r"\[[^\]]*\]\((https?://[^)]+)\)")
 UPDATE_ITEM_ID_RE = re.compile(r"<!--\s*item-id:\s*(.+?)\s*-->")
 CATEGORY_LABELS = {
@@ -101,9 +102,13 @@ def find_latest_update_md(update_dir: Path) -> Path | None:
 
 
 def parse_item_ids_from_update_md(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
     text = path.read_text(encoding="utf-8")
     ids: set[str] = set()
     for match in UPDATE_ITEM_ID_RE.finditer(text):
+        ids.add(match.group(1).strip())
+    for match in UPDATE_LINK_LINE_RE.finditer(text):
         ids.add(match.group(1).strip())
     if ids:
         return ids
@@ -136,59 +141,53 @@ def archive_update_to_backup(previous: Path, *, update_dir: Path) -> Path:
 
 
 def update_filename_for_now() -> str:
-    return beijing_now().strftime("%Y-%m-%d_%H%M") + ".md"
+    return beijing_now().strftime("%Y%m%d-%H%M%S") + ".md"
 
 
-def _previous_update_line(
-    previous: Path | None,
-    *,
-    update_dir: Path,
-    archived_to: Path | None = None,
-) -> str:
-    if not previous:
-        return ""
-    label = previous.name
-    if archived_to is not None:
-        link_path = f"backup/{archived_to.name}"
-    else:
-        link_path = previous.relative_to(update_dir).as_posix()
-    return f"- **上一份更新**: [{label}]({link_path})\n"
+def _unique_update_dest(update_dir: Path, name: str) -> Path:
+    dest = update_dir / name
+    if not dest.exists():
+        return dest
+    stem = Path(name).stem
+    suffix = Path(name).suffix
+    n = 1
+    while dest.exists():
+        dest = update_dir / f"{stem}_{n}{suffix}"
+        n += 1
+    return dest
 
 
 def build_update_markdown(
     items: list[NewsItem],
     *,
-    previous: Path | None,
-    update_dir: Path,
-    archived_to: Path | None = None,
+    feed_count: int,
+    previous_filename: str | None,
 ) -> str:
-    now = beijing_now()
-    lines = [
-        "# CNBeta 新闻更新",
-        "",
-        f"- **生成时间**: {format_beijing_time(now, with_label=True)}",
-        f"- **新增条数**: {len(items)}",
-    ]
-    prev_line = _previous_update_line(
-        previous, update_dir=update_dir, archived_to=archived_to
-    )
-    if prev_line:
-        lines.append(prev_line.rstrip())
-    lines.extend(["", "## 文章", ""])
-    if not items:
-        lines.append("_（无新增）_")
+    lines = ["# CNBeta 新闻更新", ""]
+    if previous_filename:
+        lines.append(f"上一批: [{previous_filename}](backup/{previous_filename})")
         lines.append("")
-    else:
-        for index, item in enumerate(items, start=1):
-            when = format_beijing_time(item.published, with_label=False) or "未知时间"
-            lines.append(f"<!-- item-id: {item.item_id} -->")
-            lines.append(
-                f"{index}. **[{item.category_label}]** [{item.title}]({item.link})"
-            )
-            lines.append(f"   - **发布时间**: {when}")
-            if item.summary:
-                lines.append(f"   - **摘要**: {item.summary}")
-            lines.append("")
+    lines.extend(
+        [
+            f"抓取时间: {format_beijing_time(beijing_now(), with_label=True)}",
+            f"来源: {feed_count} 个 RSS feed | 新增: {len(items)} 条",
+            "",
+        ]
+    )
+    for index, item in enumerate(items, start=1):
+        when = format_beijing_time(item.published, with_label=False) or "未知时间"
+        lines.append(f"<!-- item-id: {item.item_id} -->")
+        lines.extend(
+            [
+                f"## {index}. [{item.category_label}] {item.title}",
+                "",
+                f"- **链接**: {item.link}",
+                f"- **时间**: {when}",
+            ]
+        )
+        if item.summary:
+            lines.append(f"- **摘要**: {item.summary}")
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -197,27 +196,27 @@ def write_update_markdown(
     *,
     update_dir: Path,
     previous: Path | None,
+    feed_count: int,
     dry_run: bool = False,
 ) -> tuple[Path | None, Path | None]:
-    """Write a timestamped update/*.md and archive the previous latest file."""
+    """Write a timestamped update/*.md, then move the previous file to backup/."""
+    if not items:
+        return None, None
     update_dir.mkdir(parents=True, exist_ok=True)
-    dest = update_dir / update_filename_for_now()
-    archived_to: Path | None = None
-    if previous is not None:
-        if dry_run:
-            archived_to = update_dir / "backup" / previous.name
-        else:
-            archived_to = archive_update_to_backup(previous, update_dir=update_dir)
+    previous_filename = previous.name if previous else None
+    dest = _unique_update_dest(update_dir, update_filename_for_now())
     content = build_update_markdown(
         items,
-        previous=previous,
-        update_dir=update_dir,
-        archived_to=archived_to,
+        feed_count=feed_count,
+        previous_filename=previous_filename,
     )
     if dry_run:
         print(content)
-        return None, archived_to if not dry_run else None
+        return None, None
     dest.write_text(content, encoding="utf-8")
+    archived_to: Path | None = None
+    if previous is not None:
+        archived_to = archive_update_to_backup(previous, update_dir=update_dir)
     return dest, archived_to
 
 
@@ -519,11 +518,14 @@ def run(
     seen_ids = set() if reset_state else set(state.get("seen_ids") or [])
 
     previous_md = None if reset_state else find_latest_update_md(update_dir)
-    if previous_md is not None:
-        seen_ids.update(parse_item_ids_from_update_md(previous_md))
+    md_seen_ids = (
+        set()
+        if reset_state or previous_md is None
+        else parse_item_ids_from_update_md(previous_md)
+    )
 
     all_items = fetch_all_feeds(feed_urls)
-    new_items = select_new_items(all_items, seen_ids)[:max_items]
+    new_items = select_new_items(all_items, md_seen_ids)[:max_items]
 
     result = {
         "feeds": feed_urls,
@@ -540,32 +542,35 @@ def run(
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return result
 
-    update_path: Path | None = None
-    if not skip_update_md:
-        update_path, _archived = write_update_markdown(
-            new_items,
-            update_dir=update_dir,
-            previous=previous_md,
-            dry_run=dry_run,
-        )
-        result["update_path"] = (
-            update_path.name if update_path else update_filename_for_now()
-        )
-
     if not new_items:
         print("[info] no new CNBeta items")
-        if update_path:
-            print(f"[ok] wrote {update_path.relative_to(SKILL_DIR)}")
         save_state(state_path, list(seen_ids))
         return result
 
     if dry_run:
         if skip_update_md:
             print(build_text_message(new_items, feed_count=len(feed_urls)))
+        else:
+            write_update_markdown(
+                new_items,
+                update_dir=update_dir,
+                previous=previous_md,
+                feed_count=len(feed_urls),
+                dry_run=True,
+            )
         return result
 
     send_items_to_feishu(new_items, feed_count=len(feed_urls), use_card=use_card)
     result["sent"] = True
+    update_path: Path | None = None
+    if not skip_update_md:
+        update_path, _archived = write_update_markdown(
+            new_items,
+            update_dir=update_dir,
+            previous=previous_md,
+            feed_count=len(feed_urls),
+        )
+        result["update_path"] = update_path.name if update_path else None
     for item in new_items:
         seen_ids.add(item.item_id)
     save_state(state_path, list(seen_ids))

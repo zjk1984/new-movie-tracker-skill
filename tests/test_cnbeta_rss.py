@@ -122,10 +122,13 @@ class CnbetaRssTests(unittest.TestCase):
         md = """# CNBeta 新闻更新
 
 <!-- item-id: https://example.com/a -->
-1. **[科技]** [A](https://example.com/a)
+## 1. [科技] A
+
+- **链接**: https://example.com/a
+- **时间**: 2026-09-18 10:00:00
 """
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "2026-09-18_1500.md"
+            path = Path(tmp) / "20250918-150000.md"
             path.write_text(md, encoding="utf-8")
             ids = parse_item_ids_from_update_md(path)
         self.assertEqual(ids, {"https://example.com/a"})
@@ -152,20 +155,22 @@ class CnbetaRssTests(unittest.TestCase):
                     feed_url="https://rss.cnbeta.com.tw",
                 )
             ],
-            previous=None,
-            update_dir=Path("update"),
+            feed_count=1,
+            previous_filename=None,
         )
         with tempfile.TemporaryDirectory() as tmp:
             update_dir = Path(tmp) / "update"
             update_dir.mkdir()
-            previous = update_dir / "2026-09-18_1400.md"
+            previous = update_dir / "20250918-140000.md"
             previous.write_text(previous_content, encoding="utf-8")
 
-            new_path, archived = write_update_markdown(
-                [item],
-                update_dir=update_dir,
-                previous=previous,
-            )
+            with patch("cnbeta_rss.update_filename_for_now", return_value="20250918-150000.md"):
+                new_path, archived = write_update_markdown(
+                    [item],
+                    update_dir=update_dir,
+                    previous=previous,
+                    feed_count=1,
+                )
             self.assertIsNotNone(new_path)
             self.assertTrue(new_path.exists())
             self.assertFalse(previous.exists())
@@ -174,7 +179,8 @@ class CnbetaRssTests(unittest.TestCase):
             self.assertEqual(find_latest_update_md(update_dir), new_path)
             text = new_path.read_text(encoding="utf-8")
             self.assertIn("新标题", text)
-            self.assertIn("[2026-09-18_1400.md](backup/2026-09-18_1400.md)", text)
+            self.assertIn("上一批: [20250918-140000.md](backup/20250918-140000.md)", text)
+            self.assertIn("- **链接**: https://www.cnbeta.com.tw/articles/tech/2.htm", text)
 
     @patch("cnbeta_rss.fetch_feed")
     def test_run_dedupes_against_previous_update_md(self, mock_fetch):
@@ -186,9 +192,9 @@ class CnbetaRssTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             update_dir = Path(tmp) / "update"
             update_dir.mkdir()
-            previous = update_dir / "2026-09-18_1400.md"
+            previous = update_dir / "20250918-140000.md"
             previous.write_text(
-                build_update_markdown([items[0]], previous=None, update_dir=update_dir),
+                build_update_markdown([items[0]], feed_count=1, previous_filename=None),
                 encoding="utf-8",
             )
             with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
