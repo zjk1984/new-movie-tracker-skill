@@ -30,6 +30,7 @@ CNSUB_MAGNET_HINTS = (
     "subtitle",
     "-c.",
     "-c-",
+    "-uc",
     ".c.",
     "_c.",
 )
