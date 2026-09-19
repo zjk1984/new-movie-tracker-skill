@@ -9,8 +9,19 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from javdb_client import extract_all_av_numbers  # noqa: E402
-from magnet_select import apply_selection, build_number_downloads, number_from_magnet  # noqa: E402
+from magnet_select import (  # noqa: E402
+    apply_selection,
+    build_number_downloads,
+    magnet_has_cnsub,
+    number_from_magnet,
+)
 from pikpak_download import iter_item_downloads  # noqa: E402
+
+
+class MagnetCnsubTests(unittest.TestCase):
+    def test_magnet_has_cnsub_uc_suffix(self):
+        mag = "magnet:?xt=urn:btih:abc&dn=ABC-123-UC%20title"
+        self.assertTrue(magnet_has_cnsub(mag))
 
 
 class ExtractAllNumbersTests(unittest.TestCase):
