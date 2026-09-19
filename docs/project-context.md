@@ -98,12 +98,14 @@ Wrapper: `scripts/cnbeta_rss.sh` → log `data/cnbeta_rss.log`, crontab marker `
 | `scripts/rss_sources.json` | Curated feed catalog by category |
 | `scripts/feishu_notify.py` | Shared Feishu app bot client |
 | `scripts/env_utils.py` | Shared `.env.local` loader |
-| `update/` | Per-run markdown news snapshots |
-| `update/backup/` | Previous update files archived after each run |
+| `update/` | Per-run markdown news snapshots (`YYYYMMDD-HHMMSS.md`); gitignored local runtime artifacts — only `.gitkeep` is tracked |
+| `update/backup/` | Previous update files archived after each run; gitignored (`update/backup/*.md`) |
 | `data/cnbeta_rss_state.json` | Runtime state (gitignored via `data/`) |
 | `docs/feishu-setup.md` | Feishu app + webhook + cron configuration |
 | `tests/test_cnbeta_rss.py` | RSS parsing, limits, dedup, translation hook, and message tests |
 | `tests/test_rss_translate.py` | Translation detection, batching, and bilingual output tests |
+
+`update/*.md` files are created when the aggregator runs locally (or on cron); they are not committed. After `git clone`, expect empty `update/` directories until the first successful run.
 
 ## Translation
 
