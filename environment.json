@@ -1,0 +1,4 @@
+{
+  "install": "./scripts/setup_cron.sh",
+  "start": "./scripts/restart_daily_supervisor.sh"
+}

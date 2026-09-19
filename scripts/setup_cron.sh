@@ -65,7 +65,7 @@ Environment overrides:
 Container / Cloud Agent VMs (PID 1 is tini, cron may start late or die):
   Cron is best-effort. Run the external supervisor in tmux (recommended):
     tmux new-session -d -s daily-supervisor -c $ROOT '$ROOT/scripts/daily_run_supervisor.sh'
-  Optionally add environment.json "start": "./scripts/ensure_cron_running.sh"
+  Apply repo environment.json on the cron VM ("start": "./scripts/restart_daily_supervisor.sh")
   @reboot only fires when cron finally starts — it cannot fix a missed 07:00 slot.
 EOF
       exit 0
@@ -169,7 +169,7 @@ cron_service_unit() {
 
 ensure_cron_boot_enabled() {
   if ! command -v systemctl >/dev/null 2>&1; then
-    echo "[info] systemctl not available; run ensure_cron_running.sh from your container start hook"
+    echo "[info] systemctl not available; run restart_daily_supervisor.sh from your container start hook"
     return 0
   fi
 
