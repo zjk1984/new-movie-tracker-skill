@@ -200,6 +200,37 @@ def scrape_two_phase(args) -> None:
     _send_feishu_start(args)
     storage_state = bootstrap_storage_state(out_dir, args, chrome, args.urls[0])
 
+    def _needs_forum_retry(result) -> bool:
+        return result.stopped == "break_forum" or (
+            result.pages_scanned == 0 and not result.candidates
+        )
+
+    def _retry_forums_serially(forum_urls: list[str]):
+        if not forum_urls:
+            return {}
+        scan_log(
+            f"[info] phase 1 retry: {len(forum_urls)} forum(s) serially "
+            "(cloudflare or empty list in parallel workers)",
+        )
+        user_data_dir = out_dir / "chrome_profile"
+        retried: dict[str, object] = {}
+        with sync_playwright() as playwright:
+            context = playwright.chromium.launch_persistent_context(
+                user_data_dir=str(user_data_dir),
+                **_browser_launch_kwargs(chrome, headless=args.headless),
+                **_context_kwargs(),
+            )
+            page = context.new_page()
+            try:
+                for forum_url in forum_urls:
+                    scan_log(f"[info] phase 1 retry forum: {forum_url}")
+                    retried[forum_url] = list_forum_pages(
+                        page, forum_url, args, match_ctx, screenshot_dir,
+                    )
+            finally:
+                context.close()
+        return retried
+
     scan_log("[info] phase 1: parallel forum list scan")
     forum_results = []
     with ThreadPoolExecutor(max_workers=min(list_workers, len(args.urls))) as pool:
@@ -226,6 +257,21 @@ def scrape_two_phase(args) -> None:
             if result.stopped == "abort":
                 scan_log("[err] cloudflare abort during phase 1")
                 raise SystemExit(1)
+
+    retry_urls = [r.forum_url for r in forum_results if _needs_forum_retry(r)]
+    if retry_urls:
+        retried = _retry_forums_serially(retry_urls)
+        forum_results = [
+            retried.get(r.forum_url, r) if r.forum_url in retried else r
+            for r in forum_results
+        ]
+
+    for result in forum_results:
+        scan_log(
+            f"[info] phase 1 summary {result.forum_url}: "
+            f"{len(result.candidates)} candidates, "
+            f"{result.pages_scanned} pages, stopped={result.stopped}",
+        )
 
     candidates: list[dict] = []
     total_posts = 0

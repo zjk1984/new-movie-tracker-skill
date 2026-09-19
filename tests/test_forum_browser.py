@@ -40,6 +40,28 @@ class DedupeCandidatesTests(unittest.TestCase):
         self.assertEqual(out[0]["href"], "thread-100-1-1.html")
         self.assertEqual(out[1]["href"], "thread-200-1-1.html")
 
+    def test_cross_forum_duplicate_keeps_both_forum_tags(self):
+        out = dedupe_candidates([
+            {
+                "href": "thread-100-1-1.html",
+                "title": "A",
+                "forum": "https://www.sehuatang.org/forum-142-1.html",
+            },
+            {
+                "href": "thread-100-1-1.html",
+                "title": "A",
+                "forum": "https://www.sehuatang.org/forum-103-1.html",
+            },
+        ])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(
+            out[0]["forums"],
+            [
+                "https://www.sehuatang.org/forum-142-1.html",
+                "https://www.sehuatang.org/forum-103-1.html",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

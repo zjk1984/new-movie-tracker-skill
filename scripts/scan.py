@@ -1036,10 +1036,30 @@ def maybe_send_feishu_progress(
         return feishu_progress_sent
 
 
+def item_forum_urls(item: dict) -> list[str]:
+    """Forum URLs that listed this thread (primary + cross-forum duplicates)."""
+    forums = item.get("forums")
+    if isinstance(forums, list) and forums:
+        return [str(f).strip() for f in forums if str(f).strip()]
+    forum = (item.get("forum") or "").strip()
+    return [forum] if forum else []
+
+
+def _merge_forum_attribution(existing: dict, other: dict) -> None:
+    merged: list[str] = []
+    for src in (existing, other):
+        for url in item_forum_urls(src):
+            if url not in merged:
+                merged.append(url)
+    if merged:
+        existing["forums"] = merged
+        existing["forum"] = merged[0]
+
+
 def dedupe_candidates(candidates: list[dict]) -> list[dict]:
     from forum_browser import canonical_thread_href, thread_id_from_href
 
-    seen: set[str] = set()
+    seen: dict[str, dict] = {}
     out: list[dict] = []
     for item in candidates:
         href = (item.get("href") or "").strip()
@@ -1049,8 +1069,12 @@ def dedupe_candidates(candidates: list[dict]) -> list[dict]:
         else:
             key = f"title:{item.get('title', '')}"
         if key in seen:
+            _merge_forum_attribution(seen[key], item)
             continue
-        seen.add(key)
+        forum = (item.get("forum") or "").strip()
+        if forum:
+            item["forums"] = [forum]
+        seen[key] = item
         out.append(item)
     return out
 
