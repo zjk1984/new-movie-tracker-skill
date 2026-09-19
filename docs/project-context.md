@@ -28,7 +28,7 @@ flowchart LR
 4. **Parse** title, link, publish time, summary, and assign `source_category` + `source_name`.
 5. **Filter** to articles published within the last `RSS_LOOKBACK_DAYS` (default **2**). Older entries are ignored even if unseen — no backlog backfill.
 6. **Dedupe** in-window items against `data/cnbeta_rss_state.json` and the latest `update/*.md` (or `update/backup/*.md` when `update/` is empty).
-7. **Limit** to `RSS_MAX_ITEMS_PER_CATEGORY` (default **5**) per category and `RSS_MAX_ITEMS` (default **30**) total per run.
+7. **Limit** to `RSS_MAX_ITEMS_PER_CATEGORY` (default **7**) per category and `RSS_MAX_ITEMS` (default **50**) total per run.
 8. **Translate** foreign titles/summaries to Simplified Chinese via `scripts/rss_translate.py` (OpenAI-compatible API when `OPENAI_API_KEY` is set; otherwise `deep-translator`). Chinese text is detected by CJK ratio and skipped. Original title/link are preserved; Feishu cards and markdown show **中文标题/摘要** as primary text with originals alongside when different.
 9. **Send** grouped by category to Feishu as an interactive card (or plain text). If nothing qualifies, log `no new RSS items`, skip Feishu, and do not write markdown.
 10. **Archive** each non-empty batch to `update/YYYYMMDD-HHMMSS.md` with `<!-- category: ... -->` tags; move the previous file to `update/backup/`.

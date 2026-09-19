@@ -137,13 +137,13 @@ class CnbetaRssTests(unittest.TestCase):
         self.assertFalse(result["sent"])
         json.dumps(result)
 
-    def test_resolve_max_items_defaults_to_30(self):
+    def test_resolve_max_items_defaults_to_50(self):
         with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(resolve_max_items(), 30)
+            self.assertEqual(resolve_max_items(), 50)
 
-    def test_resolve_max_items_per_category_defaults_to_5(self):
+    def test_resolve_max_items_per_category_defaults_to_7(self):
         with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(resolve_max_items_per_category(), 5)
+            self.assertEqual(resolve_max_items_per_category(), 7)
 
     def test_resolve_lookback_days_defaults_to_2(self):
         with patch.dict("os.environ", {}, clear=True):
@@ -602,6 +602,40 @@ class CnbetaRssTests(unittest.TestCase):
         ai_count = sum(1 for item in limited if item.source_category == "ai")
         self.assertEqual(tech_count, 3)
         self.assertEqual(ai_count, 3)
+
+    def test_apply_item_limits_default_caps_allow_50_total(self):
+        categories = [
+            "tech_cn",
+            "tech_en",
+            "politics_econ_cn",
+            "politics_econ_intl",
+            "finance_cn",
+            "finance_intl",
+            "ai",
+            "insights",
+        ]
+        items: list[NewsItem] = []
+        for cat in categories:
+            for i in range(10):
+                items.append(
+                    NewsItem(
+                        item_id=f"{cat}-{i}",
+                        title=f"{cat} {i}",
+                        link=f"https://example.com/{cat}/{i}",
+                        published=f"2026-09-18T{10 - i:02d}:00:00+00:00",
+                        category="tech",
+                        summary="",
+                        feed_url="https://example.com/feed",
+                        source_category=cat,
+                        source_name="Test",
+                    )
+                )
+        limited = apply_item_limits(
+            items,
+            max_items=50,
+            max_items_per_category=7,
+        )
+        self.assertEqual(len(limited), 50)
 
     def test_group_items_by_category_preserves_order(self):
         items = [

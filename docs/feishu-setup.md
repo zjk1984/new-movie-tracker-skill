@@ -55,8 +55,8 @@ FEISHU_APP_ID=cli_xxxxxxxx
 FEISHU_APP_SECRET=xxxxxxxx
 FEISHU_RECEIVE_ID=oc_xxxxxxxx
 FEISHU_RECEIVE_ID_TYPE=chat_id
-RSS_MAX_ITEMS=30
-RSS_MAX_ITEMS_PER_CATEGORY=5
+RSS_MAX_ITEMS=50
+RSS_MAX_ITEMS_PER_CATEGORY=7
 # RSS_ENABLED_CATEGORIES=tech_cn,tech_en,ai
 ```
 
@@ -110,8 +110,8 @@ python scripts/cnbeta_rss.py --ping-feishu
 | `RSS_SOURCES_PATH` | `CNBETA_RSS_SOURCES_PATH` | `scripts/rss_sources.json` | Feed catalog JSON |
 | `RSS_ENABLED_CATEGORIES` | `CNBETA_RSS_ENABLED_CATEGORIES` | all | Comma-separated category keys, or `all` |
 | `RSS_FEEDS` | `CNBETA_RSS_FEEDS` | — | Legacy override: comma URLs (skips JSON catalog) |
-| `RSS_MAX_ITEMS` | `CNBETA_RSS_MAX_ITEMS` | `30` | Max new items per run (total) |
-| `RSS_MAX_ITEMS_PER_CATEGORY` | `CNBETA_RSS_MAX_ITEMS_PER_CATEGORY` | `5` | Max new items per category per run |
+| `RSS_MAX_ITEMS` | `CNBETA_RSS_MAX_ITEMS` | `50` | Max new items per run (total) |
+| `RSS_MAX_ITEMS_PER_CATEGORY` | `CNBETA_RSS_MAX_ITEMS_PER_CATEGORY` | `7` | Max new items per category per run |
 | `RSS_LOOKBACK_DAYS` | `CNBETA_RSS_LOOKBACK_DAYS` | `2` | Only articles within this window |
 | `RSS_UPDATE_DIR` | `CNBETA_RSS_UPDATE_DIR` | `update` | Markdown snapshot directory |
 | `RSS_STATE_PATH` | `CNBETA_RSS_STATE_PATH` | `data/cnbeta_rss_state.json` | Seen-item state |
