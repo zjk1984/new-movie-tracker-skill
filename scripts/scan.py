@@ -25,6 +25,22 @@ from forum_browser import pass_age_gate
 
 SKILL_DIR = Path(__file__).parent.parent
 
+# forum-103 last: cross-forum dedupe prefers cnsub / 有码 listings over 今日下载链接 overlap.
+DEFAULT_FORUM_URLS = [
+    "https://www.sehuatang.org/forum-2-1.html",
+    "https://www.sehuatang.org/forum-95-1.html",
+    "https://www.sehuatang.org/forum-142-1.html",
+    "https://www.sehuatang.org/forum-37-1.html",
+    "https://www.sehuatang.org/forum-103-1.html",
+]
+
+BARE_DOWNLOAD_LINK_MARKERS = (
+    "今日下载链接",
+    "每日下载",
+    "磁力合集",
+    "下载总汇",
+)
+
 CJK_SIMPLIFIED_CHARS = str.maketrans({
     "亜": "亚",
     "亞": "亚",
@@ -1045,15 +1061,40 @@ def item_forum_urls(item: dict) -> list[str]:
     return [forum] if forum else []
 
 
-def _merge_forum_attribution(existing: dict, other: dict) -> None:
+def _is_bare_download_link_title(title: str) -> bool:
+    from magnet_select import title_has_cnsub
+
+    text = title or ""
+    if title_has_cnsub(text):
+        return False
+    return any(marker in text for marker in BARE_DOWNLOAD_LINK_MARKERS)
+
+
+def _candidate_survivor_rank(item: dict) -> tuple[int, int, int]:
+    """Higher rank wins when the same thread appears on multiple forums."""
+    from magnet_select import title_has_cnsub
+
+    title = item.get("title") or ""
+    forum_urls = item_forum_urls(item)
+    is_103 = any("forum-103" in url for url in forum_urls)
+    return (
+        int(title_has_cnsub(title)),
+        int(is_103),
+        -int(_is_bare_download_link_title(title)),
+    )
+
+
+def _merge_forum_attribution(survivor: dict, other: dict) -> None:
     merged: list[str] = []
-    for src in (existing, other):
+    for src in (survivor, other):
         for url in item_forum_urls(src):
             if url not in merged:
                 merged.append(url)
-    if merged:
-        existing["forums"] = merged
-        existing["forum"] = merged[0]
+    if not merged:
+        return
+    survivor["forums"] = merged
+    primary = (survivor.get("forum") or "").strip()
+    survivor["forum"] = primary if primary in merged else merged[0]
 
 
 def dedupe_candidates(candidates: list[dict]) -> list[dict]:
@@ -1068,12 +1109,18 @@ def dedupe_candidates(candidates: list[dict]) -> list[dict]:
             key = thread_id_from_href(item["href"]) or item["href"]
         else:
             key = f"title:{item.get('title', '')}"
-        if key in seen:
-            _merge_forum_attribution(seen[key], item)
-            continue
         forum = (item.get("forum") or "").strip()
-        if forum:
+        if forum and "forums" not in item:
             item["forums"] = [forum]
+        if key in seen:
+            existing = seen[key]
+            if _candidate_survivor_rank(item) > _candidate_survivor_rank(existing):
+                _merge_forum_attribution(item, existing)
+                out[out.index(existing)] = item
+                seen[key] = item
+            else:
+                _merge_forum_attribution(existing, item)
+            continue
         seen[key] = item
         out.append(item)
     return out
@@ -1408,6 +1455,7 @@ def scrape(args):
                 else None
             )
 
+            list_candidates: list[dict] = []
             for forum_url in args.urls:
                 list_result = list_forum_pages(
                     page, forum_url, args, match_ctx, screenshot_dir,
@@ -1417,22 +1465,24 @@ def scrape(args):
                     return
                 total_posts += list_result.total_posts
                 total_pages_scanned += list_result.pages_scanned
+                list_candidates.extend(list_result.candidates)
 
-                for item in list_result.candidates:
-                    if args.fetch_magnets and item.get("href"):
-                        enrich_matched_post(page, item, args, javdb_client)
-                    elif javdb_client:
-                        scan_log(f"[info] javdb lookup: {item['title'][:40]}...")
-                        enrich_with_javdb(item, javdb_client, args)
-                        apply_item_filters(item, javdb_client, args)
-                    all_matched.append(item)
-                    feishu_progress_sent = maybe_send_feishu_progress(
-                        len(all_matched),
-                        feishu_progress_sent,
-                        args,
-                        forum_url=forum_url,
-                        page_range=page_range,
-                    )
+            for item in dedupe_candidates(list_candidates):
+                forum_url = (item.get("forum") or "").strip()
+                if args.fetch_magnets and item.get("href"):
+                    enrich_matched_post(page, item, args, javdb_client)
+                elif javdb_client:
+                    scan_log(f"[info] javdb lookup: {item['title'][:40]}...")
+                    enrich_with_javdb(item, javdb_client, args)
+                    apply_item_filters(item, javdb_client, args)
+                all_matched.append(item)
+                feishu_progress_sent = maybe_send_feishu_progress(
+                    len(all_matched),
+                    feishu_progress_sent,
+                    args,
+                    forum_url=forum_url,
+                    page_range=page_range,
+                )
 
             save_scan_results(
                 args,
@@ -1481,13 +1531,12 @@ def main():
     parser.add_argument("--aliases-file", default=str(SKILL_DIR / "aliases.json"), help="Path to alias mapping JSON file")
     parser.add_argument("--actors-dir", default=r"E:\sakana", help="Local actor directory (fallback)")
     parser.add_argument("--save-actors", action="store_true", help="Save loaded actors to --actors-file")
-    parser.add_argument("--urls", nargs="+", default=[
-        "https://www.sehuatang.org/forum-2-1.html",
-        "https://www.sehuatang.org/forum-95-1.html",
-        "https://www.sehuatang.org/forum-142-1.html",
-        "https://www.sehuatang.org/forum-103-1.html",
-        "https://www.sehuatang.org/forum-37-1.html",
-    ], help="Target forum URLs to scan")
+    parser.add_argument(
+        "--urls",
+        nargs="+",
+        default=list(DEFAULT_FORUM_URLS),
+        help="Target forum URLs to scan",
+    )
     parser.add_argument("--days", type=int, default=3, help="How many recent days to check (ignored if --since is set)")
     parser.add_argument("--since", default=None, help="Start date YYYY-MM-DD or YYYY-MM (inclusive)")
     parser.add_argument("--until", default=None, help="End date YYYY-MM-DD (inclusive; defaults to month-end for --since YYYY-MM)")

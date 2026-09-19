@@ -14,13 +14,7 @@ from env_utils import load_env_local
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = SKILL_DIR / "scripts"
 
-DEFAULT_FORUMS = [
-    "https://www.sehuatang.org/forum-2-1.html",
-    "https://www.sehuatang.org/forum-95-1.html",
-    "https://www.sehuatang.org/forum-142-1.html",
-    "https://www.sehuatang.org/forum-103-1.html",
-    "https://www.sehuatang.org/forum-37-1.html",
-]
+from scan import DEFAULT_FORUM_URLS as DEFAULT_FORUMS
 
 
 def run_scan(
@@ -197,7 +191,7 @@ def main() -> int:
         "--urls",
         nargs="+",
         default=DEFAULT_FORUMS,
-        help="Forum URLs to scan (default: forum-2/95/142 + forum-103 + forum-37)",
+        help="Forum URLs to scan (default: forum-2/95/142/37 + forum-103 last)",
     )
     parser.add_argument("--days", type=int, default=2, help="Recent days to scan (default: 2)")
     parser.add_argument("--max-pages", type=int, default=10, help="Max pages per forum")
