@@ -1,0 +1,327 @@
+{
+  "version": 1,
+  "categories": {
+    "tech_cn": {
+      "label": "中文科技",
+      "description": "Chinese-language technology news"
+    },
+    "tech_en": {
+      "label": "英文科技",
+      "description": "English-language technology news"
+    },
+    "politics_econ_cn": {
+      "label": "国内政治经济",
+      "description": "China politics, policy, and economy"
+    },
+    "politics_econ_intl": {
+      "label": "国际政治经济",
+      "description": "International politics, business, and economy"
+    },
+    "ai": {
+      "label": "AI",
+      "description": "Artificial intelligence research and industry"
+    },
+    "insights": {
+      "label": "热点洞察",
+      "description": "Trending topics, product launches, and community picks"
+    }
+  },
+  "feeds": [
+    {
+      "id": "cnbeta",
+      "name": "CNBeta",
+      "url": "https://rss.cnbeta.com.tw",
+      "category": "tech_cn",
+      "notes": "Official RSS. SSL may fail; set CNBETA_RSS_VERIFY_SSL=false if needed."
+    },
+    {
+      "id": "ithome",
+      "name": "IT之家",
+      "url": "https://www.ithome.com/rss/",
+      "category": "tech_cn",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "solidot",
+      "name": "Solidot",
+      "url": "https://www.solidot.org/index.rss",
+      "category": "tech_cn",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "sspai",
+      "name": "少数派",
+      "url": "https://sspai.com/feed",
+      "category": "tech_cn",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "36kr-newsflash",
+      "name": "36氪快讯",
+      "url": "https://www.36kr.com/feed-newsflash",
+      "category": "tech_cn",
+      "notes": "Official Atom feed at /feed-newsflash (main /feed returns HTML)."
+    },
+    {
+      "id": "ifanr",
+      "name": "爱范儿",
+      "url": "https://www.ifanr.com/feed",
+      "category": "tech_cn",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "geekpark",
+      "name": "极客公园",
+      "url": "https://www.geekpark.net/rss",
+      "category": "tech_cn",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "techcrunch",
+      "name": "TechCrunch",
+      "url": "https://techcrunch.com/feed/",
+      "category": "tech_en",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "theverge",
+      "name": "The Verge",
+      "url": "https://www.theverge.com/rss/index.xml",
+      "category": "tech_en",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "arstechnica",
+      "name": "Ars Technica",
+      "url": "https://feeds.arstechnica.com/arstechnica/index",
+      "category": "tech_en",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "hn-frontpage",
+      "name": "Hacker News Front Page",
+      "url": "https://hnrss.org/frontpage",
+      "category": "tech_en",
+      "notes": "Unofficial RSS via hnrss.org."
+    },
+    {
+      "id": "wired",
+      "name": "Wired",
+      "url": "https://www.wired.com/feed/rss",
+      "category": "tech_en",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "engadget",
+      "name": "Engadget",
+      "url": "https://www.engadget.com/rss.xml",
+      "category": "tech_en",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "qbitai",
+      "name": "量子位",
+      "url": "https://www.qbitai.com/feed",
+      "category": "ai",
+      "notes": "Official RSS. Replaces 机器之心 (jiqizhixin.com/rss returns HTML paywall)."
+    },
+    {
+      "id": "mit-tech-review",
+      "name": "MIT Technology Review",
+      "url": "https://www.technologyreview.com/feed/",
+      "category": "ai",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "openai-news",
+      "name": "OpenAI News",
+      "url": "https://openai.com/news/rss.xml",
+      "category": "ai",
+      "notes": "Official RSS (large feed; /blog/rss.xml also works)."
+    },
+    {
+      "id": "google-ai",
+      "name": "Google AI Blog",
+      "url": "https://blog.google/technology/ai/rss/",
+      "category": "ai",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "deepmind",
+      "name": "Google DeepMind Blog",
+      "url": "https://deepmind.google/blog/rss.xml",
+      "category": "ai",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "xinhua-politics",
+      "name": "新华网时政",
+      "url": "http://www.news.cn/politics/news_politics.xml",
+      "category": "politics_econ_cn",
+      "notes": "Official RSS (HTTP)."
+    },
+    {
+      "id": "people-daily-politics",
+      "name": "人民网时政",
+      "url": "http://www.people.com.cn/rss/politics.xml",
+      "category": "politics_econ_cn",
+      "notes": "Official RSS (HTTP)."
+    },
+    {
+      "id": "ft-chinese",
+      "name": "FT中文网",
+      "url": "https://www.ftchinese.com/rss/feed",
+      "category": "politics_econ_cn",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "bbc-chinese",
+      "name": "BBC中文",
+      "url": "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml",
+      "category": "politics_econ_cn",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "zaobao-world",
+      "name": "联合早报即时",
+      "url": "https://feeds.feedburner.com/zaobao/realtime/world",
+      "category": "politics_econ_cn",
+      "notes": "FeedBurner mirror; zaobao.com/realtime/* returns HTML without RSS."
+    },
+    {
+      "id": "bbc-world",
+      "name": "BBC World",
+      "url": "http://feeds.bbci.co.uk/news/world/rss.xml",
+      "category": "politics_econ_intl",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "guardian-world",
+      "name": "The Guardian World",
+      "url": "https://www.theguardian.com/world/rss",
+      "category": "politics_econ_intl",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "guardian-business",
+      "name": "The Guardian Business",
+      "url": "https://www.theguardian.com/business/rss",
+      "category": "politics_econ_intl",
+      "notes": "Official RSS. Replaces Reuters (401) and Economist (403)."
+    },
+    {
+      "id": "nyt-world",
+      "name": "NYT World",
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+      "category": "politics_econ_intl",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "ft-world",
+      "name": "Financial Times World",
+      "url": "https://www.ft.com/world?format=rss",
+      "category": "politics_econ_intl",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "aljazeera",
+      "name": "Al Jazeera",
+      "url": "https://www.aljazeera.com/xml/rss/all.xml",
+      "category": "politics_econ_intl",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "hn-100",
+      "name": "HN 100+ Points",
+      "url": "https://hnrss.org/frontpage?points=100",
+      "category": "insights",
+      "notes": "Unofficial RSS via hnrss.org."
+    },
+    {
+      "id": "hn-best",
+      "name": "Hacker News Best",
+      "url": "https://hnrss.org/best",
+      "category": "insights",
+      "notes": "Unofficial RSS via hnrss.org."
+    },
+    {
+      "id": "producthunt",
+      "name": "Product Hunt",
+      "url": "https://www.producthunt.com/feed",
+      "category": "insights",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "lobsters",
+      "name": "Lobsters",
+      "url": "https://lobste.rs/rss",
+      "category": "insights",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "techmeme",
+      "name": "Techmeme",
+      "url": "https://www.techmeme.com/feed.xml",
+      "category": "insights",
+      "notes": "Official RSS."
+    }
+  ],
+  "disabled_feeds": [
+    {
+      "id": "36kr-main",
+      "name": "36氪",
+      "url": "https://36kr.com/feed",
+      "category": "tech_cn",
+      "reason": "Returns HTML challenge page, not RSS.",
+      "rsshub_fallback": "https://rsshub.app/36kr/newsflashes (403 on public instance; self-host RSSHub or use feed-newsflash)"
+    },
+    {
+      "id": "jiqizhixin",
+      "name": "机器之心",
+      "url": "https://www.jiqizhixin.com/rss",
+      "category": "ai",
+      "reason": "Returns HTML paywall page.",
+      "rsshub_fallback": "https://rsshub.app/jiqizhixin/daily (403 on public instance)"
+    },
+    {
+      "id": "caixin",
+      "name": "财新",
+      "url": "https://rss.caixin.com/rss/roll.xml",
+      "category": "politics_econ_cn",
+      "reason": "DNS unreachable from test environment.",
+      "rsshub_fallback": "https://rsshub.app/caixin/latest (403 on public instance)"
+    },
+    {
+      "id": "wallstreetcn",
+      "name": "华尔街见闻",
+      "url": "https://wallstreetcn.com/live/global",
+      "category": "politics_econ_cn",
+      "reason": "No stable public RSS; /rss returns 404.",
+      "rsshub_fallback": "https://rsshub.app/wallstreetcn/live (403 on public instance)"
+    },
+    {
+      "id": "reuters-world",
+      "name": "Reuters World",
+      "url": "https://www.reuters.com/world/rss",
+      "category": "politics_econ_intl",
+      "reason": "Returns HTTP 401 without subscription.",
+      "rsshub_fallback": null
+    },
+    {
+      "id": "economist",
+      "name": "The Economist",
+      "url": "https://www.economist.com/world/rss.xml",
+      "category": "politics_econ_intl",
+      "reason": "Returns HTTP 403.",
+      "rsshub_fallback": null
+    },
+    {
+      "id": "huxiu",
+      "name": "虎嗅",
+      "url": "https://www.huxiu.com/rss/0.xml",
+      "category": "tech_cn",
+      "reason": "Connection timeout from test environment.",
+      "rsshub_fallback": "https://rsshub.app/huxiu/article/0 (403 on public instance)"
+    }
+  ]
+}

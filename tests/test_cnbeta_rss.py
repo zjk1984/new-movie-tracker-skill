@@ -14,19 +14,25 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from datetime import datetime, timezone
 
 from cnbeta_rss import (  # noqa: E402
+    FeedSource,
     NewsItem,
+    apply_item_limits,
     build_interactive_card,
     build_text_message,
     build_update_markdown,
+    fetch_all_feeds,
     filter_by_lookback,
     find_latest_dedup_md,
     find_latest_update_md,
+    group_items_by_category,
+    load_feed_sources,
     load_seen_ids,
     parse_feed,
     parse_item_ids_from_update_md,
     resolve_auth_mode,
     resolve_lookback_days,
     resolve_max_items,
+    resolve_max_items_per_category,
     save_state,
     select_new_items,
     write_update_markdown,
@@ -109,21 +115,35 @@ class CnbetaRssTests(unittest.TestCase):
         mock_fetch.return_value = FIXTURE.read_text(encoding="utf-8")
         from cnbeta_rss import run
 
-        result = run(
-            max_items=3,
-            dry_run=False,
-            fetch_only=True,
-            reset_state=True,
-            use_card=True,
-        )
+        single = [
+            FeedSource(
+                id="cnbeta",
+                name="CNBeta",
+                url="https://rss.cnbeta.com.tw",
+                category="tech_cn",
+            )
+        ]
+        with patch("cnbeta_rss.resolve_active_sources", return_value=single):
+            result = run(
+                max_items=3,
+                max_items_per_category=5,
+                dry_run=False,
+                fetch_only=True,
+                reset_state=True,
+                use_card=True,
+            )
         self.assertGreaterEqual(result["fetched_total"], 100)
         self.assertLessEqual(result["new_count"], 3)
         self.assertFalse(result["sent"])
         json.dumps(result)
 
-    def test_resolve_max_items_defaults_to_20(self):
+    def test_resolve_max_items_defaults_to_30(self):
         with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(resolve_max_items(), 20)
+            self.assertEqual(resolve_max_items(), 30)
+
+    def test_resolve_max_items_per_category_defaults_to_5(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(resolve_max_items_per_category(), 5)
 
     def test_resolve_lookback_days_defaults_to_2(self):
         with patch.dict("os.environ", {}, clear=True):
@@ -288,7 +308,19 @@ class CnbetaRssTests(unittest.TestCase):
         mock_fetch.return_value = FIXTURE.read_text(encoding="utf-8")
         from cnbeta_rss import parse_feed, run
 
-        items = parse_feed(mock_fetch.return_value, feed_url="https://rss.cnbeta.com.tw")
+        single = [
+            FeedSource(
+                id="cnbeta",
+                name="CNBeta",
+                url="https://rss.cnbeta.com.tw",
+                category="tech_cn",
+            )
+        ]
+        items = parse_feed(
+            mock_fetch.return_value,
+            feed_url="https://rss.cnbeta.com.tw",
+            source=single[0],
+        )
         first_id = items[0].item_id
         with tempfile.TemporaryDirectory() as tmp:
             update_dir = Path(tmp) / "update"
@@ -298,18 +330,20 @@ class CnbetaRssTests(unittest.TestCase):
                 build_update_markdown([items[0]], feed_count=1, previous_filename=None),
                 encoding="utf-8",
             )
-            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
-                with patch("cnbeta_rss.resolve_state_path") as mock_state:
-                    state_path = Path(tmp) / "state.json"
-                    mock_state.return_value = state_path
-                    result = run(
-                        max_items=20,
-                        dry_run=True,
-                        fetch_only=False,
-                        reset_state=False,
-                        use_card=True,
-                        skip_update_md=False,
-                    )
+            with patch("cnbeta_rss.resolve_active_sources", return_value=single):
+                with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                    with patch("cnbeta_rss.resolve_state_path") as mock_state:
+                        state_path = Path(tmp) / "state.json"
+                        mock_state.return_value = state_path
+                        result = run(
+                            max_items=20,
+                            max_items_per_category=20,
+                            dry_run=True,
+                            fetch_only=False,
+                            reset_state=False,
+                            use_card=True,
+                            skip_update_md=False,
+                        )
         self.assertNotIn(first_id, [item["item_id"] for item in result["items"]])
 
     @patch("cnbeta_rss.fetch_feed")
@@ -317,38 +351,53 @@ class CnbetaRssTests(unittest.TestCase):
         mock_fetch.return_value = FIXTURE.read_text(encoding="utf-8")
         from cnbeta_rss import parse_feed, run
 
-        items = parse_feed(mock_fetch.return_value, feed_url="https://rss.cnbeta.com.tw")
+        single = [
+            FeedSource(
+                id="cnbeta",
+                name="CNBeta",
+                url="https://rss.cnbeta.com.tw",
+                category="tech_cn",
+            )
+        ]
+        items = parse_feed(
+            mock_fetch.return_value,
+            feed_url="https://rss.cnbeta.com.tw",
+            source=single[0],
+        )
         first_batch = items[:20]
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             update_dir = tmp_path / "update"
             state_path = tmp_path / "state.json"
             update_dir.mkdir()
-            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
-                with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
-                    with patch("cnbeta_rss.send_items_to_feishu"):
-                        with patch(
-                            "cnbeta_rss.update_filename_for_now",
-                            return_value="20250918-140000.md",
-                        ):
-                            first = run(
-                                max_items=20,
-                                dry_run=False,
-                                fetch_only=False,
-                                reset_state=True,
-                                use_card=True,
-                            )
-                        with patch(
-                            "cnbeta_rss.update_filename_for_now",
-                            return_value="20250918-150000.md",
-                        ):
-                            second = run(
-                                max_items=20,
-                                dry_run=False,
-                                fetch_only=False,
-                                reset_state=False,
-                                use_card=True,
-                            )
+            with patch("cnbeta_rss.resolve_active_sources", return_value=single):
+                with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                    with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
+                        with patch("cnbeta_rss.send_items_to_feishu"):
+                            with patch(
+                                "cnbeta_rss.update_filename_for_now",
+                                return_value="20250918-140000.md",
+                            ):
+                                first = run(
+                                    max_items=20,
+                                    max_items_per_category=20,
+                                    dry_run=False,
+                                    fetch_only=False,
+                                    reset_state=True,
+                                    use_card=True,
+                                )
+                            with patch(
+                                "cnbeta_rss.update_filename_for_now",
+                                return_value="20250918-150000.md",
+                            ):
+                                second = run(
+                                    max_items=20,
+                                    max_items_per_category=20,
+                                    dry_run=False,
+                                    fetch_only=False,
+                                    reset_state=False,
+                                    use_card=True,
+                                )
         first_ids = {item["item_id"] for item in first["items"]}
         second_ids = {item["item_id"] for item in second["items"]}
         self.assertEqual(len(first_ids), 20)
@@ -364,21 +413,31 @@ class CnbetaRssTests(unittest.TestCase):
         mock_beijing_now.return_value = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
         from cnbeta_rss import run
 
+        single = [
+            FeedSource(
+                id="cnbeta",
+                name="CNBeta",
+                url="https://rss.cnbeta.com.tw",
+                category="tech_cn",
+            )
+        ]
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             update_dir = tmp_path / "update"
             state_path = tmp_path / "state.json"
             update_dir.mkdir()
-            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
-                with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
-                    with patch("cnbeta_rss.send_items_to_feishu") as mock_send:
-                        result = run(
-                            max_items=20,
-                            dry_run=False,
-                            fetch_only=False,
-                            reset_state=True,
-                            use_card=True,
-                        )
+            with patch("cnbeta_rss.resolve_active_sources", return_value=single):
+                with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                    with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
+                        with patch("cnbeta_rss.send_items_to_feishu") as mock_send:
+                            result = run(
+                                max_items=20,
+                                max_items_per_category=5,
+                                dry_run=False,
+                                fetch_only=False,
+                                reset_state=True,
+                                use_card=True,
+                            )
         self.assertEqual(result["new_count"], 0)
         self.assertEqual(result["within_window_total"], 0)
         self.assertFalse(result["sent"])
@@ -429,6 +488,7 @@ class CnbetaRssTests(unittest.TestCase):
                         with patch("cnbeta_rss.send_items_to_feishu") as mock_send:
                             result = run(
                                 max_items=20,
+                                max_items_per_category=5,
                                 dry_run=False,
                                 fetch_only=False,
                                 reset_state=False,
@@ -446,7 +506,19 @@ class CnbetaRssTests(unittest.TestCase):
         mock_fetch.return_value = FIXTURE.read_text(encoding="utf-8")
         from cnbeta_rss import parse_feed, run
 
-        items = parse_feed(mock_fetch.return_value, feed_url="https://rss.cnbeta.com.tw")
+        single = [
+            FeedSource(
+                id="cnbeta",
+                name="CNBeta",
+                url="https://rss.cnbeta.com.tw",
+                category="tech_cn",
+            )
+        ]
+        items = parse_feed(
+            mock_fetch.return_value,
+            feed_url="https://rss.cnbeta.com.tw",
+            source=single[0],
+        )
         first_batch = items[:20]
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -460,20 +532,186 @@ class CnbetaRssTests(unittest.TestCase):
                 encoding="utf-8",
             )
             save_state(state_path, [item.item_id for item in first_batch])
-            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
-                with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
-                    result = run(
-                        max_items=20,
-                        dry_run=False,
-                        fetch_only=True,
-                        reset_state=False,
-                        use_card=True,
-                    )
+            with patch("cnbeta_rss.resolve_active_sources", return_value=single):
+                with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                    with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
+                        result = run(
+                            max_items=20,
+                            max_items_per_category=20,
+                            dry_run=False,
+                            fetch_only=True,
+                            reset_state=False,
+                            use_card=True,
+                        )
         overlap = {item["item_id"] for item in result["items"]} & {
             item.item_id for item in first_batch
         }
         self.assertFalse(overlap)
         self.assertEqual(result["dedup_source"], backup_md.name)
+
+    def test_load_feed_sources_reads_catalog(self):
+        sources = load_feed_sources()
+        self.assertGreaterEqual(len(sources), 20)
+        categories = {source.category for source in sources}
+        self.assertIn("tech_cn", categories)
+        self.assertIn("ai", categories)
+
+    @patch.dict(
+        "os.environ",
+        {"RSS_ENABLED_CATEGORIES": "tech_cn,ai"},
+        clear=False,
+    )
+    def test_load_feed_sources_respects_enabled_categories(self):
+        sources = load_feed_sources()
+        categories = {source.category for source in sources}
+        self.assertTrue(categories.issubset({"tech_cn", "ai"}))
+        self.assertIn("tech_cn", categories)
+
+    def test_apply_item_limits_per_category(self):
+        items = [
+            NewsItem(
+                item_id=f"tech-{i}",
+                title=f"T{i}",
+                link=f"https://example.com/t{i}",
+                published="2026-09-18T10:00:00+00:00",
+                category="tech",
+                summary="",
+                feed_url="https://example.com/feed",
+                source_category="tech_cn",
+                source_name="A",
+            )
+            for i in range(8)
+        ] + [
+            NewsItem(
+                item_id=f"ai-{i}",
+                title=f"A{i}",
+                link=f"https://example.com/a{i}",
+                published="2026-09-18T09:00:00+00:00",
+                category="ai",
+                summary="",
+                feed_url="https://example.com/ai",
+                source_category="ai",
+                source_name="B",
+            )
+            for i in range(8)
+        ]
+        limited = apply_item_limits(items, max_items=30, max_items_per_category=3)
+        tech_count = sum(1 for item in limited if item.source_category == "tech_cn")
+        ai_count = sum(1 for item in limited if item.source_category == "ai")
+        self.assertEqual(tech_count, 3)
+        self.assertEqual(ai_count, 3)
+
+    def test_group_items_by_category_preserves_order(self):
+        items = [
+            NewsItem(
+                item_id="1",
+                title="One",
+                link="https://example.com/1",
+                published="2026-09-18T10:00:00+00:00",
+                category="tech",
+                summary="",
+                feed_url="https://example.com",
+                source_category="tech_cn",
+            ),
+            NewsItem(
+                item_id="2",
+                title="Two",
+                link="https://example.com/2",
+                published="2026-09-18T09:00:00+00:00",
+                category="ai",
+                summary="",
+                feed_url="https://example.com",
+                source_category="ai",
+            ),
+        ]
+        grouped = group_items_by_category(items)
+        self.assertEqual([label for label, _ in grouped], ["中文科技", "AI"])
+
+    def test_build_update_markdown_includes_category_tags(self):
+        item = NewsItem(
+            item_id="https://example.com/x",
+            title="Tagged",
+            link="https://example.com/x",
+            published="2026-09-18T12:00:00+00:00",
+            category="tech",
+            summary="summary",
+            feed_url="https://example.com/feed",
+            source_category="tech_cn",
+            source_name="IT之家",
+        )
+        md = build_update_markdown([item], feed_count=1, previous_filename=None)
+        self.assertIn("<!-- category: tech_cn -->", md)
+        self.assertIn("- **分类**: tech_cn", md)
+        self.assertIn("### 中文科技", md)
+
+    @patch("cnbeta_rss.fetch_feed")
+    def test_fetch_all_feeds_continues_on_single_failure(self, mock_fetch):
+        xml_text = FIXTURE.read_text(encoding="utf-8")
+
+        def side_effect(url, **kwargs):
+            if "broken" in url:
+                raise RuntimeError("boom")
+            return xml_text
+
+        mock_fetch.side_effect = side_effect
+        sources = [
+            FeedSource(id="ok", name="OK", url="https://rss.cnbeta.com.tw", category="tech_cn"),
+            FeedSource(id="bad", name="Bad", url="https://broken.example/feed", category="ai"),
+        ]
+        items = fetch_all_feeds(sources)
+        self.assertGreaterEqual(len(items), 100)
+
+    @patch("cnbeta_rss.fetch_all_feeds")
+    def test_run_multi_source_dedupes_across_categories(self, mock_fetch_all):
+        now = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+        shared_link = "https://example.com/shared"
+        mock_fetch_all.return_value = [
+            NewsItem(
+                item_id=shared_link,
+                title="Shared",
+                link=shared_link,
+                published="2026-09-18T08:00:00+00:00",
+                category="tech",
+                summary="",
+                feed_url="https://example.com/a",
+                source_category="tech_cn",
+                source_name="A",
+            ),
+            NewsItem(
+                item_id="https://example.com/unique",
+                title="Unique",
+                link="https://example.com/unique",
+                published="2026-09-18T07:00:00+00:00",
+                category="ai",
+                summary="",
+                feed_url="https://example.com/b",
+                source_category="ai",
+                source_name="B",
+            ),
+        ]
+        from cnbeta_rss import run
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            update_dir = tmp_path / "update"
+            state_path = tmp_path / "state.json"
+            update_dir.mkdir()
+            save_state(state_path, [shared_link])
+            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
+                    with patch("cnbeta_rss.beijing_now", return_value=now):
+                        with patch("cnbeta_rss.send_items_to_feishu") as mock_send:
+                            result = run(
+                                max_items=20,
+                                max_items_per_category=5,
+                                dry_run=False,
+                                fetch_only=False,
+                                reset_state=False,
+                                use_card=True,
+                            )
+        self.assertEqual(result["new_count"], 1)
+        self.assertEqual(result["items"][0]["item_id"], "https://example.com/unique")
+        mock_send.assert_called_once()
 
 
 if __name__ == "__main__":
