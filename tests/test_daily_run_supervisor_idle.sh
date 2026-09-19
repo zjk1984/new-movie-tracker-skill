@@ -17,6 +17,11 @@ TODAY="$(TZ="$DAILY_RUN_SLOT_TZ" date +%Y-%m-%d)"
 RUN_LOG="$TMP/daily_run.log"
 touch "$RUN_LOG"
 
+IDLE_LOG=()
+idle_log() {
+  IDLE_LOG+=("$*")
+}
+
 find_pending_poll_slot() {
   local slot
   for slot in "${DAILY_RUN_SLOTS[@]}"; do
@@ -63,6 +68,9 @@ assert_eq() {
 run_idle_sleep() {
   SLEEP_CALLS=()
   SLEEP_TOTAL=0
+  IDLE_LOG=()
+  DAILY_RUN_SUPERVISOR_IDLE_LOG=idle_log
+  export DAILY_RUN_SUPERVISOR_IDLE_LOG
   daily_run_supervisor_idle_sleep_until_next_slot
 }
 
@@ -125,11 +133,110 @@ export DAILY_RUN_SLOT_NOW
 run_idle_sleep
 assert_eq "zero sleep at slot boundary" "0" "${#SLEEP_CALLS[@]}"
 
-# Supervisor wires chunked idle helper
+# Heartbeat every 15 min during long idle (mock 900s heartbeat)
+DAILY_RUN_SLOT_NOW="${TODAY}T06:00:00+08:00"
+export DAILY_RUN_SLOT_NOW
+DAILY_RUN_SUPERVISOR_IDLE_HEARTBEAT_SEC=900
+export DAILY_RUN_SUPERVISOR_IDLE_HEARTBEAT_SEC
+run_idle_sleep
+heartbeat_count=0
+for line in "${IDLE_LOG[@]}"; do
+  if [[ "$line" == *"idle heartbeat"* ]]; then
+    heartbeat_count=$((heartbeat_count + 1))
+  fi
+done
+if [[ "$heartbeat_count" -lt 1 ]]; then
+  echo "[err] expected at least one idle heartbeat during 06:00-07:00 idle" >&2
+  exit 1
+fi
+unset DAILY_RUN_SUPERVISOR_IDLE_HEARTBEAT_SEC
+
+# Checkpoint resume simulation: one sleep overshoots into poll window (13:00)
+cat > "$RUN_LOG" <<EOF
+===== ${TODAY}T07:05:00+08:00 daily_run.sh start (TZ=Asia/Shanghai) =====
+EOF
+DAILY_RUN_SLOT_NOW="${TODAY}T12:50:00+08:00"
+export DAILY_RUN_SLOT_NOW
+SLEEP_CALLS=()
+IDLE_LOG=()
+checkpoint_sleep() {
+  SLEEP_CALLS+=("$1")
+  # Simulate restore jumping wall clock past 13:00 while chunk was in flight.
+  DAILY_RUN_SLOT_NOW="${TODAY}T13:01:00+08:00"
+  export DAILY_RUN_SLOT_NOW
+}
+sleep() { checkpoint_sleep "$1"; }
+run_idle_sleep() {
+  SLEEP_CALLS=()
+  IDLE_LOG=()
+  DAILY_RUN_SUPERVISOR_IDLE_LOG=idle_log
+  export DAILY_RUN_SUPERVISOR_IDLE_LOG
+  daily_run_supervisor_idle_sleep_until_next_slot
+}
+run_idle_sleep
+if ! find_pending_poll_slot >/dev/null; then
+  echo "[err] expected slot 13 poll pending after checkpoint resume simulation" >&2
+  exit 1
+fi
+wake_logged=0
+for line in "${IDLE_LOG[@]}"; do
+  if [[ "$line" == *"after sleep chunk"* ]]; then
+    wake_logged=1
+    break
+  fi
+done
+if [[ "$wake_logged" -ne 1 ]]; then
+  echo "[err] expected post-chunk wake log after checkpoint resume simulation" >&2
+  exit 1
+fi
+
+# Missed-slot detection for catch-up on supervisor start
+: > "$RUN_LOG"
+DAILY_RUN_SLOT_NOW="${TODAY}T14:00:00+08:00"
+export DAILY_RUN_SLOT_NOW
+missed="$(daily_run_supervisor_find_missed_slot_today "$RUN_LOG" || true)"
+assert_eq "missed slot at 14:00 with empty log" "7" "$missed"
+
+cat > "$RUN_LOG" <<EOF
+===== ${TODAY}T07:05:00+08:00 daily_run.sh start (TZ=Asia/Shanghai) =====
+EOF
+missed="$(daily_run_supervisor_find_missed_slot_today "$RUN_LOG" || true)"
+assert_eq "missed slot 13 after 7am logged" "13" "$missed"
+
+cat > "$RUN_LOG" <<EOF
+===== ${TODAY}T07:05:00+08:00 daily_run.sh start (TZ=Asia/Shanghai) =====
+===== ${TODAY}T13:10:00+08:00 daily_run.sh start (TZ=Asia/Shanghai) =====
+EOF
+DAILY_RUN_SLOT_NOW="${TODAY}T21:00:00+08:00"
+export DAILY_RUN_SLOT_NOW
+missed="$(daily_run_supervisor_find_missed_slot_today "$RUN_LOG" || true)"
+assert_eq "missed slot 20 after 7+13 logged" "20" "$missed"
+
+cat > "$RUN_LOG" <<EOF
+===== ${TODAY}T07:05:00+08:00 daily_run.sh start (TZ=Asia/Shanghai) =====
+===== ${TODAY}T13:10:00+08:00 daily_run.sh start (TZ=Asia/Shanghai) =====
+===== ${TODAY}T20:05:00+08:00 daily_run.sh start (TZ=Asia/Shanghai) =====
+EOF
+if daily_run_supervisor_find_missed_slot_today "$RUN_LOG" >/dev/null; then
+  echo "[err] expected no missed slots when all ran today" >&2
+  exit 1
+fi
+
+DAILY_RUN_SLOT_NOW="${TODAY}T06:30:00+08:00"
+export DAILY_RUN_SLOT_NOW
+if daily_run_supervisor_find_missed_slot_today "$RUN_LOG" >/dev/null; then
+  echo "[err] expected no missed slots before 07:00 start" >&2
+  exit 1
+fi
+
+# Supervisor wires chunked idle helper + catch-up
 SUP="$ROOT/scripts/daily_run_supervisor.sh"
 [[ -x "$SUP" ]] || chmod +x "$SUP"
 grep -Fq 'daily_run_supervisor_idle_sleep_until_next_slot' "$SUP"
 grep -Fq 'DAILY_RUN_SUPERVISOR_IDLE_CHUNK_SEC' "$SUP"
+grep -Fq 'DAILY_RUN_SUPERVISOR_IDLE_HEARTBEAT_SEC' "$SUP"
+grep -Fq 'daily_run_supervisor_find_missed_slot_today' "$SUP"
+grep -Fq 'catch_up_missed_slots_on_start' "$SUP"
 grep -Fq 'daily_run_supervisor_idle.sh' "$SUP"
 
 echo "[ok] daily_run_supervisor idle sleep passed"
