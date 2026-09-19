@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from scan import (
     find_chrome,
     list_forum_pages,
     maybe_send_feishu_progress,
+    needs_forum_list_retry,
     prepare_scrape_setup,
     save_scan_results,
     scan_log,
@@ -117,6 +119,23 @@ def _list_forum_worker(
             browser.close()
 
 
+_enrich_worker_tls = threading.local()
+
+
+def _init_enrich_worker(storage_state: Path, chrome: str, headless: bool) -> None:
+    playwright = sync_playwright().start()
+    browser = playwright.chromium.launch(
+        **_browser_launch_kwargs(chrome, headless=headless),
+    )
+    context = browser.new_context(
+        storage_state=str(storage_state),
+        **_context_kwargs(),
+    )
+    _enrich_worker_tls.playwright = playwright
+    _enrich_worker_tls.browser = browser
+    _enrich_worker_tls.context = context
+
+
 def _enrich_worker(
     item: dict,
     args,
@@ -124,33 +143,30 @@ def _enrich_worker(
     chrome: str,
 ):
     item = copy.deepcopy(item)
-    with sync_playwright() as playwright:
-        browser, context, page = _new_worker_page(
-            playwright, chrome, args, storage_state,
-        )
-        try:
-            javdb_client = None
-            if (
-                getattr(args, "javdb", False)
-                or getattr(args, "javdb_magnets", False)
-                or getattr(args, "cnsub_priority", False)
-                or getattr(args, "javdb_query", True)
-            ):
-                from javdb_client import JavDBClient
+    context = _enrich_worker_tls.context
+    page = context.new_page()
+    try:
+        javdb_client = None
+        if (
+            getattr(args, "javdb", False)
+            or getattr(args, "javdb_magnets", False)
+            or getattr(args, "cnsub_priority", False)
+            or getattr(args, "javdb_query", True)
+        ):
+            from javdb_client import JavDBClient
 
-                javdb_client = JavDBClient(host=getattr(args, "javdb_host", None))
-            if args.fetch_magnets and item.get("href"):
-                enrich_matched_post(page, item, args, javdb_client)
-            elif javdb_client:
-                from scan import apply_item_filters, enrich_with_javdb
+            javdb_client = JavDBClient(host=getattr(args, "javdb_host", None))
+        if args.fetch_magnets and item.get("href"):
+            enrich_matched_post(page, item, args, javdb_client)
+        elif javdb_client:
+            from scan import apply_item_filters, enrich_with_javdb
 
-                scan_log(f"[info] javdb lookup: {item['title'][:40]}...")
-                enrich_with_javdb(item, javdb_client, args)
-                apply_item_filters(item, javdb_client, args)
-            return item
-        finally:
-            context.close()
-            browser.close()
+            scan_log(f"[info] javdb lookup: {item['title'][:40]}...")
+            enrich_with_javdb(item, javdb_client, args)
+            apply_item_filters(item, javdb_client, args)
+        return item
+    finally:
+        page.close()
 
 
 def _send_feishu_start(args) -> None:
@@ -199,11 +215,6 @@ def scrape_two_phase(args) -> None:
 
     _send_feishu_start(args)
     storage_state = bootstrap_storage_state(out_dir, args, chrome, args.urls[0])
-
-    def _needs_forum_retry(result) -> bool:
-        return result.stopped == "break_forum" or (
-            result.pages_scanned == 0 and not result.candidates
-        )
 
     def _retry_forums_serially(forum_urls: list[str]):
         if not forum_urls:
@@ -258,7 +269,7 @@ def scrape_two_phase(args) -> None:
                 scan_log("[err] cloudflare abort during phase 1")
                 raise SystemExit(1)
 
-    retry_urls = [r.forum_url for r in forum_results if _needs_forum_retry(r)]
+    retry_urls = [r.forum_url for r in forum_results if needs_forum_list_retry(r)]
     if retry_urls:
         retried = _retry_forums_serially(retry_urls)
         forum_results = [
@@ -317,7 +328,11 @@ def scrape_two_phase(args) -> None:
             f"[info] phase 2: parallel thread enrich for {len(enrich_items)} posts",
         )
         enriched_by_key: dict[str, dict] = {}
-        with ThreadPoolExecutor(max_workers=fetch_workers) as pool:
+        with ThreadPoolExecutor(
+            max_workers=fetch_workers,
+            initializer=_init_enrich_worker,
+            initargs=(storage_state, chrome, args.headless),
+        ) as pool:
             futures = {
                 pool.submit(_enrich_worker, item, args, storage_state, chrome): item
                 for item in enrich_items
@@ -335,10 +350,10 @@ def scrape_two_phase(args) -> None:
                     args,
                     phase=" (phase 2)",
                 )
-        for item in no_href:
-            enriched_by_key[item.get("title", "")] = _enrich_worker(
-                item, args, storage_state, chrome,
-            )
+            for item in no_href:
+                enriched_by_key[item.get("title", "")] = _enrich_worker(
+                    item, args, storage_state, chrome,
+                )
         for item in candidates:
             key = (item.get("href") or "").strip() or item.get("title", "")
             all_matched.append(enriched_by_key.get(key, item))

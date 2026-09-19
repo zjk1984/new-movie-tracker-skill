@@ -11,6 +11,15 @@ daily_run_slot_today() {
   TZ="$DAILY_RUN_SLOT_TZ" date +%Y-%m-%d
 }
 
+# Calendar day for slot math; honors DAILY_RUN_SLOT_NOW in tests/supervisor dry-runs.
+daily_run_slot_reference_day() {
+  if [[ -n "${DAILY_RUN_SLOT_NOW:-}" ]]; then
+    TZ="$DAILY_RUN_SLOT_TZ" date -d "$DAILY_RUN_SLOT_NOW" +%Y-%m-%d
+  else
+    daily_run_slot_today
+  fi
+}
+
 daily_run_slot_hour_in_window() {
   local slot="$1"
   local hour="$2"
@@ -44,7 +53,7 @@ daily_run_slot_ran_today() {
   fi
 
   [[ -f "$log_file" ]] || return 1
-  today="${today:-$(daily_run_slot_today)}"
+  today="${today:-$(daily_run_slot_reference_day)}"
 
   local line ts bj_date bj_hour
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -81,7 +90,7 @@ daily_run_slot_now_epoch() {
 
 daily_run_slot_start_epoch() {
   local slot="$1"
-  local day="${2:-$(daily_run_slot_today)}"
+  local day="${2:-$(daily_run_slot_reference_day)}"
   TZ="$DAILY_RUN_SLOT_TZ" date -d "${day} ${slot}:00:00" +%s
 }
 
@@ -123,7 +132,7 @@ daily_run_slot_pending_for_poll() {
 seconds_until_next_slot_start() {
   local now today slot start_ts best=-1
   now="$(daily_run_slot_now_epoch)"
-  today="$(daily_run_slot_today)"
+  today="$(daily_run_slot_reference_day)"
   for slot in "${DAILY_RUN_SLOTS[@]}"; do
     start_ts="$(daily_run_slot_start_epoch "$slot" "$today")"
     if [[ "$start_ts" -gt "$now" ]]; then
