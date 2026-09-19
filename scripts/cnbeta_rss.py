@@ -50,6 +50,8 @@ DEFAULT_CATEGORY_LABELS = {
     "tech_en": "英文科技",
     "politics_econ_cn": "国内政治经济",
     "politics_econ_intl": "国际政治经济",
+    "finance_cn": "国内财经",
+    "finance_intl": "国际财经",
     "ai": "AI",
     "insights": "热点洞察",
     "legacy": "资讯",
@@ -76,6 +78,24 @@ class NewsItem:
     feed_url: str
     source_category: str = "legacy"
     source_name: str = ""
+    title_zh: str = ""
+    summary_zh: str = ""
+
+    @property
+    def display_title(self) -> str:
+        zh = (self.title_zh or "").strip()
+        original = (self.title or "").strip()
+        if zh and zh != original:
+            return zh
+        return original
+
+    @property
+    def display_summary(self) -> str:
+        zh = (self.summary_zh or "").strip()
+        original = (self.summary or "").strip()
+        if zh and zh != original:
+            return zh
+        return original
 
     @property
     def category_label(self) -> str:
@@ -374,7 +394,7 @@ def build_update_markdown(
             lines.append(f"<!-- category: {item.source_category} -->")
             lines.extend(
                 [
-                    f"## {index}. [{item.display_label}] {item.title}",
+                    f"## {index}. [{item.display_label}] {_format_item_title(item)}",
                     "",
                     f"- **分类**: {item.source_category}",
                     f"- **链接**: {item.link}",
@@ -383,8 +403,12 @@ def build_update_markdown(
             )
             if item.source_name:
                 lines.append(f"- **来源**: {item.source_name}")
-            if item.summary:
-                lines.append(f"- **摘要**: {item.summary}")
+            original_title = (item.title or "").strip()
+            zh_title = (item.title_zh or "").strip()
+            if zh_title and original_title and zh_title != original_title:
+                lines.append(f"- **原标题**: {original_title}")
+            if item.display_summary:
+                lines.append(f"- **摘要**: {_format_item_summary(item, limit=500)}")
             lines.append("")
             index += 1
     return "\n".join(lines).rstrip() + "\n"
@@ -698,6 +722,30 @@ def truncate(text: str, limit: int = 120) -> str:
     return text[: limit - 1] + "…"
 
 
+def _format_item_title(item: NewsItem) -> str:
+    original = (item.title or "").strip()
+    zh = (item.title_zh or "").strip()
+    if zh and original and zh != original:
+        return f"{zh}（{original}）"
+    return item.display_title
+
+
+def _format_item_summary(item: NewsItem, *, limit: int = 120) -> str:
+    original = (item.summary or "").strip()
+    zh = (item.summary_zh or "").strip()
+    if zh and original and zh != original:
+        return truncate(f"{zh}（原文: {original}）", limit)
+    return truncate(item.display_summary, limit)
+
+
+def translate_items_for_output(items: list[NewsItem]) -> list[NewsItem]:
+    if not items:
+        return items
+    from rss_translate import apply_translations_to_items
+
+    return apply_translations_to_items(items)
+
+
 def build_text_message(items: list[NewsItem], *, feed_count: int) -> str:
     lines = [
         f"RSS 新闻更新 ({len(items)} 条)",
@@ -710,10 +758,10 @@ def build_text_message(items: list[NewsItem], *, feed_count: int) -> str:
         lines.append(f"【{category_label}】")
         for item in group:
             when = format_beijing_time(item.published, with_label=False) or "未知时间"
-            lines.append(f"{index}. [{item.display_label}] {item.title}")
+            lines.append(f"{index}. [{item.display_label}] {_format_item_title(item)}")
             lines.append(f"   {when} | {item.link}")
-            if item.summary:
-                lines.append(f"   {truncate(item.summary, 100)}")
+            if item.display_summary:
+                lines.append(f"   {_format_item_summary(item, limit=100)}")
             index += 1
         lines.append("")
     return "\n".join(lines).strip()
@@ -731,11 +779,12 @@ def build_interactive_card(items: list[NewsItem], *, feed_count: int) -> dict[st
         for item in group:
             when = format_beijing_time(item.published, with_label=False) or "未知时间"
             body_lines.append(
-                f"**{index}. [{item.display_label}]** [{item.title}]({item.link})"
+                f"**{index}. [{item.display_label}]** "
+                f"[{_format_item_title(item)}]({item.link})"
             )
             body_lines.append(f"_{when}_")
-            if item.summary:
-                body_lines.append(truncate(item.summary, 120))
+            if item.display_summary:
+                body_lines.append(_format_item_summary(item, limit=120))
             body_lines.append("")
             index += 1
     return {
@@ -913,6 +962,9 @@ def run(
         print("[info] no new RSS items")
         save_state(state_path, list(seen_ids))
         return result
+
+    new_items = translate_items_for_output(new_items)
+    result["items"] = [asdict(item) for item in new_items]
 
     if dry_run:
         if skip_update_md:

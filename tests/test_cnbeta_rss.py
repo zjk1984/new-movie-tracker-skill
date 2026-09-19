@@ -555,6 +555,8 @@ class CnbetaRssTests(unittest.TestCase):
         categories = {source.category for source in sources}
         self.assertIn("tech_cn", categories)
         self.assertIn("ai", categories)
+        self.assertIn("finance_cn", categories)
+        self.assertIn("finance_intl", categories)
 
     @patch.dict(
         "os.environ",
@@ -712,6 +714,59 @@ class CnbetaRssTests(unittest.TestCase):
         self.assertEqual(result["new_count"], 1)
         self.assertEqual(result["items"][0]["item_id"], "https://example.com/unique")
         mock_send.assert_called_once()
+
+    @patch("cnbeta_rss.translate_items_for_output")
+    @patch("cnbeta_rss.fetch_all_feeds")
+    def test_run_translates_before_send(self, mock_fetch_all, mock_translate):
+        now = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+        english = NewsItem(
+            item_id="https://example.com/en",
+            title="Fed hike",
+            link="https://example.com/en",
+            published="2026-09-18T08:00:00+00:00",
+            category="finance",
+            summary="Markets react",
+            feed_url="https://example.com/feed",
+            source_category="finance_intl",
+        )
+        translated = NewsItem(
+            item_id=english.item_id,
+            title=english.title,
+            link=english.link,
+            published=english.published,
+            category=english.category,
+            summary=english.summary,
+            feed_url=english.feed_url,
+            source_category=english.source_category,
+            title_zh="美联储加息",
+            summary_zh="市场反应",
+        )
+        mock_fetch_all.return_value = [english]
+        mock_translate.return_value = [translated]
+        from cnbeta_rss import run
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            update_dir = tmp_path / "update"
+            state_path = tmp_path / "state.json"
+            update_dir.mkdir()
+            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
+                    with patch("cnbeta_rss.beijing_now", return_value=now):
+                        with patch("cnbeta_rss.send_items_to_feishu") as mock_send:
+                            result = run(
+                                max_items=20,
+                                max_items_per_category=5,
+                                dry_run=False,
+                                fetch_only=False,
+                                reset_state=True,
+                                use_card=True,
+                            )
+        mock_translate.assert_called_once()
+        mock_send.assert_called_once()
+        sent_items = mock_send.call_args.args[0]
+        self.assertEqual(sent_items[0].title_zh, "美联储加息")
+        self.assertEqual(result["items"][0]["title_zh"], "美联储加息")
 
 
 if __name__ == "__main__":

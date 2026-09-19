@@ -24,6 +24,14 @@
     "insights": {
       "label": "热点洞察",
       "description": "Trending topics, product launches, and community picks"
+    },
+    "finance_cn": {
+      "label": "国内财经",
+      "description": "China finance, markets, and macro news"
+    },
+    "finance_intl": {
+      "label": "国际财经",
+      "description": "Global finance, markets, and business news"
     }
   },
   "feeds": [
@@ -264,6 +272,83 @@
       "url": "https://www.techmeme.com/feed.xml",
       "category": "insights",
       "notes": "Official RSS."
+    },
+    {
+      "id": "wallstreetcn-global",
+      "name": "华尔街见闻",
+      "url": "https://rsshub.rssforever.com/wallstreetcn/news/global",
+      "category": "finance_cn",
+      "notes": "Via community RSSHub mirror (rsshub.app returns 403). Route /wallstreetcn/news/global is more stable than /live (often times out)."
+    },
+    {
+      "id": "yicai-latest",
+      "name": "第一财经",
+      "url": "https://rsshub.rssforever.com/yicai/latest",
+      "category": "finance_cn",
+      "notes": "Via community RSSHub mirror; no stable official RSS at yicai.com/feed."
+    },
+    {
+      "id": "10jqka-7x24",
+      "name": "同花顺 7×24",
+      "url": "https://news.10jqka.com.cn/today_list/index.xml",
+      "category": "finance_cn",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "investing-cn",
+      "name": "Investing.com 中文",
+      "url": "https://cn.investing.com/rss/news.rss",
+      "category": "finance_cn",
+      "notes": "Official RSS; mix of domestic and global market headlines in Chinese."
+    },
+    {
+      "id": "bloomberg-markets",
+      "name": "Bloomberg Markets",
+      "url": "https://feeds.bloomberg.com/markets/news.rss",
+      "category": "finance_intl",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "ft-markets",
+      "name": "Financial Times Markets",
+      "url": "https://www.ft.com/markets?format=rss",
+      "category": "finance_intl",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "cnbc-investing",
+      "name": "CNBC Investing",
+      "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069",
+      "category": "finance_intl",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "marketwatch-top",
+      "name": "MarketWatch Top Stories",
+      "url": "https://feeds.marketwatch.com/marketwatch/topstories/",
+      "category": "finance_intl",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "wsj-markets",
+      "name": "WSJ Markets",
+      "url": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+      "category": "finance_intl",
+      "notes": "Official Dow Jones RSS."
+    },
+    {
+      "id": "bbc-business",
+      "name": "BBC Business",
+      "url": "https://feeds.bbci.co.uk/news/business/rss.xml",
+      "category": "finance_intl",
+      "notes": "Official RSS."
+    },
+    {
+      "id": "yahoo-finance",
+      "name": "Yahoo Finance",
+      "url": "https://finance.yahoo.com/news/rssindex",
+      "category": "finance_intl",
+      "notes": "Official RSS."
     }
   ],
   "disabled_feeds": [
@@ -294,10 +379,50 @@
     {
       "id": "wallstreetcn",
       "name": "华尔街见闻",
-      "url": "https://wallstreetcn.com/live/global",
-      "category": "politics_econ_cn",
+      "url": "https://wallstreetcn.com/rss",
+      "category": "finance_cn",
       "reason": "No stable public RSS; /rss returns 404.",
-      "rsshub_fallback": "https://rsshub.app/wallstreetcn/live (403 on public instance)"
+      "rsshub_fallback": "https://rsshub.rssforever.com/wallstreetcn/news/global (enabled in finance_cn); /live often times out"
+    },
+    {
+      "id": "wallstreetcn-live",
+      "name": "华尔街见闻 7×24",
+      "url": "https://rsshub.rssforever.com/wallstreetcn/live",
+      "category": "finance_cn",
+      "reason": "Community RSSHub /live route often times out (>45s). Use /wallstreetcn/news/global instead.",
+      "rsshub_fallback": null
+    },
+    {
+      "id": "cls-telegraph",
+      "name": "财联社电报",
+      "url": "https://www.cls.cn/rss",
+      "category": "finance_cn",
+      "reason": "No official RSS; /rss returns 404. RSSHub mirrors (cls/telegraph) often 503/timeout.",
+      "rsshub_fallback": "https://rsshub.app/cls/telegraph (403 on public instance)"
+    },
+    {
+      "id": "yicai-official",
+      "name": "第一财经",
+      "url": "https://www.yicai.com/feed/",
+      "category": "finance_cn",
+      "reason": "Returns HTML, not RSS.",
+      "rsshub_fallback": "https://rsshub.rssforever.com/yicai/latest (enabled in finance_cn)"
+    },
+    {
+      "id": "sina-finance-hot",
+      "name": "新浪财经要闻",
+      "url": "https://rss.sina.com.cn/roll/finance/hot_roll.xml",
+      "category": "finance_cn",
+      "reason": "Feed responds but channel has zero items (stale since 2018).",
+      "rsshub_fallback": null
+    },
+    {
+      "id": "bloomberg-terminal",
+      "name": "Bloomberg (legacy feed)",
+      "url": "https://www.bloomberg.com/feed/podcast/etf-report.xml",
+      "category": "finance_intl",
+      "reason": "Podcast-only legacy URL; use feeds.bloomberg.com/markets/news.rss instead.",
+      "rsshub_fallback": null
     },
     {
       "id": "reuters-world",
