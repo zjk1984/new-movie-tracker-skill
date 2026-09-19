@@ -143,9 +143,19 @@ release_lock() {
 
 trap release_lock EXIT
 
+catch_up_missed_slots_on_start() {
+  local missed
+  missed="$(daily_run_supervisor_find_missed_slot_today "$RUN_LOG" 2>/dev/null || true)"
+  if [[ -n "$missed" ]]; then
+    supervisor_log "[info] catch-up: slot $missed should have run today; triggering"
+    trigger_slot "$missed" || true
+  fi
+}
+
 main_loop() {
   acquire_lock
   supervisor_log "=== daily_run_supervisor start (pid $$, poll=${POLL_SEC}s, TZ=$TZ_NAME) ==="
+  catch_up_missed_slots_on_start
 
   while true; do
     supervisor_cycle
@@ -185,7 +195,8 @@ Long-running loop that:
 
 Environment:
   DAILY_RUN_SUPERVISOR_POLL_SEC       Poll interval during active slot windows (default 300)
-  DAILY_RUN_SUPERVISOR_IDLE_CHUNK_SEC Max idle sleep chunk between slot recomputes (default 60)
+  DAILY_RUN_SUPERVISOR_IDLE_CHUNK_SEC     Max idle sleep chunk between slot recomputes (default 60)
+  DAILY_RUN_SUPERVISOR_IDLE_HEARTBEAT_SEC Idle heartbeat interval in supervisor.log (default 900)
   DAILY_RUN_TZ / DAILY_RUN_SLOT_TZ      Asia/Shanghai
 
 Start in tmux on cron VM:
