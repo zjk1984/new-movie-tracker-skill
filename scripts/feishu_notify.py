@@ -247,8 +247,15 @@ def analyze_scan(
     skipped_jav_score = 0
     from pikpak_download import pick_item_download
 
+    from scan import item_forum_urls
+
     for item in matched:
-        forums[_forum_label(item.get("forum", ""))] += 1
+        urls = item_forum_urls(item)
+        if not urls:
+            forums["unknown"] += 1
+        else:
+            for forum_url in urls:
+                forums[_forum_label(forum_url)] += 1
         region = item.get("content_region") or "other"
         region_counts[region] += 1
         sub = item.get("domestic_subtype")
