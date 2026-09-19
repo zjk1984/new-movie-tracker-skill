@@ -9,9 +9,17 @@ LOG="$ROOT/data/cron_health.log"
 SETUP="$ROOT/scripts/setup_cron.sh"
 MARK="# new-movie-tracker-daily"
 CNBETA_MARK="# new-movie-tracker-cnbeta"
+CNBETA_RSS_CRON="${CNBETA_RSS_CRON:-0}"
 CRON_USER_FILE="$ROOT/data/cron_install_user"
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 TZ_NAME="${DAILY_RUN_TZ:-Asia/Shanghai}"
+
+cnbeta_cron_enabled() {
+  case "${CNBETA_RSS_CRON,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 mkdir -p "$ROOT/data"
 
@@ -143,7 +151,14 @@ tracker_crontab_present() {
   local user="$1"
   local tab
   tab="$(tracker_crontab_list "$user")" || return 1
-  echo "$tab" | grep -Fq "$MARK" && echo "$tab" | grep -Fq "$CNBETA_MARK"
+  if ! echo "$tab" | grep -Fq "$MARK"; then
+    return 1
+  fi
+  if cnbeta_cron_enabled; then
+    echo "$tab" | grep -Fq "$CNBETA_MARK"
+  else
+    return 0
+  fi
 }
 
 repair_tracker_crontab() {
@@ -201,14 +216,22 @@ upcoming_slot_note() {
   fi
 
   if tracker_crontab_present "$install_user"; then
-    log_line "[ok] tracker crontab loaded for $install_user ($MARK, $CNBETA_MARK)"
+    if cnbeta_cron_enabled; then
+      log_line "[ok] tracker crontab loaded for $install_user ($MARK, $CNBETA_MARK)"
+    else
+      log_line "[ok] tracker crontab loaded for $install_user ($MARK)"
+    fi
   else
     if repair_tracker_crontab "$install_user"; then
       crontab_repaired=1
       if tracker_crontab_present "$install_user"; then
         log_line "[ok] tracker crontab repaired for $install_user"
       else
-        log_line "[err] tracker crontab repair did not load daily/cnbeta marks for $install_user"
+        if cnbeta_cron_enabled; then
+          log_line "[err] tracker crontab repair did not load daily/cnbeta marks for $install_user"
+        else
+          log_line "[err] tracker crontab repair did not load daily mark for $install_user"
+        fi
       fi
     else
       log_line "[err] tracker crontab repair failed for $install_user"
