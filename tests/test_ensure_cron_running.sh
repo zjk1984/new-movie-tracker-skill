@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENSURE="$ROOT/scripts/ensure_cron_running.sh"
 SETUP="$ROOT/scripts/setup_cron.sh"
 MARK="# new-movie-tracker-daily"
+CNBETA_MARK="# new-movie-tracker-cnbeta"
 CRON_USER_FILE="$ROOT/data/cron_install_user"
 
 if [[ ! -x "$ENSURE" ]]; then
@@ -44,6 +45,7 @@ if command -v crontab >/dev/null 2>&1; then
 
   # ensure script documents auto-repair (not warn-only).
   grep -Fq 'repair_tracker_crontab' "$ENSURE"
+  grep -Fq 'CNBETA_MARK' "$ENSURE"
   grep -Fq 'restart_cron_daemon' "$ENSURE"
   ! grep -Fq 'run ./scripts/setup_cron.sh' "$ENSURE" || {
     if grep 'run ./scripts/setup_cron.sh' "$ENSURE" | grep -qv repair; then

@@ -152,8 +152,38 @@ python scripts/cnbeta_rss.py --text
 
 ## Schedule periodic runs
 
+CNBeta uses the same **07:00, 13:00, and 20:00 Asia/Shanghai** schedule as the movie tracker. Install both job sets with one command (requires `cron` and system timezone `Asia/Shanghai`):
+
 ```bash
-0 * * * * cd /path/to/repo && /usr/bin/python3 scripts/cnbeta_rss.py >> logs/cnbeta_rss.log 2>&1
+./scripts/setup_cron.sh
+```
+
+This adds six user crontab lines (daily scan + CNBeta RSS at each slot). CNBeta credentials are read from `.env.local` automatically when `scripts/cnbeta_rss.py` runs.
+
+**Cron lines installed** (default times; `ROOT` = repo path):
+
+```cron
+0 7 * * * TZ=Asia/Shanghai ROOT/scripts/daily_run.sh # new-movie-tracker-daily
+0 7 * * * TZ=Asia/Shanghai ROOT/scripts/cnbeta_rss.sh # new-movie-tracker-cnbeta
+0 13 * * * TZ=Asia/Shanghai ROOT/scripts/daily_run.sh # new-movie-tracker-daily
+0 13 * * * TZ=Asia/Shanghai ROOT/scripts/cnbeta_rss.sh # new-movie-tracker-cnbeta
+0 20 * * * TZ=Asia/Shanghai ROOT/scripts/daily_run.sh # new-movie-tracker-daily
+0 20 * * * TZ=Asia/Shanghai ROOT/scripts/cnbeta_rss.sh # new-movie-tracker-cnbeta
+```
+
+**Verify on your machine:**
+
+```bash
+./scripts/setup_cron.sh --dry-run          # preview lines without installing
+crontab -l | grep new-movie-tracker        # confirm daily + cnbeta marks
+tail -f data/cnbeta_rss.log                # watch scheduled runs
+python scripts/cnbeta_rss.py --fetch-only  # manual smoke test (no Feishu)
+```
+
+Custom slot times (applies to **both** daily and CNBeta jobs):
+
+```bash
+DAILY_RUN_TIMES=07:00,13:00,20:00 ./scripts/setup_cron.sh
 ```
 
 Each run writes a timestamped markdown file under `update/` with new articles only. The previous `update/*.md` is moved to `update/backup/` and linked from the new file. Dedup merges article URLs from `data/cnbeta_rss_state.json` and the latest markdown snapshot (`update/*.md`, or `update/backup/*.md` when no current file exists). A second run against an unchanged feed therefore skips items already sent and only pushes the next unseen batch (or none when everything in the feed was already delivered).

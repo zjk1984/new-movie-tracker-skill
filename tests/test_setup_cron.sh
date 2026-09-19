@@ -26,6 +26,9 @@ fi
 DRY="$("$SCRIPT" --dry-run 2>/dev/null)"
 echo "$DRY" | grep -q 'would install cron line(s):'
 echo "$DRY" | grep -q 'new-movie-tracker-daily'
+echo "$DRY" | grep -q 'new-movie-tracker-cnbeta'
+echo "$DRY" | grep -q 'cnbeta_rss.sh'
+echo "$DRY" | grep -q 'cnbeta_rss.log'
 echo "$DRY" | grep -q '/etc/cron.d/new-movie-tracker-reboot'
 echo "$DRY" | grep -q '/etc/cron.d/new-movie-tracker-health'
 echo "$DRY" | grep -q 'cron_reboot_reload.sh'
