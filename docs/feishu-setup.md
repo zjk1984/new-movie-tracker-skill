@@ -173,15 +173,39 @@ python scripts/cnbeta_rss.py --text
 
 ## Schedule periodic runs
 
-### Recommended: repo cron helper (PR #66)
-
-When [PR #66](https://github.com/zjk1984/new-movie-tracker-skill/pull/66) is merged, install Beijing-time slots at **07:00, 13:00, 20:00**:
+CNBeta uses the same **07:00, 13:00, and 20:00 Asia/Shanghai** schedule as the movie tracker. Install both job sets with one command (requires `cron` and system timezone `Asia/Shanghai`):
 
 ```bash
 cp .env.local.example .env.local   # fill Feishu creds
 ./scripts/setup_cron.sh
-crontab -l | grep new-movie-tracker
-tail -f data/cnbeta_rss.log
+```
+
+This adds six user crontab lines (daily scan + CNBeta RSS at each slot). CNBeta credentials are read from `.env.local` automatically when `scripts/cnbeta_rss.py` runs.
+
+**Cron lines installed** (default times; `ROOT` = repo path):
+
+```cron
+0 7 * * * TZ=Asia/Shanghai ROOT/scripts/daily_run.sh # new-movie-tracker-daily
+0 7 * * * TZ=Asia/Shanghai ROOT/scripts/cnbeta_rss.sh # new-movie-tracker-cnbeta
+0 13 * * * TZ=Asia/Shanghai ROOT/scripts/daily_run.sh # new-movie-tracker-daily
+0 13 * * * TZ=Asia/Shanghai ROOT/scripts/cnbeta_rss.sh # new-movie-tracker-cnbeta
+0 20 * * * TZ=Asia/Shanghai ROOT/scripts/daily_run.sh # new-movie-tracker-daily
+0 20 * * * TZ=Asia/Shanghai ROOT/scripts/cnbeta_rss.sh # new-movie-tracker-cnbeta
+```
+
+**Verify on your machine:**
+
+```bash
+./scripts/setup_cron.sh --dry-run          # preview lines without installing
+crontab -l | grep new-movie-tracker        # confirm daily + cnbeta marks
+tail -f data/cnbeta_rss.log                # watch scheduled runs
+python scripts/cnbeta_rss.py --fetch-only  # manual smoke test (no Feishu)
+```
+
+Custom slot times (applies to **both** daily and CNBeta jobs):
+
+```bash
+DAILY_RUN_TIMES=07:00,13:00,20:00 ./scripts/setup_cron.sh
 ```
 
 Each slot runs `scripts/cnbeta_rss.sh`, which invokes this aggregator and logs to `data/cnbeta_rss.log`.

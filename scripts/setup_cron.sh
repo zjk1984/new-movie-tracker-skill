@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Install daily_run cron jobs (07:00 + 13:00 + 20:00 Asia/Shanghai by default).
+# Install daily_run + CNBeta RSS cron jobs (07:00 + 13:00 + 20:00 Asia/Shanghai by default).
 # Usage: ./scripts/setup_cron.sh [--dry-run] [--ensure-only] [--time HH:MM] [--time HH:MM ...]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WRAPPER="$ROOT/scripts/daily_run.sh"
+CNBETA_WRAPPER="$ROOT/scripts/cnbeta_rss.sh"
 REBOOT_SCRIPT="$ROOT/scripts/cron_reboot_reload.sh"
 ENSURE_SCRIPT="$ROOT/scripts/ensure_cron_running.sh"
 MARK="# new-movie-tracker-daily"
+CNBETA_MARK="# new-movie-tracker-cnbeta"
 REBOOT_MARK="# new-movie-tracker-daily-reboot"
 REBOOT_CRON_D="/etc/cron.d/new-movie-tracker-reboot"
 HEALTH_CRON_D="/etc/cron.d/new-movie-tracker-health"
@@ -37,9 +39,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<EOF
-Install cron job(s) for scripts/daily_run.sh.
+Install cron job(s) for scripts/daily_run.sh and scripts/cnbeta_rss.sh.
 
-Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
+Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time) for both jobs.
+CNBeta RSS loads Feishu credentials from .env.local (see docs/feishu-setup.md).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).
 Also installs root /etc/cron.d hooks:
@@ -122,8 +125,10 @@ save_cron_install_user() {
   printf '%s\n' "$user" > "$CRON_USER_FILE"
 }
 
-cron_line_for_time() {
+cron_line_for_job() {
   local time="$1"
+  local wrapper="$2"
+  local mark="$3"
   if ! [[ "$time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
     echo "[err] invalid time '$time' (expected HH:MM, 24h)" >&2
     return 1
@@ -134,12 +139,22 @@ cron_line_for_time() {
   hour="${hour:-0}"
   minute="${minute#0}"
   minute="${minute:-0}"
-  echo "$minute $hour * * * TZ=$TZ_NAME $WRAPPER $MARK"
+  echo "$minute $hour * * * TZ=$TZ_NAME $wrapper $mark"
+}
+
+cron_line_for_time() {
+  cron_line_for_job "$1" "$WRAPPER" "$MARK"
+}
+
+cron_line_for_cnbeta() {
+  cron_line_for_job "$1" "$CNBETA_WRAPPER" "$CNBETA_MARK"
 }
 
 is_tracker_cron_line() {
   local line="$1"
-  [[ "$line" == *"$WRAPPER"* ]] || [[ "$line" == *"$MARK"* ]] || [[ "$line" == *"$REBOOT_MARK"* ]] || [[ "$line" == *"@reboot"* && "$line" == *"new-movie-tracker"* ]]
+  [[ "$line" == *"$WRAPPER"* ]] || [[ "$line" == *"$MARK"* ]] \
+    || [[ "$line" == *"$CNBETA_WRAPPER"* ]] || [[ "$line" == *"$CNBETA_MARK"* ]] \
+    || [[ "$line" == *"$REBOOT_MARK"* ]] || [[ "$line" == *"@reboot"* && "$line" == *"new-movie-tracker"* ]]
 }
 
 cron_service_unit() {
@@ -391,12 +406,13 @@ if [[ "${ENSURE_ONLY:-0}" == 1 ]]; then
   exit 0
 fi
 
-chmod +x "$WRAPPER"
+chmod +x "$WRAPPER" "$CNBETA_WRAPPER"
 mkdir -p "$ROOT/data"
 
 lines=()
 for time in "${TIMES[@]}"; do
   lines+=("$(cron_line_for_time "$time")")
+  lines+=("$(cron_line_for_cnbeta "$time")")
 done
 
 if [[ "${REPAIR_CRONTAB:-0}" == 1 ]]; then
@@ -421,7 +437,7 @@ if [[ "${DRY_RUN:-0}" == 1 ]]; then
   for line in "${lines[@]}"; do
     echo "  $line"
   done
-  echo "  log: $ROOT/data/daily_run.log"
+  echo "  log: $ROOT/data/daily_run.log, $ROOT/data/cnbeta_rss.log"
   install_reboot_cron_d
   install_health_cron_d
   ensure_cron_boot_enabled || true
@@ -434,13 +450,13 @@ if ! install_user_crontab "$install_user" "${lines[@]}"; then
   exit 1
 fi
 
-echo "[ok] cron installed for $install_user (${#lines[@]} slot(s)):"
+echo "[ok] cron installed for $install_user (${#lines[@]} line(s), ${#TIMES[@]} slot(s)):"
 for line in "${lines[@]}"; do
   echo "     $line"
 done
 echo "     timezone: $TZ_NAME (system TZ should match for correct schedule)"
-echo "     log: $ROOT/data/daily_run.log"
-crontab -l | grep -E 'new-movie-tracker-daily' || true
+echo "     log: $ROOT/data/daily_run.log, $ROOT/data/cnbeta_rss.log"
+crontab -l | grep -E 'new-movie-tracker-(daily|cnbeta)' || true
 
 install_reboot_cron_d || true
 install_health_cron_d || true

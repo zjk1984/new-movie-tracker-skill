@@ -77,6 +77,18 @@ Legacy single-feed mode (ignores JSON catalog):
 CNBETA_RSS_FEEDS=https://rss.cnbeta.com.tw python scripts/cnbeta_rss.py
 ```
 
+Feishu credentials live in `.env.local` (see [feishu-setup.md](./feishu-setup.md)). The Python script loads them via `scripts/env_utils.py`; no extra export is needed in cron.
+
+## Scheduled runs
+
+Install with the shared cron helper (same 07:00 / 13:00 / 20:00 Beijing slots as `daily_run`):
+
+```bash
+./scripts/setup_cron.sh
+```
+
+Wrapper: `scripts/cnbeta_rss.sh` → log `data/cnbeta_rss.log`, crontab marker `# new-movie-tracker-cnbeta`.
+
 ## Repository layout
 
 | Path | Role |
