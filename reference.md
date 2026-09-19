@@ -362,15 +362,18 @@ Supervisor poll windows (Beijing, from slot start until next slot start):
 
 Between poll windows the supervisor sleeps until the next slot start (e.g. 06:50 → sleep until 07:00; after 07:00 slot logged → sleep until 13:00).
 
-Optional **startup hook** (still recommended alongside supervisor):
+**VM wake / start hook** (required on checkpoint VMs — restarts supervisor so missed-slot catch-up runs):
+
+Repo ships `environment.json`:
 
 ```json
 {
-  "start": "./scripts/ensure_cron_running.sh"
+  "install": "./scripts/setup_cron.sh",
+  "start": "./scripts/restart_daily_supervisor.sh"
 }
 ```
 
-(in Cloud Agent `environment.json`, after `./scripts/setup_cron.sh` in install). Optional **Cursor `subscribe_timer`** wake at 07:00/13:00/20:00 — see project doc `daily-run-external-schedule.md`.
+`restart_daily_supervisor.sh` runs `ensure_cron_running.sh`, kills stale `daily-supervisor` tmux (frozen after checkpoint restore), and starts a fresh `daily_run_supervisor.sh` so `catch_up_missed_slots_on_start` re-evaluates missed Beijing slots. Apply this `environment.json` to the cron VM Cloud Agent environment. Optional **Cursor `subscribe_timer`** wake at 07:00/13:00/20:00 — see project doc `daily-run-external-schedule.md`.
 
 Supervisor one-shot check (no loop): `./scripts/daily_run_supervisor.sh --once`
 
