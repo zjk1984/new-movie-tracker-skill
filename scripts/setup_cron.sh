@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install daily_run + CNBeta RSS cron jobs (07:00 + 13:00 + 20:00 Asia/Shanghai by default).
+# Install daily_run cron jobs (07:00 + 13:00 + 20:00 Asia/Shanghai by default).
+# Optional CNBeta RSS cron: set CNBETA_RSS_CRON=1 (default off).
 # Usage: ./scripts/setup_cron.sh [--dry-run] [--ensure-only] [--time HH:MM] [--time HH:MM ...]
 set -euo pipefail
 
@@ -10,6 +11,7 @@ REBOOT_SCRIPT="$ROOT/scripts/cron_reboot_reload.sh"
 ENSURE_SCRIPT="$ROOT/scripts/ensure_cron_running.sh"
 MARK="# new-movie-tracker-daily"
 CNBETA_MARK="# new-movie-tracker-cnbeta"
+CNBETA_RSS_CRON="${CNBETA_RSS_CRON:-0}"
 REBOOT_MARK="# new-movie-tracker-daily-reboot"
 REBOOT_CRON_D="/etc/cron.d/new-movie-tracker-reboot"
 HEALTH_CRON_D="/etc/cron.d/new-movie-tracker-health"
@@ -39,9 +41,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<EOF
-Install cron job(s) for scripts/daily_run.sh and scripts/cnbeta_rss.sh.
+Install cron job(s) for scripts/daily_run.sh (and optionally scripts/cnbeta_rss.sh).
 
-Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time) for both jobs.
+Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
+CNBeta RSS cron is off by default; set CNBETA_RSS_CRON=1 to install news aggregation slots.
 CNBeta RSS loads Feishu credentials from .env.local (see docs/feishu-setup.md).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).
@@ -61,6 +64,7 @@ Usage:
 Environment overrides:
   DAILY_RUN_TZ=Asia/Shanghai
   DAILY_RUN_TIMES=07:00,13:00,20:00
+  CNBETA_RSS_CRON=1          install CNBeta RSS cron lines (default: off)
 
 Container / Cloud Agent VMs (PID 1 is tini, cron may start late or die):
   Cron is best-effort. Run the external supervisor in tmux (recommended):
@@ -148,6 +152,13 @@ cron_line_for_time() {
 
 cron_line_for_cnbeta() {
   cron_line_for_job "$1" "$CNBETA_WRAPPER" "$CNBETA_MARK"
+}
+
+cnbeta_cron_enabled() {
+  case "${CNBETA_RSS_CRON,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 is_tracker_cron_line() {
@@ -406,13 +417,18 @@ if [[ "${ENSURE_ONLY:-0}" == 1 ]]; then
   exit 0
 fi
 
-chmod +x "$WRAPPER" "$CNBETA_WRAPPER"
+chmod +x "$WRAPPER"
+if cnbeta_cron_enabled; then
+  chmod +x "$CNBETA_WRAPPER"
+fi
 mkdir -p "$ROOT/data"
 
 lines=()
 for time in "${TIMES[@]}"; do
   lines+=("$(cron_line_for_time "$time")")
-  lines+=("$(cron_line_for_cnbeta "$time")")
+  if cnbeta_cron_enabled; then
+    lines+=("$(cron_line_for_cnbeta "$time")")
+  fi
 done
 
 if [[ "${REPAIR_CRONTAB:-0}" == 1 ]]; then
@@ -437,7 +453,10 @@ if [[ "${DRY_RUN:-0}" == 1 ]]; then
   for line in "${lines[@]}"; do
     echo "  $line"
   done
-  echo "  log: $ROOT/data/daily_run.log, $ROOT/data/cnbeta_rss.log"
+  echo "  log: $ROOT/data/daily_run.log"
+  if cnbeta_cron_enabled; then
+    echo "  log: $ROOT/data/cnbeta_rss.log"
+  fi
   install_reboot_cron_d
   install_health_cron_d
   ensure_cron_boot_enabled || true
@@ -455,8 +474,13 @@ for line in "${lines[@]}"; do
   echo "     $line"
 done
 echo "     timezone: $TZ_NAME (system TZ should match for correct schedule)"
-echo "     log: $ROOT/data/daily_run.log, $ROOT/data/cnbeta_rss.log"
-crontab -l | grep -E 'new-movie-tracker-(daily|cnbeta)' || true
+echo "     log: $ROOT/data/daily_run.log"
+if cnbeta_cron_enabled; then
+  echo "     log: $ROOT/data/cnbeta_rss.log"
+  crontab -l | grep -E 'new-movie-tracker-(daily|cnbeta)' || true
+else
+  crontab -l | grep -E 'new-movie-tracker-daily' || true
+fi
 
 install_reboot_cron_d || true
 install_health_cron_d || true

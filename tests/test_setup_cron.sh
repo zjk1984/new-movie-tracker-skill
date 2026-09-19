@@ -26,9 +26,19 @@ fi
 DRY="$("$SCRIPT" --dry-run 2>/dev/null)"
 echo "$DRY" | grep -q 'would install cron line(s):'
 echo "$DRY" | grep -q 'new-movie-tracker-daily'
-echo "$DRY" | grep -q 'new-movie-tracker-cnbeta'
-echo "$DRY" | grep -q 'cnbeta_rss.sh'
-echo "$DRY" | grep -q 'cnbeta_rss.log'
+if echo "$DRY" | grep -q 'new-movie-tracker-cnbeta'; then
+  echo "[err] cnbeta cron should be off by default" >&2
+  exit 1
+fi
+if echo "$DRY" | grep -q 'cnbeta_rss'; then
+  echo "[err] cnbeta_rss should not appear in default dry-run" >&2
+  exit 1
+fi
+
+CNBETA_DRY="$(CNBETA_RSS_CRON=1 "$SCRIPT" --dry-run 2>/dev/null)"
+echo "$CNBETA_DRY" | grep -q 'new-movie-tracker-cnbeta'
+echo "$CNBETA_DRY" | grep -q 'cnbeta_rss.sh'
+echo "$CNBETA_DRY" | grep -q 'cnbeta_rss.log'
 echo "$DRY" | grep -q '/etc/cron.d/new-movie-tracker-reboot'
 echo "$DRY" | grep -q '/etc/cron.d/new-movie-tracker-health'
 echo "$DRY" | grep -q 'cron_reboot_reload.sh'
@@ -94,5 +104,8 @@ grep -Fq 'cron_install_user' "$ENSURE_SCRIPT"
 grep -Fq 'repair_tracker_crontab' "$ENSURE_SCRIPT"
 grep -Fq -- '--repair-crontab' "$ENSURE_SCRIPT"
 grep -Fq 'crontab -u' "$ENSURE_SCRIPT"
+grep -Fq 'CNBETA_RSS_CRON' "$SCRIPT"
+grep -Fq 'cnbeta_cron_enabled' "$SCRIPT"
+grep -Fq 'CNBETA_RSS_CRON' "$ENSURE_SCRIPT"
 
 echo "[ok] setup_cron validation passed"
