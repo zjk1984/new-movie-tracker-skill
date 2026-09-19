@@ -37,30 +37,29 @@ class RssTranslateTests(unittest.TestCase):
     def test_chinese_mixed_content_skips_translation(self):
         self.assertTrue(is_primarily_chinese("苹果发布新款 iPhone，售价 799 美元"))
 
-    @patch("rss_translate._translate_batch_openai")
-    @patch("rss_translate._openai_configured", return_value=True)
-    def test_translate_batch_uses_openai_when_configured(self, _mock_cfg, mock_openai):
-        mock_openai.return_value = ["美联储加息", "市场震荡"]
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=False):
-            with patch("rss_translate.TRANSLATE_ENABLED", True):
-                with patch("rss_translate._cache", {}):
-                    with patch("rss_translate._cache_loaded", True):
-                        results = translate_batch(
-                            ["Fed raises rates", "Markets wobble"],
-                        )
+    @patch("rss_translate.translate_to_zh")
+    def test_translate_batch_uses_deep_translator(self, mock_translate):
+        mock_translate.side_effect = lambda text: {
+            "Fed raises rates": "美联储加息",
+            "Markets wobble": "市场震荡",
+        }.get(text, "")
+        with patch("rss_translate.TRANSLATE_ENABLED", True):
+            with patch("rss_translate._cache", {}):
+                with patch("rss_translate._cache_loaded", True):
+                    results = translate_batch(
+                        ["Fed raises rates", "Markets wobble"],
+                    )
         self.assertEqual(results, ["美联储加息", "市场震荡"])
-        mock_openai.assert_called_once()
+        self.assertEqual(mock_translate.call_count, 2)
 
-    @patch("rss_translate._translate_batch_fallback")
-    @patch("rss_translate._openai_configured", return_value=False)
-    def test_translate_batch_skips_chinese(self, _mock_openai, mock_fallback):
-        mock_fallback.return_value = ["Another English headline zh"]
+    @patch("rss_translate.translate_to_zh")
+    def test_translate_batch_skips_chinese(self, mock_translate):
+        mock_translate.return_value = "Another English headline zh"
         with patch("rss_translate._cache", {}):
             with patch("rss_translate._cache_loaded", True):
                 results = translate_batch(["中文标题", "Another English headline"])
         self.assertEqual(results[0], "中文标题")
-        mock_fallback.assert_called_once()
-        self.assertEqual(mock_fallback.call_args.args[0], ["Another English headline"])
+        mock_translate.assert_called_once_with("Another English headline")
 
     @patch("rss_translate.translate_batch")
     def test_apply_translations_to_items_sets_zh_fields(self, mock_batch):

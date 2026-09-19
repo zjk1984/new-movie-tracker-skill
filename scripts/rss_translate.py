@@ -16,7 +16,12 @@ CACHE_FILE = Path(
         str(SKILL_DIR / "data" / "rss_translate_cache.json"),
     ),
 )
-TRANSLATE_ENABLED = os.environ.get("RSS_TRANSLATE", "1").strip().lower() not in {
+# Match main branch title translation toggle (TITLE_TRANSLATE); RSS_TRANSLATE is legacy alias.
+_translate_flag = (
+    os.environ.get("RSS_TRANSLATE")
+    or os.environ.get("TITLE_TRANSLATE", "1")
+)
+TRANSLATE_ENABLED = _translate_flag.strip().lower() not in {
     "0",
     "false",
     "no",
@@ -26,6 +31,7 @@ CHINESE_THRESHOLD = float(os.environ.get("RSS_TRANSLATE_CHINESE_THRESHOLD", "0.3
 BATCH_SIZE = max(1, int(os.environ.get("RSS_TRANSLATE_BATCH_SIZE", "10")))
 
 CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
+HIRAGANA_KATAKANA_RE = re.compile(r"[\u3040-\u309f\u30a0-\u30ff]")
 
 _cache: dict[str, str] = {}
 _cache_loaded = False
@@ -80,75 +86,60 @@ def _rate_limit_pause(min_interval: float = 0.35) -> None:
     _last_request_at = time.time()
 
 
-def _openai_configured() -> bool:
-    return bool((os.environ.get("OPENAI_API_KEY") or "").strip())
+def _source_language(text: str) -> str:
+    if HIRAGANA_KATAKANA_RE.search(text or ""):
+        return "japanese"
+    return "english"
 
 
-def _translate_batch_openai(texts: list[str]) -> list[str]:
-    import requests
+def _translate_with_mymemory(text: str) -> str:
+    from deep_translator import MyMemoryTranslator
 
-    api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
-    base_url = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
-    model = (os.environ.get("OPENAI_MODEL") or "gpt-4o-mini").strip()
-    numbered = "\n".join(f"{index + 1}. {text[:800]}" for index, text in enumerate(texts))
-    prompt = (
-        "Translate each numbered line to Simplified Chinese. "
-        "Keep proper nouns readable. Return ONLY a JSON array of strings, "
-        "one translation per line, same order and count as the input.\n\n"
-        f"{numbered}"
-    )
-    _rate_limit_pause(0.5)
-    resp = requests.post(
-        f"{base_url}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "temperature": 0.2,
-            "messages": [{"role": "user", "content": prompt}],
-        },
-        timeout=60,
-    )
-    resp.raise_for_status()
-    content = resp.json()["choices"][0]["message"]["content"].strip()
-    if content.startswith("```"):
-        content = re.sub(r"^```(?:json)?\s*", "", content)
-        content = re.sub(r"\s*```$", "", content)
-    parsed = json.loads(content)
-    if not isinstance(parsed, list) or len(parsed) != len(texts):
-        raise ValueError("OpenAI translation returned unexpected JSON shape")
-    return [str(item).strip() for item in parsed]
+    _rate_limit_pause()
+    return MyMemoryTranslator(
+        source=_source_language(text),
+        target="chinese simplified",
+    ).translate(text[:5000])
 
 
-def _translate_batch_fallback(texts: list[str]) -> list[str]:
+def _translate_with_google(text: str) -> str:
     from deep_translator import GoogleTranslator
 
-    translator = GoogleTranslator(source="auto", target="zh-CN")
-    results: list[str] = []
-    for text in texts:
-        _rate_limit_pause()
+    _rate_limit_pause(0.5)
+    return GoogleTranslator(source="auto", target="zh-CN").translate(text[:5000])
+
+
+def translate_to_zh(text: str) -> str:
+    """Translate non-Chinese text to Simplified Chinese (same client stack as title_translate)."""
+    text = (text or "").strip()
+    if not text or is_primarily_chinese(text):
+        return text if is_primarily_chinese(text) else ""
+    if not TRANSLATE_ENABLED:
+        return ""
+    _load_disk_cache()
+    cached = _cache.get(text)
+    if cached:
+        return cached
+    try:
+        zh = _translate_with_mymemory(text)
+    except Exception:
         try:
-            results.append(translator.translate(text[:5000]) or "")
+            zh = _translate_with_google(text)
         except Exception:
-            results.append("")
-    return results
+            return ""
+    zh = (zh or "").strip()
+    if zh:
+        _cache[text] = zh
+        _save_disk_cache()
+    return zh
 
 
 def translate_text(text: str) -> str:
     text = (text or "").strip()
     if not text or is_primarily_chinese(text):
         return text
-    if not TRANSLATE_ENABLED:
-        return ""
-    _load_disk_cache()
-    if text in _cache:
-        return _cache[text]
-    translated = translate_batch([text])[0]
-    _cache[text] = translated
-    _save_disk_cache()
-    return translated
+    translated = translate_to_zh(text)
+    return translated or text
 
 
 def translate_batch(texts: list[str]) -> list[str]:
@@ -163,8 +154,9 @@ def translate_batch(texts: list[str]) -> list[str]:
             results[index] = ""
             continue
         _load_disk_cache()
-        if cleaned in _cache:
-            results[index] = _cache[cleaned]
+        cached = _cache.get(cleaned)
+        if cached:
+            results[index] = cached
         else:
             pending.append((index, cleaned))
 
@@ -180,23 +172,13 @@ def translate_batch(texts: list[str]) -> list[str]:
 
     translated_by_text: dict[str, str] = {}
     for start in range(0, len(unique_texts), BATCH_SIZE):
-        chunk = unique_texts[start : start + BATCH_SIZE]
-        try:
-            if _openai_configured():
-                chunk_results = _translate_batch_openai(chunk)
-            else:
-                chunk_results = _translate_batch_fallback(chunk)
-        except Exception:
-            chunk_results = [""] * len(chunk)
-        for source, target in zip(chunk, chunk_results):
-            translated_by_text[source] = (target or "").strip()
+        for source in unique_texts[start : start + BATCH_SIZE]:
+            translated_by_text[source] = translate_to_zh(source)
 
     for source, indices in index_map.items():
         target = translated_by_text.get(source, "")
-        _cache[source] = target
         for index in indices:
             results[index] = target
-    _save_disk_cache()
     return results
 
 
