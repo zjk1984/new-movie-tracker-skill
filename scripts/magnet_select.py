@@ -65,6 +65,8 @@ def pick_forum_magnet(magnets: list[str], *, prefer_cnsub: bool) -> str | None:
 
 
 def lookup_javdb_cnsub(javdb_client, number: str) -> dict[str, Any] | None:
+    from javdb_client import build_query_report
+
     info = javdb_client.lookup(number, fetch_magnets=True, cnsub=True, best_only=True)
     magnets = info.get("magnets") or []
     if not magnets:
@@ -76,7 +78,14 @@ def lookup_javdb_cnsub(javdb_client, number: str) -> dict[str, Any] | None:
             "number": info.get("number"),
             "title": info.get("title"),
             "release_date": info.get("release_date"),
+            "content_type": info.get("content_type"),
+            "content_type_label": info.get("content_type_label"),
+            "has_cnsub": info.get("has_cnsub"),
+            "cnsub_magnet_count": info.get("cnsub_magnet_count", 0),
+            "score": info.get("score"),
+            "reviews_count": info.get("reviews_count"),
         },
+        "javdb_query": build_query_report(info),
     }
 
 
@@ -139,6 +148,8 @@ def select_magnet(item: dict[str, Any], javdb_client=None) -> dict[str, Any] | N
                 javdb_hit = lookup_javdb_cnsub(javdb_client, number)
                 if javdb_hit:
                     item["javdb"] = javdb_hit.get("javdb")
+                    if javdb_hit.get("javdb_query"):
+                        item["javdb_query"] = javdb_hit["javdb_query"]
                     if javdb_hit["javdb"].get("release_date"):
                         item["release_date"] = javdb_hit["javdb"]["release_date"]
                     return {
@@ -165,6 +176,8 @@ def select_magnet(item: dict[str, Any], javdb_client=None) -> dict[str, Any] | N
             javdb_hit = lookup_javdb_cnsub(javdb_client, number)
             if javdb_hit:
                 item["javdb"] = javdb_hit.get("javdb")
+                if javdb_hit.get("javdb_query"):
+                    item["javdb_query"] = javdb_hit["javdb_query"]
                 if javdb_hit["javdb"].get("release_date"):
                     item["release_date"] = javdb_hit["javdb"]["release_date"]
                 return {

@@ -853,7 +853,13 @@ def check_cloudflare(
         page.screenshot(path=str(screenshot_dir / f"cf_timeout_{page_num}.png"))
         return "abort"
 
-    scan_log(f"[warn] cloudflare on page {page_num}, stopping current forum")
+    scan_log(
+        f"[warn] cloudflare on page {page_num}, waiting up to 45s (headless)",
+    )
+    if _wait_past_cloudflare_page(page, timeout_s=45):
+        scan_log("[info] cloudflare challenge cleared (headless)")
+        return "ok"
+    scan_log(f"[warn] cloudflare still blocking page {page_num}, stopping current forum")
     page.screenshot(path=str(screenshot_dir / f"cf_block_{page_num}.png"))
     return "break_forum"
 
@@ -957,6 +963,13 @@ def list_forum_pages(
             page.wait_for_timeout(4000 if match_ctx.since or start_page > 1 else 2000)
 
     return ForumListResult(forum_url, candidates, total_posts, pages_scanned, stopped)
+
+
+def needs_forum_list_retry(result: ForumListResult) -> bool:
+    """True when phase-1 list scan should be retried serially (CF or empty list)."""
+    return result.stopped == "break_forum" or (
+        result.pages_scanned == 0 and not result.candidates
+    )
 
 
 def apply_item_filters(item: dict, javdb_client, args) -> None:
@@ -1455,7 +1468,7 @@ def scrape(args):
                 else None
             )
 
-            list_candidates: list[dict] = []
+            forum_results: dict[str, ForumListResult] = {}
             for forum_url in args.urls:
                 list_result = list_forum_pages(
                     page, forum_url, args, match_ctx, screenshot_dir,
@@ -1463,6 +1476,31 @@ def scrape(args):
                 if list_result.stopped == "abort":
                     context.close()
                     return
+                forum_results[forum_url] = list_result
+
+            retry_urls = [
+                url for url, result in forum_results.items()
+                if needs_forum_list_retry(result)
+            ]
+            if retry_urls:
+                scan_log(
+                    f"[info] serial list retry: {len(retry_urls)} forum(s) "
+                    "(cloudflare or empty list)",
+                )
+                for forum_url in retry_urls:
+                    scan_log(f"[info] serial list retry forum: {forum_url}")
+                    forum_results[forum_url] = list_forum_pages(
+                        page, forum_url, args, match_ctx, screenshot_dir,
+                    )
+                    if forum_results[forum_url].stopped == "abort":
+                        context.close()
+                        return
+
+            list_candidates: list[dict] = []
+            total_posts = 0
+            total_pages_scanned = 0
+            for forum_url in args.urls:
+                list_result = forum_results[forum_url]
                 total_posts += list_result.total_posts
                 total_pages_scanned += list_result.pages_scanned
                 list_candidates.extend(list_result.candidates)
