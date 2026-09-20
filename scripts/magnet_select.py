@@ -85,6 +85,7 @@ def lookup_javdb_cnsub(javdb_client, number: str) -> dict[str, Any] | None:
             "cnsub_magnet_count": info.get("cnsub_magnet_count", 0),
             "score": info.get("score"),
             "reviews_count": info.get("reviews_count"),
+            "watched_count": info.get("watched_count"),
         },
         "javdb_query": build_query_report(info),
     }

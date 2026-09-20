@@ -171,6 +171,9 @@ def _parse_reviews_count(value: Any) -> int | None:
     return count if count >= 0 else None
 
 
+_parse_watched_count = _parse_reviews_count
+
+
 def parse_release_date(release_date: str | None) -> date | None:
     """Parse JavDB release_date (YYYY-MM-DD) to a calendar date."""
     text = _any_str(release_date).strip()
@@ -630,6 +633,7 @@ class JavDBClient:
             "title": _any_str(detail.get("title")),
             "release_date": _any_str(detail.get("release_date")),
             "reviews_count": _parse_reviews_count(detail.get("reviews_count")),
+            "watched_count": _parse_watched_count(detail.get("watched_count")),
             "duration": detail.get("duration"),
             "has_cnsub": detail.get("has_cnsub"),
             "score": _parse_score(detail.get("score")),
@@ -697,12 +701,15 @@ def format_lookup_summary(info: dict[str, Any], *, error: str | None = None) -> 
     number = info.get("number", "?")
     label = info.get("content_type_label") or content_type_label(info.get("content_type", ""))
     parts = [f"JavDB {number} [{label}]", f"发行 {info.get('release_date') or '-'}"]
+    watched_count = info.get("watched_count")
+    if watched_count is not None:
+        parts.append(f"看过 {watched_count} 人")
     reviews_count = info.get("reviews_count")
     if reviews_count is not None:
-        parts.append(f"评价 {reviews_count} 人")
+        parts.append(f"评分 {reviews_count} 人")
     score = info.get("score")
     if score is not None:
-        parts.append(f"评分 {score:.2f}")
+        parts.append(f"均分 {score:.2f}")
     cnsub_label = format_cnsub_label(info)
     if cnsub_label not in {"-", "无"}:
         parts.append(f"中字 {cnsub_label}")
@@ -732,6 +739,7 @@ def build_query_report(info: dict[str, Any]) -> dict[str, Any]:
         "content_type_label": info.get("content_type_label"),
         "release_date": info.get("release_date"),
         "reviews_count": info.get("reviews_count"),
+        "watched_count": info.get("watched_count"),
         "title": info.get("title"),
         "has_cnsub": info.get("has_cnsub"),
         "cnsub_magnet_count": info.get("cnsub_magnet_count", 0),
@@ -760,6 +768,7 @@ def build_error_report(number: str, error: str) -> dict[str, Any]:
         "content_type_label": "",
         "release_date": "",
         "reviews_count": None,
+        "watched_count": None,
         "title": "",
         "has_cnsub": None,
         "cnsub_magnet_count": 0,
@@ -791,6 +800,7 @@ def attach_javdb_query(item: dict[str, Any], client: JavDBClient) -> None:
             "title": info.get("title"),
             "release_date": info.get("release_date"),
             "reviews_count": info.get("reviews_count"),
+            "watched_count": info.get("watched_count"),
             "content_type": info.get("content_type"),
             "content_type_label": info.get("content_type_label"),
             "has_cnsub": info.get("has_cnsub"),
@@ -869,8 +879,8 @@ def javdb_tags_ok(item: dict[str, Any]) -> bool | None:
     return find_excluded_javdb_tag(q.get("tags")) is None
 
 
-def javdb_reviews_ok(item: dict[str, Any]) -> bool | None:
-    """Return True/False when JavDB reviews gate applies; None if not Japanese JAV."""
+def _javdb_popularity_count_ok(item: dict[str, Any], count_field: str) -> bool | None:
+    """Return True/False when a popularity-count gate applies; None if not Japanese JAV."""
     if not item_needs_javdb_score(item):
         return None
     q = item.get("javdb_query") or {}
@@ -888,23 +898,29 @@ def javdb_reviews_ok(item: dict[str, Any]) -> bool | None:
     if is_zero_reviews_ok_release(release_date):
         return True
 
-    reviews_count = _parse_reviews_count(q.get("reviews_count"))
-    if reviews_count is None:
+    count = _parse_reviews_count(q.get(count_field))
+    if count is None:
         return False
 
     if days <= JAVDB_RECENT_RELEASE_DAYS:
-        return reviews_count >= JAVDB_RECENT_MIN_REVIEWS
+        return count >= JAVDB_RECENT_MIN_REVIEWS
 
     release_year = parse_release_date_year(release_date)
     if release_year is None:
         return False
 
     threshold = reviews_threshold_for_year(release_year)
-    return reviews_count >= threshold
+    return count >= threshold
 
 
-def javdb_reviews_skip_reason(item: dict[str, Any]) -> str:
-    """Build skip_reason for a failing reviews gate (query must be ok)."""
+def _javdb_popularity_count_skip_reason(
+    item: dict[str, Any],
+    count_field: str,
+    *,
+    no_count_reason: str,
+    low_prefix: str,
+) -> str:
+    """Build skip_reason for a failing popularity-count gate (query must be ok)."""
     q = item.get("javdb_query") or {}
     release_date = q.get("release_date")
     if parse_release_date(release_date) is None:
@@ -915,13 +931,43 @@ def javdb_reviews_skip_reason(item: dict[str, Any]) -> str:
         return "javdb_no_release_date"
 
     if is_zero_reviews_ok_release(release_date):
-        return "javdb_no_reviews_count"
+        return no_count_reason
 
-    reviews_count = _parse_reviews_count(q.get("reviews_count"))
-    if reviews_count is None:
-        return "javdb_no_reviews_count"
+    count = _parse_reviews_count(q.get(count_field))
+    if count is None:
+        return no_count_reason
 
-    return f"javdb_reviews_low_{int(reviews_count)}"
+    return f"{low_prefix}_{int(count)}"
+
+
+def javdb_reviews_ok(item: dict[str, Any]) -> bool | None:
+    """Return True/False when JavDB reviews (rating count) gate applies; None if not Japanese JAV."""
+    return _javdb_popularity_count_ok(item, "reviews_count")
+
+
+def javdb_reviews_skip_reason(item: dict[str, Any]) -> str:
+    """Build skip_reason for a failing reviews gate (query must be ok)."""
+    return _javdb_popularity_count_skip_reason(
+        item,
+        "reviews_count",
+        no_count_reason="javdb_no_reviews_count",
+        low_prefix="javdb_reviews_low",
+    )
+
+
+def javdb_watched_ok(item: dict[str, Any]) -> bool | None:
+    """Return True/False when JavDB watched (App 评价) gate applies; None if not Japanese JAV."""
+    return _javdb_popularity_count_ok(item, "watched_count")
+
+
+def javdb_watched_skip_reason(item: dict[str, Any]) -> str:
+    """Build skip_reason for a failing watched gate (query must be ok)."""
+    return _javdb_popularity_count_skip_reason(
+        item,
+        "watched_count",
+        no_count_reason="javdb_no_watched_count",
+        low_prefix="javdb_watched_low",
+    )
 
 
 def javdb_score_ok(
@@ -997,6 +1043,12 @@ def ensure_javdb_score_gate(
     reviews_ok = javdb_reviews_ok(item)
     if reviews_ok is False:
         item["skip_reason"] = javdb_reviews_skip_reason(item)
+        _clear_download_selection(item)
+        return False
+
+    watched_ok = javdb_watched_ok(item)
+    if watched_ok is False:
+        item["skip_reason"] = javdb_watched_skip_reason(item)
         _clear_download_selection(item)
         return False
 
@@ -1083,7 +1135,9 @@ def enrich_matched_javdb(
         if item.get("javdb_query"):
             q = item["javdb_query"]
             if q.get("query_status") == "ok" and (
-                q.get("score") is None or q.get("reviews_count") is None
+                q.get("score") is None
+                or q.get("reviews_count") is None
+                or q.get("watched_count") is None
             ):
                 attach_javdb_query(item, client)
                 queried += 1
