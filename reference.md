@@ -205,20 +205,22 @@ Disable with `--no-javdb-query`.
 
 ### JavDB download gates (Japanese items)
 
-Before PikPak submit, `scripts/javdb_client.py` applies gates in order: **tags** → **reviews_count** → **score** (default min 4.0, `JAVDB_MIN_DOWNLOAD_SCORE`).
+Before PikPak submit, `scripts/javdb_client.py` applies gates in order: **tags** → **reviews_count** → **watched_count** → **score** (default min 4.0, `JAVDB_MIN_DOWNLOAD_SCORE`).
 
-**Reviews gate** (`reviews_count` vs release date/year, Asia/Shanghai calendar):
+**Popularity gates** (`reviews_count` = rating count, `watched_count` = App「评价」/看过人数; same thresholds vs release date/year, Asia/Shanghai calendar):
 
-| Release timing | Minimum `reviews_count` |
-|----------------|---------------------------|
+| Release timing | Minimum count |
+|----------------|---------------|
 | Within 7 calendar days of release | 0 or missing (pass) |
 | 8–30 calendar days after release | ≥ 10 |
 | Current year (older than 30 days) | ≥ 100 |
 | Prior years | ≥ 1000 |
 
-Missing `release_date` fails. Missing `reviews_count` fails for releases older than 7 days. Constants: `JAVDB_ZERO_REVIEWS_DAYS`, `JAVDB_RECENT_RELEASE_DAYS`, `JAVDB_RECENT_MIN_REVIEWS`.
+Missing `release_date` fails. Missing count fails for releases older than 7 days. Constants: `JAVDB_ZERO_REVIEWS_DAYS`, `JAVDB_RECENT_RELEASE_DAYS`, `JAVDB_RECENT_MIN_REVIEWS`.
 
-Skip reasons: `javdb_no_release_date`, `javdb_no_reviews_count`, `javdb_reviews_low_{n}`.
+Skip reasons: `javdb_no_release_date`, `javdb_no_reviews_count`, `javdb_reviews_low_{n}`, `javdb_no_watched_count`, `javdb_watched_low_{n}`.
+
+Summary labels: `watched_count` → 「看过 N 人」; `reviews_count` → 「评分 N 人」; `score` → 「均分 X.XX」.
 
 ### Environment variables
 

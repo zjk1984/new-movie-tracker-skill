@@ -650,14 +650,18 @@ def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
         return f"JavDB 标签排除: {tag}"
     if reason.startswith("javdb_reviews_low_"):
         count = reason.replace("javdb_reviews_low_", "")
-        return f"JavDB 评论数不足 ({count})"
+        return f"JavDB 评分人数不足 ({count})"
+    if reason.startswith("javdb_watched_low_"):
+        count = reason.replace("javdb_watched_low_", "")
+        return f"JavDB 看过人数不足 ({count})"
     labels = {
-        "javdb_no_score": "JavDB 无评分",
+        "javdb_no_score": "JavDB 无均分",
         "javdb_not_queried": "JavDB 未查询",
         "javdb_query_error": "JavDB 查询失败",
         "javdb_no_number": "无番号，未提交",
         "javdb_no_release_date": "JavDB 无发行日期",
-        "javdb_no_reviews_count": "JavDB 无评论数",
+        "javdb_no_reviews_count": "JavDB 无评分人数",
+        "javdb_no_watched_count": "JavDB 无看过人数",
         "not_eligible": "未通过提交门控",
     }
     if reason in labels:

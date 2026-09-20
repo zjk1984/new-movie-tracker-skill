@@ -24,6 +24,7 @@ from javdb_client import (  # noqa: E402
     is_zero_reviews_ok_release,
     javdb_reviews_ok,
     javdb_tags_ok,
+    javdb_watched_ok,
     needs_javdb_query,
     parse_release_date,
     parse_release_date_year,
@@ -92,6 +93,7 @@ class JavDBTagTests(unittest.TestCase):
             "content_type_label": "有码",
             "release_date": "2026-03-01",
             "reviews_count": 1500,
+            "watched_count": 800,
             "tags": ["巨乳", "人妻"],
             "tag_labels": "巨乳, 人妻",
             "maker_name": "本中",
@@ -103,6 +105,7 @@ class JavDBTagTests(unittest.TestCase):
         self.assertEqual(report["tag_labels"], "巨乳, 人妻")
         self.assertEqual(report["release_date"], "2026-03-01")
         self.assertEqual(report["reviews_count"], 1500)
+        self.assertEqual(report["watched_count"], 800)
         self.assertEqual(report["maker_name"], "本中")
         self.assertEqual(report["series_name"], "人妻系列")
 
@@ -198,6 +201,7 @@ class JavDBTagTests(unittest.TestCase):
                 "tags": ["巨乳"],
                 "release_date": "2026-01-01",
                 "reviews_count": 200,
+                "watched_count": 200,
                 "score": 4.5,
             },
         }
@@ -245,20 +249,24 @@ class JavDBReviewsGateTests(unittest.TestCase):
         *,
         release_date: str,
         reviews_count: int | None,
+        watched_count: int | None = None,
         score: float = 4.5,
         av_number: str = "HMN-900",
     ):
+        q: dict = {
+            "query_status": "ok",
+            "number": av_number,
+            "tags": ["巨乳"],
+            "release_date": release_date,
+            "reviews_count": reviews_count,
+            "score": score,
+        }
+        if watched_count is not None:
+            q["watched_count"] = watched_count
         return {
             "content_region": "jav_censored",
             "av_number": av_number,
-            "javdb_query": {
-                "query_status": "ok",
-                "number": av_number,
-                "tags": ["巨乳"],
-                "release_date": release_date,
-                "reviews_count": reviews_count,
-                "score": score,
-            },
+            "javdb_query": q,
         }
 
     def test_javdb_reviews_ok_prior_year_needs_1000(self):
@@ -268,7 +276,11 @@ class JavDBReviewsGateTests(unittest.TestCase):
                 item = self._item(release_date=f"{y - 1}-06-01", reviews_count=999)
                 self.assertFalse(javdb_reviews_ok(item))
             with self.subTest("at threshold"):
-                item = self._item(release_date=f"{y - 1}-06-01", reviews_count=1000)
+                item = self._item(
+                    release_date=f"{y - 1}-06-01",
+                    reviews_count=1000,
+                    watched_count=1000,
+                )
                 self.assertTrue(javdb_reviews_ok(item))
 
     def test_javdb_reviews_ok_current_year_needs_100(self):
@@ -278,7 +290,11 @@ class JavDBReviewsGateTests(unittest.TestCase):
                 item = self._item(release_date=f"{y}-03-01", reviews_count=99)
                 self.assertFalse(javdb_reviews_ok(item))
             with self.subTest("at threshold"):
-                item = self._item(release_date=f"{y}-03-01", reviews_count=100)
+                item = self._item(
+                    release_date=f"{y}-03-01",
+                    reviews_count=100,
+                    watched_count=100,
+                )
                 self.assertTrue(javdb_reviews_ok(item))
 
     def test_javdb_reviews_ok_year_boundary_dec31_vs_jan1(self):
@@ -286,7 +302,11 @@ class JavDBReviewsGateTests(unittest.TestCase):
         with patch("javdb_client.current_beijing_year", return_value=y):
             dec31 = self._item(release_date=f"{y - 1}-12-31", reviews_count=500)
             self.assertFalse(javdb_reviews_ok(dec31))
-            jan1 = self._item(release_date=f"{y}-01-01", reviews_count=500)
+            jan1 = self._item(
+                release_date=f"{y}-01-01",
+                reviews_count=500,
+                watched_count=500,
+            )
             self.assertTrue(javdb_reviews_ok(jan1))
 
     def test_javdb_reviews_ok_missing_fields(self):
@@ -327,8 +347,24 @@ class JavDBReviewsGateTests(unittest.TestCase):
             item = self._item(
                 release_date=f"{self.MOCK_YEAR - 1}-01-01",
                 reviews_count=1200,
+                watched_count=1200,
             )
             self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
+
+    def test_flva_054_watched_gate_fails_despite_high_reviews_count(self):
+        """FLVA-054: App 评价 318 (watched_count) vs 1784 评分人数 (reviews_count)."""
+        with patch("javdb_client.current_beijing_year", return_value=2026):
+            item = self._item(
+                release_date="2024-06-05",
+                reviews_count=1784,
+                watched_count=318,
+                score=4.26,
+                av_number="FLVA-054",
+            )
+            self.assertTrue(javdb_reviews_ok(item))
+            self.assertFalse(javdb_watched_ok(item))
+            self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
+            self.assertEqual(item["skip_reason"], "javdb_watched_low_318")
 
     def test_is_recent_release_within_thirty_days(self):
         from datetime import datetime
@@ -384,6 +420,7 @@ class JavDBReviewsGateTests(unittest.TestCase):
                     item = self._item(
                         release_date=release_15_days_ago,
                         reviews_count=JAVDB_RECENT_MIN_REVIEWS,
+                        watched_count=JAVDB_RECENT_MIN_REVIEWS,
                     )
                     self.assertTrue(javdb_reviews_ok(item))
                 with self.subTest("15 days ago zero reviews fails"):
@@ -409,7 +446,11 @@ class JavDBReviewsGateTests(unittest.TestCase):
             with patch("javdb_client.current_beijing_year", return_value=2026):
                 item = self._item(release_date=release_35_days_ago, reviews_count=10)
                 self.assertFalse(javdb_reviews_ok(item))
-                item = self._item(release_date=release_35_days_ago, reviews_count=100)
+                item = self._item(
+                    release_date=release_35_days_ago,
+                    reviews_count=100,
+                    watched_count=100,
+                )
                 self.assertTrue(javdb_reviews_ok(item))
 
     def test_javdb_reviews_ok_current_year_old_release_still_needs_100(self):
@@ -421,8 +462,35 @@ class JavDBReviewsGateTests(unittest.TestCase):
             with patch("javdb_client.current_beijing_year", return_value=2026):
                 item = self._item(release_date="2026-03-01", reviews_count=99)
                 self.assertFalse(javdb_reviews_ok(item))
-                item = self._item(release_date="2026-03-01", reviews_count=100)
+                item = self._item(
+                    release_date="2026-03-01",
+                    reviews_count=100,
+                    watched_count=100,
+                )
                 self.assertTrue(javdb_reviews_ok(item))
+
+    def test_javdb_watched_ok_mirrors_reviews_thresholds(self):
+        y = self.MOCK_YEAR
+        with patch("javdb_client.current_beijing_year", return_value=y):
+            item = self._item(
+                release_date=f"{y - 1}-06-01",
+                reviews_count=5000,
+                watched_count=999,
+            )
+            self.assertTrue(javdb_reviews_ok(item))
+            self.assertFalse(javdb_watched_ok(item))
+
+    def test_ensure_javdb_score_gate_skips_low_watched(self):
+        with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):
+            item = self._item(
+                release_date=f"{self.MOCK_YEAR - 1}-01-01",
+                reviews_count=1200,
+                watched_count=50,
+            )
+            item["selected_magnet"] = "magnet:?xt=urn:btih:abc"
+            self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
+            self.assertEqual(item["skip_reason"], "javdb_watched_low_50")
+            self.assertNotIn("selected_magnet", item)
 
 
 if __name__ == "__main__":

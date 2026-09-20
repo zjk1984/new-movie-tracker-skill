@@ -315,6 +315,7 @@ class UndownloadedPostsTests(unittest.TestCase):
                     "score": 4.5,
                     "release_date": "2026-01-01",
                     "reviews_count": 1500,
+                    "watched_count": 1500,
                     "title": "最高にエロい隣人",
                 },
             },
@@ -512,7 +513,11 @@ class FilterReasonLabelTests(unittest.TestCase):
 
     def test_skip_reason_javdb_reviews_low(self):
         item = {"skip_reason": "javdb_reviews_low_50"}
-        self.assertEqual(_skip_reason_label(item), "JavDB 评论数不足 (50)")
+        self.assertEqual(_skip_reason_label(item), "JavDB 评分人数不足 (50)")
+
+    def test_skip_reason_javdb_watched_low(self):
+        item = {"skip_reason": "javdb_watched_low_318"}
+        self.assertEqual(_skip_reason_label(item), "JavDB 看过人数不足 (318)")
 
     def test_skip_reason_javdb_score_low(self):
         item = {"skip_reason": "javdb_score_low_3.50"}
@@ -698,6 +703,7 @@ class BatchSplitByNumberTests(unittest.TestCase):
                 "score": score,
                 "release_date": "2026-09-15",
                 "reviews_count": 1200,
+                "watched_count": 1200,
             }
             if score is not None and score < 4:
                 item["skip_reason"] = f"javdb_score_low_{score:.2f}"
