@@ -65,15 +65,16 @@ def pick_forum_magnet(magnets: list[str], *, prefer_cnsub: bool) -> str | None:
     return magnets[0]
 
 
-def lookup_javdb_cnsub(javdb_client, number: str) -> dict[str, Any] | None:
+def pick_forum_cnsub_magnet(magnets: list[str]) -> str | None:
+    """Return the first forum magnet tagged as Chinese-subtitled, if any."""
+    return pick_forum_magnet(magnets, prefer_cnsub=True) if magnets else None
+
+
+def _javdb_hit_payload(info: dict[str, Any], magnet: str) -> dict[str, Any]:
     from javdb_client import build_query_report
 
-    info = javdb_client.lookup(number, fetch_magnets=True, cnsub=True, best_only=True)
-    magnets = info.get("magnets") or []
-    if not magnets:
-        return None
     return {
-        "magnet": magnets[0],
+        "magnet": magnet,
         "javdb": {
             "id": info.get("javdb_id"),
             "number": info.get("number"),
@@ -88,6 +89,77 @@ def lookup_javdb_cnsub(javdb_client, number: str) -> dict[str, Any] | None:
         },
         "javdb_query": build_query_report(info),
     }
+
+
+def lookup_javdb_magnet(
+    javdb_client,
+    number: str,
+    *,
+    cnsub: bool = False,
+) -> dict[str, Any] | None:
+    """Fetch best JavDB magnet for *number*; optionally filter to cnsub rows."""
+    info = javdb_client.lookup(
+        number,
+        fetch_magnets=True,
+        cnsub=cnsub,
+        best_only=True,
+    )
+    magnets = info.get("magnets") or []
+    if not magnets:
+        return None
+    return _javdb_hit_payload(info, magnets[0])
+
+
+def lookup_javdb_cnsub(javdb_client, number: str) -> dict[str, Any] | None:
+    return lookup_javdb_magnet(javdb_client, number, cnsub=True)
+
+
+def _apply_javdb_hit_metadata(item: dict[str, Any], javdb_hit: dict[str, Any]) -> None:
+    item["javdb"] = javdb_hit.get("javdb")
+    if javdb_hit.get("javdb_query"):
+        item["javdb_query"] = javdb_hit["javdb_query"]
+    release_date = (javdb_hit.get("javdb") or {}).get("release_date")
+    if release_date:
+        item["release_date"] = release_date
+
+
+def _prefer_cnsub_magnet(existing: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    """When two forum payloads share a number, keep the cnsub magnet."""
+    old_mag = existing.get("magnet") or ""
+    new_mag = candidate.get("magnet") or ""
+    if magnet_has_cnsub(new_mag) and not magnet_has_cnsub(old_mag):
+        return candidate
+    return existing
+
+
+def _upgrade_number_downloads_with_javdb_cnsub(
+    paired: list[dict[str, Any]],
+    javdb_client,
+) -> list[dict[str, Any]]:
+    """Per-number: JavDB cnsub replaces forum non-cnsub when post has no cnsub."""
+    upgraded: list[dict[str, Any]] = []
+    for entry in paired:
+        row = dict(entry)
+        magnet = row.get("magnet") or ""
+        number = row.get("av_number")
+        if magnet and magnet_has_cnsub(magnet):
+            upgraded.append(row)
+            continue
+        if not number:
+            upgraded.append(row)
+            continue
+        try:
+            javdb_hit = lookup_javdb_cnsub(javdb_client, number)
+        except Exception:
+            upgraded.append(row)
+            continue
+        if not javdb_hit:
+            upgraded.append(row)
+            continue
+        row["magnet"] = javdb_hit["magnet"]
+        row["source"] = "javdb_cnsub"
+        upgraded.append(row)
+    return upgraded
 
 
 def select_alternative_from_post(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -125,41 +197,46 @@ def select_alternative_from_post(item: dict[str, Any]) -> dict[str, Any] | None:
 
 def select_magnet(item: dict[str, Any], javdb_client=None) -> dict[str, Any] | None:
     """
-    Download selection policy:
-    - Post has magnets: cnsub forum magnet -> JavDB cnsub -> any forum magnet
-    - Post has NO magnets: collect PikPak SHA / ed2k / hash from post -> JavDB cnsub
+    Download selection policy (cnsub-first):
+    1. Forum cnsub magnet (dn/title hints, not only post title)
+    2. JavDB cnsub magnet when the post has no cnsub link
+    3. Forum non-cnsub magnet
+    4. JavDB non-cnsub magnet (lowest)
     """
     from javdb_client import extract_av_number
 
-    title = item.get("title", "")
     forum_magnets = list(item.get("magnets") or [])
-    number = item.get("av_number") or extract_av_number(title)
+    number = item.get("av_number") or extract_av_number(item.get("title", ""))
     if number:
         item["av_number"] = number
 
+    def _javdb_pick(*, cnsub: bool) -> dict[str, Any] | None:
+        if not javdb_client or not number:
+            return None
+        try:
+            return lookup_javdb_magnet(javdb_client, number, cnsub=cnsub)
+        except Exception as exc:
+            item["javdb_error"] = str(exc)
+            return None
+
     if forum_magnets:
-        if title_has_cnsub(title):
+        forum_cnsub = pick_forum_cnsub_magnet(forum_magnets)
+        if forum_cnsub and magnet_has_cnsub(forum_cnsub):
             return {
-                "magnet": pick_forum_magnet(forum_magnets, prefer_cnsub=True),
+                "magnet": forum_cnsub,
                 "source": "forum_cnsub",
                 "av_number": number,
             }
-        if javdb_client and number:
-            try:
-                javdb_hit = lookup_javdb_cnsub(javdb_client, number)
-                if javdb_hit:
-                    item["javdb"] = javdb_hit.get("javdb")
-                    if javdb_hit.get("javdb_query"):
-                        item["javdb_query"] = javdb_hit["javdb_query"]
-                    if javdb_hit["javdb"].get("release_date"):
-                        item["release_date"] = javdb_hit["javdb"]["release_date"]
-                    return {
-                        "magnet": javdb_hit["magnet"],
-                        "source": "javdb_cnsub",
-                        "av_number": number,
-                    }
-            except Exception as exc:
-                item["javdb_error"] = str(exc)
+
+        javdb_hit = _javdb_pick(cnsub=True)
+        if javdb_hit:
+            _apply_javdb_hit_metadata(item, javdb_hit)
+            return {
+                "magnet": javdb_hit["magnet"],
+                "source": "javdb_cnsub",
+                "av_number": number,
+            }
+
         return {
             "magnet": forum_magnets[0],
             "source": "forum_fallback",
@@ -172,22 +249,23 @@ def select_magnet(item: dict[str, Any], javdb_client=None) -> dict[str, Any] | N
         alt["av_number"] = number
         return alt
 
-    if javdb_client and number:
-        try:
-            javdb_hit = lookup_javdb_cnsub(javdb_client, number)
-            if javdb_hit:
-                item["javdb"] = javdb_hit.get("javdb")
-                if javdb_hit.get("javdb_query"):
-                    item["javdb_query"] = javdb_hit["javdb_query"]
-                if javdb_hit["javdb"].get("release_date"):
-                    item["release_date"] = javdb_hit["javdb"]["release_date"]
-                return {
-                    "magnet": javdb_hit["magnet"],
-                    "source": "javdb_cnsub",
-                    "av_number": number,
-                }
-        except Exception as exc:
-            item["javdb_error"] = str(exc)
+    javdb_hit = _javdb_pick(cnsub=True)
+    if javdb_hit:
+        _apply_javdb_hit_metadata(item, javdb_hit)
+        return {
+            "magnet": javdb_hit["magnet"],
+            "source": "javdb_cnsub",
+            "av_number": number,
+        }
+
+    javdb_hit = _javdb_pick(cnsub=False)
+    if javdb_hit:
+        _apply_javdb_hit_metadata(item, javdb_hit)
+        return {
+            "magnet": javdb_hit["magnet"],
+            "source": "javdb_fallback",
+            "av_number": number,
+        }
 
     return None
 
@@ -212,9 +290,13 @@ def build_number_downloads(item: dict[str, Any]) -> list[dict[str, Any]]:
     by_number: dict[str, dict[str, Any]] = {}
 
     def add(num: str | None, payload: dict[str, Any]) -> None:
-        if not num or num in by_number:
+        if not num:
             return
-        by_number[num] = {"av_number": num, **payload}
+        row = {"av_number": num, **payload}
+        if num not in by_number:
+            by_number[num] = row
+            return
+        by_number[num] = _prefer_cnsub_magnet(by_number[num], row)
 
     for magnet in item.get("magnets") or []:
         add(number_from_magnet(magnet), {
@@ -295,6 +377,8 @@ def _distinct_av_numbers(paired: list[dict[str, Any]]) -> set[str]:
 def apply_selection(item: dict[str, Any], javdb_client=None) -> bool:
     paired = build_number_downloads(item)
     if paired:
+        if javdb_client:
+            paired = _upgrade_number_downloads_with_javdb_cnsub(paired, javdb_client)
         item["number_downloads"] = paired
         ok = _apply_download_dict(item, paired[0])
         if len(_distinct_av_numbers(paired)) >= 2:

@@ -413,6 +413,9 @@ def _report_probe(
         probe.pop("javdb_query", None)
         probe.pop("javdb", None)
         probe.pop("skip_reason", None)
+    elif number and probe.get("skip_reason") == "javdb_no_number":
+        # Thread-level stale reason from compilation posts without title 番号.
+        probe.pop("skip_reason", None)
     return probe
 
 
@@ -685,6 +688,9 @@ def _ensure_item_skip_reason(item: dict[str, Any]) -> None:
     region = item.get("content_region") or ""
     if region not in JAV_REGIONS:
         return
+    number = (item.get("av_number") or "").strip()
+    if number and item.get("skip_reason") == "javdb_no_number":
+        item.pop("skip_reason", None)
     if item.get("skip_reason"):
         return
     from javdb_client import is_submit_eligible, needs_javdb_query

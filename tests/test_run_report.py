@@ -630,6 +630,41 @@ def _mida783_batch_thread() -> dict:
     }
 
 
+class StaleJavdbNoNumberTests(unittest.TestCase):
+    def test_stale_javdb_no_number_cleared_when_per_link_av_number(self):
+        """MFYD-187-style compilation: thread skip_reason must not mask per-link gate."""
+        magnet = (
+            "magnet:?xt=urn:btih:AF8C0F0C1234567890ABCDEF1234567890ABCDEF"
+            "&dn=MFYD-187%20想要騙我錢的巨乳人妻"
+        )
+        matched = [
+            {
+                "href": "thread-3774691-1-1.html",
+                "title": "[亚洲无码] 【BT种子】09/19 老行家❤5部精選字幕FHD解密版❤",
+                "content_region": "jav_censored",
+                "skip_reason": "javdb_no_number",
+                "magnets": [magnet],
+            },
+        ]
+        download_report = {"succeeded": [], "failed": []}
+
+        def fake_eligible(item, *_args, **_kwargs):
+            number = (item.get("av_number") or "").upper()
+            if number == "MFYD-187":
+                item["skip_reason"] = "javdb_tag_excluded_多P"
+                return False
+            return True
+
+        with patch("title_translate.translate_title_for_item", return_value="测试"):
+            with patch("javdb_client.is_submit_eligible", side_effect=fake_eligible):
+                jav_entries, _ = _build_undownloaded_entries(matched, download_report)
+
+        self.assertEqual(len(jav_entries), 1)
+        self.assertEqual(jav_entries[0]["label"], "MFYD-187")
+        self.assertEqual(jav_entries[0]["reason"], "JavDB 标签排除: 多P")
+        self.assertNotIn("无番号", jav_entries[0]["reason"])
+
+
 class BatchSplitByNumberTests(unittest.TestCase):
     def test_undownloaded_batch_post_splits_into_five_entries(self):
         matched = [_mida783_batch_thread()]
