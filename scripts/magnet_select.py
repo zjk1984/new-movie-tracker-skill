@@ -226,11 +226,18 @@ def build_number_downloads(item: dict[str, Any]) -> list[dict[str, Any]]:
         uri = (entry.get("uri") or "").strip()
         if not uri:
             continue
-        num = extract_av_number(entry.get("name") or "") or number_from_magnet(uri)
+        num = (
+            (entry.get("av_number") or "").strip().upper()
+            or extract_av_number(entry.get("name") or "")
+            or number_from_magnet(uri)
+        )
         kind = entry.get("kind") or ""
         source = entry.get("source") or "forum_hash_entry"
+        payload: dict[str, Any] = {"magnet": uri, "source": source}
+        if entry.get("chinese_title"):
+            payload["chinese_title"] = entry["chinese_title"]
         if kind == "hash_label_btih" or uri.lower().startswith("magnet:"):
-            add(num, {"magnet": uri, "source": source})
+            add(num, payload)
         elif uri.lower().startswith("pikpak://"):
             add(num, {"pikpak_sha": uri, "source": source})
         elif uri.lower().startswith("ed2k:"):
@@ -277,11 +284,22 @@ def _apply_download_dict(item: dict[str, Any], selection: dict[str, Any]) -> boo
     return False
 
 
+def _distinct_av_numbers(paired: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(d.get("av_number")).upper()
+        for d in paired
+        if d.get("av_number")
+    }
+
+
 def apply_selection(item: dict[str, Any], javdb_client=None) -> bool:
     paired = build_number_downloads(item)
     if paired:
         item["number_downloads"] = paired
-        return _apply_download_dict(item, paired[0])
+        ok = _apply_download_dict(item, paired[0])
+        if len(_distinct_av_numbers(paired)) >= 2:
+            item.pop("av_number", None)
+        return ok
 
     selection = select_magnet(item, javdb_client)
     if not selection:
