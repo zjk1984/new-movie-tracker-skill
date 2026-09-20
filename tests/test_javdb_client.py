@@ -117,6 +117,10 @@ class JavDBTagTests(unittest.TestCase):
         self.assertEqual(find_excluded_javdb_tag(["SM", "人妻"]), "SM")
         self.assertEqual(find_excluded_javdb_tag(["第一人称摄影"]), "第一人称摄影")
         self.assertEqual(find_excluded_javdb_tag(["拘束", "巨乳"]), "拘束")
+        self.assertEqual(find_excluded_javdb_tag(["精选综合", "巨乳"]), "精选综合")
+        self.assertEqual(find_excluded_javdb_tag(["女同性恋", "人妻"]), "女同性恋")
+        self.assertEqual(find_excluded_javdb_tag(["女同接吻"]), "女同接吻")
+        self.assertEqual(find_excluded_javdb_tag(["拳交", "巨乳"]), "拳交")
         self.assertIsNone(find_excluded_javdb_tag(["巨乳", "人妻"]))
         self.assertIsNone(find_excluded_javdb_tag([]))
         self.assertIsNone(find_excluded_javdb_tag(None))
@@ -190,6 +194,24 @@ class JavDBTagTests(unittest.TestCase):
         self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
         self.assertEqual(item["skip_reason"], "javdb_tag_excluded_拘束")
         self.assertNotIn("selected_magnet", item)
+
+    def test_ensure_javdb_score_gate_skips_new_excluded_tags(self):
+        for tag in ("精选综合", "女同性恋", "女同接吻", "拳交"):
+            with self.subTest(tag=tag):
+                item = {
+                    "content_region": "jav_censored",
+                    "av_number": "HMN-900",
+                    "selected_magnet": "magnet:?xt=urn:btih:abc",
+                    "javdb_query": {
+                        "query_status": "ok",
+                        "number": "HMN-900",
+                        "tags": [tag, "巨乳"],
+                        "score": 4.8,
+                    },
+                }
+                self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
+                self.assertEqual(item["skip_reason"], f"javdb_tag_excluded_{tag}")
+                self.assertNotIn("selected_magnet", item)
 
     def test_ensure_javdb_score_gate_allows_when_no_excluded_tags(self):
         item = {
