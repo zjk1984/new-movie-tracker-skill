@@ -39,11 +39,19 @@ PIPE_CODE_RE = re.compile(
 # BT seed posts: 【特征全码】/哈希校验 → 40-char SHA1 btih (magnet)
 BT_FEATURE_LABEL_RE = re.compile(
     r"(?:【|\[)?"
-    r"(?:特征全码|特徵全码|特徵全碼|特征全码|哈希校验|校验码|文件校验|哈希值|效验码|"
+    r"(?:特征全码|特徵全码|特徵全碼|特征全码|驗證全碼|验证全码|哈希校验|校验码|文件校验|哈希值|效验码|"
     r"文件哈希|磁力哈希|btih|hash)"
     r"(?:】|\])?"
     r"[：:\s]*"
     r"([A-Fa-f0-9]{40})",
+    re.IGNORECASE,
+)
+VERIFY_FULL_CODE_BLOCK_RE = re.compile(
+    r"【(?:驗證全碼|验证全码)】[：:\s]*([A-Fa-f0-9]{40})",
+    re.IGNORECASE,
+)
+COLLECTION_CNSUB_TITLE_RE = re.compile(
+    r"【中文片名】[：:\s]*([^\n【\[]+)",
     re.IGNORECASE,
 )
 # Domestic BT posts: 【种子特码】：哈希校验; <40hex>; ;
@@ -69,7 +77,7 @@ GENERIC_FEATURE_LABEL_RE = re.compile(
     re.IGNORECASE,
 )
 NAME_BLOCK_RE = re.compile(
-    r"【(?:影片名称|中文片名|文件名称)】[：:\s]*([^\n【\[]+)",
+    r"【(?:影片名称|影片名稱|中文片名|文件名称|文件名稱)】[：:\s]*([^\n【\[]+)",
     re.IGNORECASE,
 )
 SIZE_BLOCK_RE = re.compile(
@@ -308,10 +316,44 @@ def btih_magnet(file_hash: str, name: str = "") -> str:
 
 
 def _nearest_name_before(text: str, pos: int) -> str:
-    """Best-effort title from 【影片名称】 block preceding a hash label."""
-    window = text[max(0, pos - 1200):pos]
+    """Best-effort title from 【中文片名】 / 【影片名称】 preceding a hash label."""
+    window = text[max(0, pos - 2000):pos]
+    cnsub = COLLECTION_CNSUB_TITLE_RE.findall(window)
+    if cnsub:
+        return cnsub[-1].strip()
     names = NAME_BLOCK_RE.findall(window)
     return names[-1].strip() if names else ""
+
+
+def parse_collection_body_entries(text: str) -> list[dict[str, Any]]:
+    """Parse 老行家-style blocks: 【中文片名】 + 【驗證全碼】 per film."""
+    from javdb_client import extract_av_number
+
+    plain = normalize_post_text(text)
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for match in VERIFY_FULL_CODE_BLOCK_RE.finditer(plain):
+        file_hash = match.group(1).upper()
+        if file_hash in seen:
+            continue
+        seen.add(file_hash)
+        cnsub_title = _nearest_name_before(plain, match.start())
+        number = extract_av_number(cnsub_title) if cnsub_title else None
+        name = cnsub_title or (number or "")
+        uri = btih_magnet(file_hash, name)
+        out.append({
+            "kind": "hash_label_btih",
+            "hash": file_hash,
+            "algo": "btih",
+            "name": name,
+            "av_number": number,
+            "chinese_title": cnsub_title,
+            "uri": uri,
+            "magnet": uri,
+            "label": match.group(0).strip()[:120],
+            "source": "forum_verify_full_code",
+        })
+    return out
 
 
 def extract_bt_feature_magnets(text: str) -> tuple[list[str], list[dict[str, Any]]]:
@@ -337,6 +379,8 @@ def extract_bt_feature_magnets(text: str) -> tuple[list[str], list[dict[str, Any
                 continue
             seen.add(file_hash)
             name = _nearest_name_before(plain, match.start())
+            from javdb_client import extract_av_number
+
             uri = btih_magnet(file_hash, name)
             source = (
                 "forum_bt_seed_code"
@@ -349,6 +393,7 @@ def extract_bt_feature_magnets(text: str) -> tuple[list[str], list[dict[str, Any
                 "hash": file_hash,
                 "algo": "btih",
                 "name": name,
+                "av_number": extract_av_number(name) if name else None,
                 "uri": uri,
                 "label": match.group(0).strip()[:120],
                 "source": source,
@@ -408,6 +453,16 @@ def collect_alternatives_from_text(text: str) -> dict[str, Any]:
     ed2k = extract_ed2k_links(plain)
     feature_magnets, _ = extract_bt_feature_magnets(plain)
     hash_entries = extract_hash_entries(plain)
+
+    collection_entries = parse_collection_body_entries(plain)
+    seen_hash = {entry.get("hash", "").upper() for entry in hash_entries if entry.get("hash")}
+    for entry in collection_entries:
+        file_hash = (entry.get("hash") or "").upper()
+        if not file_hash or file_hash in seen_hash:
+            continue
+        seen_hash.add(file_hash)
+        hash_entries.append(entry)
+        feature_magnets.append(entry["uri"])
 
     # Enrich hash_entries with full pipe codes found in text
     seen_uri: set[str] = set(pikpak_sha)

@@ -972,6 +972,22 @@ def needs_forum_list_retry(result: ForumListResult) -> bool:
     )
 
 
+def _thread_defers_javdb_gate(item: dict) -> bool:
+    """Compilation posts pair body 番号 to per-link downloads; gate at submit time."""
+    from javdb_client import extract_av_number
+    from magnet_select import _distinct_av_numbers, build_number_downloads
+
+    paired = item.get("number_downloads") or []
+    if not paired:
+        paired = build_number_downloads(item)
+    numbers = _distinct_av_numbers(paired)
+    if len(numbers) >= 2:
+        return True
+    if numbers and not extract_av_number(item.get("title") or ""):
+        return True
+    return False
+
+
 def apply_item_filters(item: dict, javdb_client, args) -> None:
     if not getattr(args, "region_filter", True):
         return
@@ -985,6 +1001,10 @@ def apply_item_filters(item: dict, javdb_client, args) -> None:
         from content_filter import is_downloadable as _is_dl
         from javdb_client import attach_javdb_query, ensure_javdb_score_gate
 
+        if _thread_defers_javdb_gate(item):
+            n = len(item.get("number_downloads") or [])
+            scan_log(f"[info]   javdb: deferred per-magnet gate ({n} code(s))")
+            return
         if _is_dl(item) and not item.get("javdb_query"):
             attach_javdb_query(item, javdb_client)
             q = item.get("javdb_query") or {}
