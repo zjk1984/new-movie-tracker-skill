@@ -15,15 +15,26 @@ from datetime import datetime, timezone
 
 from cnbeta_rss import (  # noqa: E402
     FeedSource,
+    FetchAllResult,
     NewsItem,
+    SourceFetchOutcome,
+    _canonical_url,
     apply_item_limits,
+    build_collapsible_interactive_card,
+    build_feishu_card_payload,
+    build_feishu_card_payloads,
     build_interactive_card,
+    chunk_items_for_collapsible_card,
+    count_collapsible_card_elements,
     build_text_message,
     build_update_markdown,
+    enrich_item_summary,
     fetch_all_feeds,
+    fetch_outcomes_to_dict,
     filter_by_lookback,
     find_latest_dedup_md,
     find_latest_update_md,
+    format_fetch_status_summary,
     group_items_by_category,
     load_feed_sources,
     load_seen_ids,
@@ -35,6 +46,7 @@ from cnbeta_rss import (  # noqa: E402
     resolve_max_items_per_category,
     save_state,
     select_new_items,
+    should_use_collapsible_card,
     write_update_markdown,
 )
 
@@ -346,9 +358,11 @@ class CnbetaRssTests(unittest.TestCase):
                         )
         self.assertNotIn(first_id, [item["item_id"] for item in result["items"]])
 
+    @patch("cnbeta_rss.beijing_now")
     @patch("cnbeta_rss.fetch_feed")
-    def test_run_second_pass_has_no_overlap_with_first(self, mock_fetch):
+    def test_run_second_pass_has_no_overlap_with_first(self, mock_fetch, mock_beijing_now):
         mock_fetch.return_value = FIXTURE.read_text(encoding="utf-8")
+        mock_beijing_now.return_value = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
         from cnbeta_rss import parse_feed, run
 
         single = [
@@ -473,7 +487,10 @@ class CnbetaRssTests(unittest.TestCase):
             summary="",
             feed_url="https://rss.cnbeta.com.tw",
         )
-        mock_fetch_all.return_value = [recent_unseen, recent_seen, old_unseen]
+        mock_fetch_all.return_value = FetchAllResult(
+            items=[recent_unseen, recent_seen, old_unseen],
+            outcomes=[],
+        )
         from cnbeta_rss import run
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -694,37 +711,43 @@ class CnbetaRssTests(unittest.TestCase):
             FeedSource(id="ok", name="OK", url="https://rss.cnbeta.com.tw", category="tech_cn"),
             FeedSource(id="bad", name="Bad", url="https://broken.example/feed", category="ai"),
         ]
-        items = fetch_all_feeds(sources)
-        self.assertGreaterEqual(len(items), 100)
+        result = fetch_all_feeds(sources)
+        self.assertGreaterEqual(len(result.items), 100)
+        self.assertEqual(len(result.outcomes), 2)
+        self.assertEqual(result.outcomes[0].status, "success")
+        self.assertEqual(result.outcomes[1].status, "failure")
 
     @patch("cnbeta_rss.fetch_all_feeds")
     def test_run_multi_source_dedupes_across_categories(self, mock_fetch_all):
         now = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
         shared_link = "https://example.com/shared"
-        mock_fetch_all.return_value = [
-            NewsItem(
-                item_id=shared_link,
-                title="Shared",
-                link=shared_link,
-                published="2026-09-18T08:00:00+00:00",
-                category="tech",
-                summary="",
-                feed_url="https://example.com/a",
-                source_category="tech_cn",
-                source_name="A",
-            ),
-            NewsItem(
-                item_id="https://example.com/unique",
-                title="Unique",
-                link="https://example.com/unique",
-                published="2026-09-18T07:00:00+00:00",
-                category="ai",
-                summary="",
-                feed_url="https://example.com/b",
-                source_category="ai",
-                source_name="B",
-            ),
-        ]
+        mock_fetch_all.return_value = FetchAllResult(
+            items=[
+                NewsItem(
+                    item_id=shared_link,
+                    title="Shared",
+                    link=shared_link,
+                    published="2026-09-18T08:00:00+00:00",
+                    category="tech",
+                    summary="",
+                    feed_url="https://example.com/a",
+                    source_category="tech_cn",
+                    source_name="A",
+                ),
+                NewsItem(
+                    item_id="https://example.com/unique",
+                    title="Unique",
+                    link="https://example.com/unique",
+                    published="2026-09-18T07:00:00+00:00",
+                    category="ai",
+                    summary="",
+                    feed_url="https://example.com/b",
+                    source_category="ai",
+                    source_name="B",
+                ),
+            ],
+            outcomes=[],
+        )
         from cnbeta_rss import run
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -775,7 +798,7 @@ class CnbetaRssTests(unittest.TestCase):
             title_zh="美联储加息",
             summary_zh="市场反应",
         )
-        mock_fetch_all.return_value = [english]
+        mock_fetch_all.return_value = FetchAllResult(items=[english], outcomes=[])
         mock_translate.return_value = [translated]
         from cnbeta_rss import run
 
@@ -801,6 +824,318 @@ class CnbetaRssTests(unittest.TestCase):
         sent_items = mock_send.call_args.args[0]
         self.assertEqual(sent_items[0].title_zh, "美联储加息")
         self.assertEqual(result["items"][0]["title_zh"], "美联储加息")
+
+    def test_canonical_url_strips_tracking_params(self):
+        raw = (
+            "https://Example.com/path/article?utm_source=twitter&fbclid=abc123"
+            "&gclid=track&keep=1"
+        )
+        canonical = _canonical_url(raw)
+        self.assertEqual(canonical, "https://example.com/path/article?keep=1")
+
+    def test_fetch_all_feeds_dedupes_same_article_different_tracking_urls(self):
+        base = "https://example.com/news/1"
+        sources = [
+            FeedSource(id="a", name="A", url="https://feed-a.example/rss", category="tech_cn"),
+            FeedSource(id="b", name="B", url="https://feed-b.example/rss", category="tech_en"),
+        ]
+        item_a = NewsItem(
+            item_id=f"{base}?utm_source=a",
+            title="Same story",
+            link=f"{base}?utm_source=a",
+            published="2026-09-18T10:00:00+00:00",
+            category="tech",
+            summary="",
+            feed_url=sources[0].url,
+            source_category="tech_cn",
+        )
+        item_b = NewsItem(
+            item_id=f"{base}?fbclid=xyz",
+            title="Same story",
+            link=f"{base}?fbclid=xyz",
+            published="2026-09-18T09:00:00+00:00",
+            category="tech",
+            summary="",
+            feed_url=sources[1].url,
+            source_category="tech_en",
+        )
+
+        def side_effect(url, **kwargs):
+            if "feed-a" in url:
+                return "<rss/>"
+            if "feed-b" in url:
+                return "<rss/>"
+            raise AssertionError(url)
+
+        with patch("cnbeta_rss.fetch_feed", side_effect=side_effect):
+            with patch("cnbeta_rss.parse_feed") as mock_parse:
+                mock_parse.side_effect = [[item_a], [item_b]]
+                result = fetch_all_feeds(sources)
+        self.assertEqual(len(result.items), 1)
+        self.assertEqual(result.items[0].published, item_a.published)
+
+    def test_select_new_items_skips_canonical_url_seen(self):
+        link = "https://example.com/article/1?utm_source=old"
+        seen = {_canonical_url(link)}
+        items = [
+            NewsItem(
+                item_id="https://example.com/article/1?fbclid=new",
+                title="Dup",
+                link="https://example.com/article/1?fbclid=new",
+                published="2026-09-18T10:00:00+00:00",
+                category="tech",
+                summary="",
+                feed_url="https://example.com/feed",
+            )
+        ]
+        fresh = select_new_items(items, seen)
+        self.assertEqual(fresh, [])
+
+    def test_format_fetch_status_summary(self):
+        outcomes = [
+            SourceFetchOutcome(
+                id="ok",
+                name="OK",
+                url="https://ok.example/rss",
+                status="success",
+                item_count=5,
+            ),
+            SourceFetchOutcome(
+                id="bad",
+                name="Bad Feed",
+                url="https://bad.example/rss",
+                status="failure",
+                item_count=0,
+                error="403",
+            ),
+            SourceFetchOutcome(
+                id="slow",
+                name="Slow Feed",
+                url="https://slow.example/rss",
+                status="timeout",
+                item_count=0,
+                error="timed out",
+            ),
+        ]
+        summary = format_fetch_status_summary(outcomes)
+        self.assertIn("2 feeds failed", summary)
+        self.assertIn("Bad Feed", summary)
+        self.assertIn("Slow Feed", summary)
+        payload = fetch_outcomes_to_dict(outcomes)
+        self.assertEqual(payload[1]["status"], "failure")
+
+    @patch("cnbeta_rss.fetch_all_feeds")
+    def test_run_includes_fetch_report_in_json(self, mock_fetch_all):
+        now = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+        item = NewsItem(
+            item_id="https://example.com/new",
+            title="New",
+            link="https://example.com/new",
+            published="2026-09-18T08:00:00+00:00",
+            category="tech",
+            summary="",
+            feed_url="https://example.com/feed",
+            source_category="tech_cn",
+        )
+        mock_fetch_all.return_value = FetchAllResult(
+            items=[item],
+            outcomes=[
+                SourceFetchOutcome(
+                    id="ok",
+                    name="OK",
+                    url="https://example.com/feed",
+                    status="success",
+                    item_count=1,
+                )
+            ],
+        )
+        from cnbeta_rss import run
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            update_dir = tmp_path / "update"
+            state_path = tmp_path / "state.json"
+            update_dir.mkdir()
+            with patch("cnbeta_rss.resolve_update_dir", return_value=update_dir):
+                with patch("cnbeta_rss.resolve_state_path", return_value=state_path):
+                    with patch("cnbeta_rss.beijing_now", return_value=now):
+                        result = run(
+                            max_items=20,
+                            max_items_per_category=5,
+                            dry_run=False,
+                            fetch_only=True,
+                            reset_state=True,
+                            use_card=True,
+                        )
+        self.assertEqual(len(result["fetch_report"]), 1)
+        self.assertEqual(result["fetch_report"][0]["status"], "success")
+        self.assertIn("成功", result["fetch_status_summary"])
+
+    @patch.dict("os.environ", {"FEISHU_COLLAPSIBLE": "1"}, clear=False)
+    def test_should_use_collapsible_card_env_toggle(self):
+        self.assertTrue(should_use_collapsible_card(1))
+
+    def test_build_feishu_card_payload_uses_collapsible_for_large_batch(self):
+        items = [
+            NewsItem(
+                item_id=f"https://example.com/{i}",
+                title=f"Title {i}",
+                link=f"https://example.com/{i}",
+                published="2026-09-18T10:00:00+00:00",
+                category="tech",
+                summary="summary",
+                feed_url="https://example.com/feed",
+                source_category="tech_cn",
+            )
+            for i in range(12)
+        ]
+        card = build_feishu_card_payload(items, feed_count=3, fetch_footer="1 feeds failed: X")
+        self.assertEqual(card.get("schema"), "2.0")
+        panel_tags = [
+            element["tag"]
+            for element in card["body"]["elements"]
+            if element.get("tag") == "collapsible_panel"
+        ]
+        self.assertEqual(len(panel_tags), 12)
+
+    def test_build_feishu_card_payload_compact_for_small_batch(self):
+        item = NewsItem(
+            item_id="https://example.com/1",
+            title="One",
+            link="https://example.com/1",
+            published="2026-09-18T10:00:00+00:00",
+            category="tech",
+            summary="summary",
+            feed_url="https://example.com/feed",
+            source_category="tech_cn",
+        )
+        card = build_feishu_card_payload([item], feed_count=1)
+        self.assertNotIn("schema", card)
+        self.assertIn("elements", card)
+
+    def test_build_collapsible_interactive_card_includes_footer(self):
+        items = [
+            NewsItem(
+                item_id=f"https://example.com/{i}",
+                title=f"Title {i}",
+                link=f"https://example.com/{i}",
+                published="2026-09-18T10:00:00+00:00",
+                category="tech",
+                summary="summary",
+                feed_url="https://example.com/feed",
+                source_category="tech_cn",
+            )
+            for i in range(2)
+        ]
+        card = build_collapsible_interactive_card(
+            items,
+            feed_count=1,
+            fetch_footer="2 feeds failed: Bad",
+        )
+        overview = card["body"]["elements"][0]["content"]
+        self.assertIn("2 feeds failed: Bad", overview)
+
+    def _sample_news_items(self, count: int, *, categories: list[str] | None = None) -> list[NewsItem]:
+        categories = categories or ["tech_cn"]
+        return [
+            NewsItem(
+                item_id=f"https://example.com/{i}",
+                title=f"Title {i}",
+                link=f"https://example.com/{i}",
+                published="2026-09-18T10:00:00+00:00",
+                category="tech",
+                summary="summary",
+                feed_url="https://example.com/feed",
+                source_category=categories[i % len(categories)],
+            )
+            for i in range(count)
+        ]
+
+    def test_count_collapsible_card_elements_matches_layout(self):
+        items = self._sample_news_items(3, categories=["tech_cn", "ai"])
+        self.assertEqual(count_collapsible_card_elements(items), 1 + 2 + 3)
+
+    def test_chunk_items_for_collapsible_card_splits_large_batch(self):
+        categories = [
+            "finance_cn",
+            "insights",
+            "politics_econ_intl",
+            "tech_cn",
+            "finance_intl",
+            "tech_en",
+            "politics_econ_cn",
+            "ai",
+        ]
+        items = self._sample_news_items(50, categories=categories)
+        self.assertEqual(count_collapsible_card_elements(items), 59)
+
+        chunks = chunk_items_for_collapsible_card(items, max_elements=45)
+        self.assertGreater(len(chunks), 1)
+        self.assertEqual(sum(len(chunk) for chunk in chunks), 50)
+        for chunk in chunks:
+            self.assertLessEqual(count_collapsible_card_elements(chunk), 45)
+
+    def test_build_feishu_card_payloads_chunks_50_items_under_element_limit(self):
+        categories = [
+            "finance_cn",
+            "insights",
+            "politics_econ_intl",
+            "tech_cn",
+            "finance_intl",
+            "tech_en",
+            "politics_econ_cn",
+            "ai",
+        ]
+        items = self._sample_news_items(50, categories=categories)
+        cards = build_feishu_card_payloads(
+            items,
+            feed_count=44,
+            fetch_footer="采集: 44 成功, 1 空, 0 失败",
+        )
+        self.assertGreater(len(cards), 1)
+        for card in cards:
+            self.assertEqual(card.get("schema"), "2.0")
+            self.assertLessEqual(len(card["body"]["elements"]), 45)
+        footer_cards = [
+            card
+            for card in cards
+            if "采集: 44 成功, 1 空, 0 失败" in card["body"]["elements"][0]["content"]
+        ]
+        self.assertEqual(len(footer_cards), 1)
+        self.assertIn("(2/", cards[-1]["header"]["title"]["content"])
+
+    @patch("cnbeta_rss._fetch_page_excerpt")
+    def test_enrich_item_summary_fallback_when_fetch_fails(self, mock_excerpt):
+        mock_excerpt.return_value = ""
+        item = NewsItem(
+            item_id="https://example.com/en",
+            title="Short",
+            link="https://example.com/en",
+            published="2026-09-18T10:00:00+00:00",
+            category="tech",
+            summary="tiny",
+            feed_url="https://example.com/feed",
+            source_category="tech_en",
+        )
+        enriched = enrich_item_summary(item)
+        self.assertEqual(enriched.summary, "tiny")
+
+    @patch("cnbeta_rss._fetch_page_excerpt")
+    def test_enrich_item_summary_replaces_short_summary(self, mock_excerpt):
+        mock_excerpt.return_value = "Full article body text " * 20
+        item = NewsItem(
+            item_id="https://example.com/en",
+            title="Short",
+            link="https://example.com/en",
+            published="2026-09-18T10:00:00+00:00",
+            category="tech",
+            summary="tiny",
+            feed_url="https://example.com/feed",
+            source_category="tech_en",
+        )
+        enriched = enrich_item_summary(item)
+        self.assertGreater(len(enriched.summary), 80)
+        self.assertIn("Full article body", enriched.summary)
 
 
 if __name__ == "__main__":
