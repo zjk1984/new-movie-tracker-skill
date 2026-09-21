@@ -28,7 +28,14 @@ TRANSLATE_ENABLED = _translate_flag.strip().lower() not in {
     "off",
 }
 CHINESE_THRESHOLD = float(os.environ.get("RSS_TRANSLATE_CHINESE_THRESHOLD", "0.35"))
-BATCH_SIZE = max(1, int(os.environ.get("RSS_TRANSLATE_BATCH_SIZE", "10")))
+BATCH_SIZE = max(1, int(os.environ.get("RSS_TRANSLATE_BATCH_SIZE", "8")))
+MIN_REQUEST_INTERVAL = float(os.environ.get("RSS_TRANSLATE_MIN_INTERVAL", "0.5"))
+BATCH_COOLDOWN = float(os.environ.get("RSS_TRANSLATE_BATCH_COOLDOWN", "2.0"))
+BACKOFF_DELAYS = tuple(
+    float(part.strip())
+    for part in os.environ.get("RSS_TRANSLATE_BACKOFF", "0,2,5,10").split(",")
+    if part.strip()
+) or (0.0, 2.0, 5.0, 10.0)
 
 CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
 HIRAGANA_KATAKANA_RE = re.compile(r"[\u3040-\u309f\u30a0-\u30ff]")
@@ -77,10 +84,11 @@ def _save_disk_cache() -> None:
     )
 
 
-def _rate_limit_pause(min_interval: float = 0.35) -> None:
+def _rate_limit_pause(min_interval: float | None = None) -> None:
     global _last_request_at
+    interval = MIN_REQUEST_INTERVAL if min_interval is None else min_interval
     now = time.time()
-    wait = min_interval - (now - _last_request_at)
+    wait = interval - (now - _last_request_at)
     if wait > 0:
         time.sleep(wait)
     _last_request_at = time.time()
@@ -105,7 +113,7 @@ def _translate_with_mymemory(text: str) -> str:
 def _translate_with_google(text: str) -> str:
     from deep_translator import GoogleTranslator
 
-    _rate_limit_pause(0.5)
+    _rate_limit_pause(max(MIN_REQUEST_INTERVAL, 0.5))
     return GoogleTranslator(source="auto", target="zh-CN").translate(text[:5000])
 
 
@@ -115,9 +123,8 @@ def _is_rate_limit_error(exc: Exception) -> bool:
 
 
 def _translate_with_backoff(text: str, *, provider: str) -> str:
-    delays = (0.0, 1.0, 2.5)
     last_exc: Exception | None = None
-    for attempt, delay in enumerate(delays):
+    for attempt, delay in enumerate(BACKOFF_DELAYS):
         if delay:
             time.sleep(delay)
         try:
@@ -126,11 +133,20 @@ def _translate_with_backoff(text: str, *, provider: str) -> str:
             return _translate_with_google(text)
         except Exception as exc:
             last_exc = exc
-            if not _is_rate_limit_error(exc) or attempt == len(delays) - 1:
+            if not _is_rate_limit_error(exc) or attempt == len(BACKOFF_DELAYS) - 1:
                 raise
     if last_exc:
         raise last_exc
     return ""
+
+
+def _is_valid_zh_translation(source: str, translated: str) -> bool:
+    translated = (translated or "").strip()
+    if not translated:
+        return False
+    if translated == source:
+        return False
+    return is_primarily_chinese(translated)
 
 
 def translate_to_zh(text: str) -> str:
@@ -196,8 +212,12 @@ def translate_batch(texts: list[str]) -> list[str]:
 
     translated_by_text: dict[str, str] = {}
     for start in range(0, len(unique_texts), BATCH_SIZE):
-        for source in unique_texts[start : start + BATCH_SIZE]:
+        batch = unique_texts[start : start + BATCH_SIZE]
+        for source in batch:
             translated_by_text[source] = translate_to_zh(source)
+        next_start = start + BATCH_SIZE
+        if next_start < len(unique_texts) and BATCH_COOLDOWN > 0:
+            time.sleep(BATCH_COOLDOWN)
 
     for source, indices in index_map.items():
         target = translated_by_text.get(source, "")
@@ -245,13 +265,12 @@ def apply_translations_to_items(items: list[Any]) -> list[Any]:
     titles = [getattr(item, "title", "") for item in items]
     summaries = [getattr(item, "summary", "") for item in items]
 
-    title_jobs: list[tuple[int, str]] = []
-    summary_jobs: list[tuple[int, str]] = []
+    jobs: list[tuple[int, str, str]] = []
     for index, (title, summary) in enumerate(zip(titles, summaries)):
         if title and not is_primarily_chinese(title):
-            title_jobs.append((index, title))
+            jobs.append((index, "title", title))
         if summary and not is_primarily_chinese(summary):
-            summary_jobs.append((index, summary))
+            jobs.append((index, "summary", summary))
 
     title_results = [""] * len(items)
     summary_results = [""] * len(items)
@@ -262,21 +281,17 @@ def apply_translations_to_items(items: list[Any]) -> list[Any]:
         if is_primarily_chinese(summary):
             summary_results[index] = summary
 
-    if title_jobs:
-        translated = translate_batch([text for _, text in title_jobs])
-        for (index, _source), zh in zip(title_jobs, translated):
-            title_results[index] = zh or titles[index]
-
-    if summary_jobs:
-        translated = translate_batch([text for _, text in summary_jobs])
-        for (index, _source), zh in zip(summary_jobs, translated):
-            summary_results[index] = zh or summaries[index]
+    if jobs:
+        translated = translate_batch([text for _, _field, text in jobs])
+        for (index, field, source), zh in zip(jobs, translated):
+            if not _is_valid_zh_translation(source, zh):
+                continue
+            if field == "title":
+                title_results[index] = zh
+            else:
+                summary_results[index] = zh
 
     for index, item in enumerate(items):
-        object.__setattr__(item, "title_zh", title_results[index] or titles[index])
-        object.__setattr__(
-            item,
-            "summary_zh",
-            summary_results[index] or summaries[index],
-        )
+        object.__setattr__(item, "title_zh", title_results[index])
+        object.__setattr__(item, "summary_zh", summary_results[index])
     return items
