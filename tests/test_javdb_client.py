@@ -29,6 +29,7 @@ from javdb_client import (  # noqa: E402
     parse_release_date,
     parse_release_date_year,
     reviews_threshold_for_year,
+    watched_threshold_for_year,
 )
 
 
@@ -266,6 +267,12 @@ class JavDBReviewsGateTests(unittest.TestCase):
         self.assertEqual(reviews_threshold_for_year(y, current_year=y), 100)
         self.assertEqual(reviews_threshold_for_year(y + 1, current_year=y), 100)
 
+    def test_watched_threshold_for_year(self):
+        y = self.MOCK_YEAR
+        self.assertEqual(watched_threshold_for_year(y - 1, current_year=y), 500)
+        self.assertEqual(watched_threshold_for_year(y, current_year=y), 100)
+        self.assertEqual(watched_threshold_for_year(y + 1, current_year=y), 100)
+
     def _item(
         self,
         *,
@@ -491,16 +498,25 @@ class JavDBReviewsGateTests(unittest.TestCase):
                 )
                 self.assertTrue(javdb_reviews_ok(item))
 
-    def test_javdb_watched_ok_mirrors_reviews_thresholds(self):
+    def test_javdb_watched_ok_prior_year_needs_500(self):
         y = self.MOCK_YEAR
         with patch("javdb_client.current_beijing_year", return_value=y):
-            item = self._item(
-                release_date=f"{y - 1}-06-01",
-                reviews_count=5000,
-                watched_count=999,
-            )
-            self.assertTrue(javdb_reviews_ok(item))
-            self.assertFalse(javdb_watched_ok(item))
+            with self.subTest("below threshold"):
+                item = self._item(
+                    release_date=f"{y - 1}-06-01",
+                    reviews_count=5000,
+                    watched_count=499,
+                )
+                self.assertTrue(javdb_reviews_ok(item))
+                self.assertFalse(javdb_watched_ok(item))
+            with self.subTest("at threshold"):
+                item = self._item(
+                    release_date=f"{y - 1}-06-01",
+                    reviews_count=5000,
+                    watched_count=500,
+                )
+                self.assertTrue(javdb_reviews_ok(item))
+                self.assertTrue(javdb_watched_ok(item))
 
     def test_ensure_javdb_score_gate_skips_low_watched(self):
         with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):

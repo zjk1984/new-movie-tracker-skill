@@ -261,6 +261,19 @@ def reviews_threshold_for_year(
     return 100
 
 
+def watched_threshold_for_year(
+    release_year: int,
+    *,
+    current_year: int | None = None,
+) -> int:
+    """Minimum watched_count required for a release year (Asia/Shanghai calendar)."""
+    if current_year is None:
+        current_year = current_beijing_year()
+    if release_year < current_year:
+        return 500
+    return 100
+
+
 def format_cnsub_label(info: dict[str, Any]) -> str:
     """Human-readable Chinese-subtitle status from JavDB metadata + magnets."""
     if info.get("query_status") == "error":
@@ -913,7 +926,10 @@ def _javdb_popularity_count_ok(item: dict[str, Any], count_field: str) -> bool |
     if release_year is None:
         return False
 
-    threshold = reviews_threshold_for_year(release_year)
+    if count_field == "watched_count":
+        threshold = watched_threshold_for_year(release_year)
+    else:
+        threshold = reviews_threshold_for_year(release_year)
     return count >= threshold
 
 

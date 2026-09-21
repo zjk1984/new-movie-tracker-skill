@@ -239,7 +239,7 @@ When the user wants **Chinese-subtitled magnets** from forum posts and automatic
 5. No-magnet fallback order: PikPak SHA → ed2k → JavDB cnsub (when `--cnsub-priority`)
 6. Submit `selected_download` (magnet / ed2k / feature code) to PikPak **My Pack** (有码 + 无码 JAV only)
 
-**JavDB download gates (日本有码/无码):** tags → `reviews_count`（评分人数）→ `watched_count`（App「评价」/看过人数）→ score (≥ 4.0). Both popularity gates share the same threshold (Asia/Shanghai, 北京时间): within **7 calendar days** of release, count may be **0 or missing** (pass); **8–30 days** requires ≥ **10**; older current-year releases ≥ 100; prior years ≥ 1000. Missing `release_date` fails.
+**JavDB download gates (日本有码/无码):** tags → `reviews_count`（评分人数）→ `watched_count`（App「评价」/看过人数）→ score (≥ 4.0). Popularity thresholds (Asia/Shanghai, 北京时间): within **7 calendar days** of release, count may be **0 or missing** (pass); **8–30 days** requires ≥ **10**; older current-year releases ≥ 100. Prior years: `reviews_count` ≥ **1000**, `watched_count` ≥ **500**. Missing `release_date` fails.
 
 **Save PikPak token once (persisted in skill directory):**
 ```bash

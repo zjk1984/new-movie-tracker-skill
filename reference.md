@@ -207,14 +207,14 @@ Disable with `--no-javdb-query`.
 
 Before PikPak submit, `scripts/javdb_client.py` applies gates in order: **tags** → **reviews_count** → **watched_count** → **score** (default min 4.0, `JAVDB_MIN_DOWNLOAD_SCORE`).
 
-**Popularity gates** (`reviews_count` = rating count, `watched_count` = App「评价」/看过人数; same thresholds vs release date/year, Asia/Shanghai calendar):
+**Popularity gates** (`reviews_count` = rating count, `watched_count` = App「评价」/看过人数; Asia/Shanghai calendar):
 
-| Release timing | Minimum count |
-|----------------|---------------|
-| Within 7 calendar days of release | 0 or missing (pass) |
-| 8–30 calendar days after release | ≥ 10 |
-| Current year (older than 30 days) | ≥ 100 |
-| Prior years | ≥ 1000 |
+| Release timing | `reviews_count` | `watched_count` |
+|----------------|-----------------|-----------------|
+| Within 7 calendar days of release | 0 or missing (pass) | 0 or missing (pass) |
+| 8–30 calendar days after release | ≥ 10 | ≥ 10 |
+| Current year (older than 30 days) | ≥ 100 | ≥ 100 |
+| Prior years | ≥ 1000 | ≥ 500 |
 
 Missing `release_date` fails. Missing count fails for releases older than 7 days. Constants: `JAVDB_ZERO_REVIEWS_DAYS`, `JAVDB_RECENT_RELEASE_DAYS`, `JAVDB_RECENT_MIN_REVIEWS`.
 
