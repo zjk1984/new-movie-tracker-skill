@@ -109,6 +109,30 @@ def _translate_with_google(text: str) -> str:
     return GoogleTranslator(source="auto", target="zh-CN").translate(text[:5000])
 
 
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "toomanyrequests" in message or "429" in message
+
+
+def _translate_with_backoff(text: str, *, provider: str) -> str:
+    delays = (0.0, 1.0, 2.5)
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate(delays):
+        if delay:
+            time.sleep(delay)
+        try:
+            if provider == "mymemory":
+                return _translate_with_mymemory(text)
+            return _translate_with_google(text)
+        except Exception as exc:
+            last_exc = exc
+            if not _is_rate_limit_error(exc) or attempt == len(delays) - 1:
+                raise
+    if last_exc:
+        raise last_exc
+    return ""
+
+
 def translate_to_zh(text: str) -> str:
     """Translate non-Chinese text to Simplified Chinese (same client stack as title_translate)."""
     text = (text or "").strip()
@@ -121,10 +145,10 @@ def translate_to_zh(text: str) -> str:
     if cached:
         return cached
     try:
-        zh = _translate_with_mymemory(text)
+        zh = _translate_with_backoff(text, provider="mymemory")
     except Exception:
         try:
-            zh = _translate_with_google(text)
+            zh = _translate_with_backoff(text, provider="google")
         except Exception:
             return ""
     zh = (zh or "").strip()

@@ -32,6 +32,7 @@ DEFAULT_MAX_ITEMS = 50
 DEFAULT_MAX_ITEMS_PER_CATEGORY = 7
 DEFAULT_LOOKBACK_DAYS = 2
 DEFAULT_COLLAPSIBLE_THRESHOLD = 10
+DEFAULT_COLLAPSIBLE_MAX_ELEMENTS = 45
 DEFAULT_ENRICH_TIMEOUT = 8
 DEFAULT_ENRICH_MIN_SUMMARY = 80
 DEFAULT_LOG_PATH = SKILL_DIR / "data" / "cnbeta_rss.log"
@@ -1012,6 +1013,54 @@ def should_use_collapsible_card(item_count: int) -> bool:
     return item_count >= resolve_feishu_collapsible_threshold()
 
 
+def resolve_feishu_collapsible_max_elements() -> int:
+    raw = _env("FEISHU_COLLAPSIBLE_MAX_ELEMENTS")
+    if not raw:
+        return DEFAULT_COLLAPSIBLE_MAX_ELEMENTS
+    try:
+        return max(5, int(raw))
+    except ValueError:
+        return DEFAULT_COLLAPSIBLE_MAX_ELEMENTS
+
+
+def count_collapsible_card_elements(items: list[NewsItem]) -> int:
+    """Count top-level body elements for a collapsible Card 2.0 layout."""
+    count = 1  # overview markdown
+    for _, group in group_items_by_category(items):
+        count += 1 + len(group)  # category header + one panel per item
+    return count
+
+
+def chunk_items_for_collapsible_card(
+    items: list[NewsItem],
+    *,
+    max_elements: int | None = None,
+) -> list[list[NewsItem]]:
+    """Split items into multiple collapsible cards when element count exceeds Feishu limit."""
+    if not items:
+        return []
+    limit = (
+        max_elements
+        if max_elements is not None
+        else resolve_feishu_collapsible_max_elements()
+    )
+    if count_collapsible_card_elements(items) <= limit:
+        return [items]
+
+    chunks: list[list[NewsItem]] = []
+    current: list[NewsItem] = []
+    for item in items:
+        trial = [*current, item]
+        if current and count_collapsible_card_elements(trial) > limit:
+            chunks.append(current)
+            current = [item]
+        else:
+            current = trial
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def format_fetch_status_summary(outcomes: list[SourceFetchOutcome]) -> str:
     if not outcomes:
         return ""
@@ -1078,19 +1127,32 @@ def build_collapsible_interactive_card(
     *,
     feed_count: int,
     fetch_footer: str = "",
+    chunk_index: int = 1,
+    chunk_total: int = 1,
+    total_items: int | None = None,
+    item_index_start: int = 1,
 ) -> dict[str, Any]:
+    total_items = len(items) if total_items is None else total_items
     overview_lines = [
         f"**抓取时间** {format_beijing_time(beijing_now(), with_label=True)}",
-        f"**来源** {feed_count} 个 RSS feed | **新增** {len(items)} 条",
-        "",
-        "点击下方折叠面板查看各条详情。",
+        f"**来源** {feed_count} 个 RSS feed | **新增** {total_items} 条",
     ]
+    if chunk_total > 1:
+        overview_lines.append(
+            f"**本批** 第 {chunk_index}/{chunk_total} 批 ({len(items)} 条)"
+        )
+    overview_lines.extend(
+        [
+            "",
+            "点击下方折叠面板查看各条详情。",
+        ]
+    )
     if fetch_footer:
         overview_lines.extend(["", f"_{fetch_footer}_"])
     elements: list[dict[str, Any]] = [
         {"tag": "markdown", "content": "\n".join(overview_lines)},
     ]
-    index = 1
+    index = item_index_start
     for category_label, group in group_items_by_category(items):
         elements.append(
             {"tag": "markdown", "content": f"## 【{category_label}】 ({len(group)})"}
@@ -1104,12 +1166,15 @@ def build_collapsible_interactive_card(
                 )
             )
             index += 1
+    header_title = "📰 RSS 新闻更新"
+    if chunk_total > 1:
+        header_title = f"📰 RSS 新闻更新 ({chunk_index}/{chunk_total})"
     return {
         "schema": "2.0",
         "config": {"wide_screen_mode": True, "update_multi": True},
         "header": {
             "template": "blue",
-            "title": {"tag": "plain_text", "content": "📰 RSS 新闻更新"},
+            "title": {"tag": "plain_text", "content": header_title},
         },
         "body": {"elements": elements},
     }
@@ -1157,23 +1222,52 @@ def build_interactive_card(
     }
 
 
+def build_feishu_card_payloads(
+    items: list[NewsItem],
+    *,
+    feed_count: int,
+    fetch_footer: str = "",
+) -> list[dict[str, Any]]:
+    if not should_use_collapsible_card(len(items)):
+        return [
+            build_interactive_card(
+                items,
+                feed_count=feed_count,
+                fetch_footer=fetch_footer,
+            )
+        ]
+
+    chunks = chunk_items_for_collapsible_card(items)
+    chunk_total = len(chunks)
+    item_index_start = 1
+    cards: list[dict[str, Any]] = []
+    for chunk_index, chunk in enumerate(chunks, start=1):
+        cards.append(
+            build_collapsible_interactive_card(
+                chunk,
+                feed_count=feed_count,
+                fetch_footer=fetch_footer if chunk_index == chunk_total else "",
+                chunk_index=chunk_index,
+                chunk_total=chunk_total,
+                total_items=len(items),
+                item_index_start=item_index_start,
+            )
+        )
+        item_index_start += len(chunk)
+    return cards
+
+
 def build_feishu_card_payload(
     items: list[NewsItem],
     *,
     feed_count: int,
     fetch_footer: str = "",
 ) -> dict[str, Any]:
-    if should_use_collapsible_card(len(items)):
-        return build_collapsible_interactive_card(
-            items,
-            feed_count=feed_count,
-            fetch_footer=fetch_footer,
-        )
-    return build_interactive_card(
+    return build_feishu_card_payloads(
         items,
         feed_count=feed_count,
         fetch_footer=fetch_footer,
-    )
+    )[0]
 
 
 def resolve_webhook_url() -> str:
@@ -1261,12 +1355,15 @@ def send_feishu_app(
     receive_id, receive_id_type = resolve_app_receive_target()
     kwargs = {"receive_id": receive_id, "receive_id_type": receive_id_type}
     if use_card:
-        card = build_feishu_card_payload(
+        cards = build_feishu_card_payloads(
             items,
             feed_count=feed_count,
             fetch_footer=fetch_footer,
         )
-        return send_interactive_card(card, **kwargs)
+        last: dict[str, Any] | None = None
+        for card in cards:
+            last = send_interactive_card(card, **kwargs)
+        return last or {}
     text = build_text_message(items, feed_count=feed_count)
     if fetch_footer:
         text = f"{text}\n\n{fetch_footer}"
@@ -1290,22 +1387,27 @@ def send_items_to_feishu(
         )
 
     if use_card:
-        payload = {
-            "msg_type": "interactive",
-            "card": build_feishu_card_payload(
-                items,
-                feed_count=feed_count,
-                fetch_footer=fetch_footer,
-            ),
-        }
-    else:
-        text = build_text_message(items, feed_count=feed_count)
-        if fetch_footer:
-            text = f"{text}\n\n{fetch_footer}"
-        payload = {
-            "msg_type": "text",
-            "content": {"text": text},
-        }
+        cards = build_feishu_card_payloads(
+            items,
+            feed_count=feed_count,
+            fetch_footer=fetch_footer,
+        )
+        last: dict[str, Any] | None = None
+        for card in cards:
+            payload = {
+                "msg_type": "interactive",
+                "card": card,
+            }
+            last = send_feishu_webhook(payload)
+        return last or {}
+
+    text = build_text_message(items, feed_count=feed_count)
+    if fetch_footer:
+        text = f"{text}\n\n{fetch_footer}"
+    payload = {
+        "msg_type": "text",
+        "content": {"text": text},
+    }
     return send_feishu_webhook(payload)
 
 

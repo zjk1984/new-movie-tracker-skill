@@ -22,7 +22,10 @@ from cnbeta_rss import (  # noqa: E402
     apply_item_limits,
     build_collapsible_interactive_card,
     build_feishu_card_payload,
+    build_feishu_card_payloads,
     build_interactive_card,
+    chunk_items_for_collapsible_card,
+    count_collapsible_card_elements,
     build_text_message,
     build_update_markdown,
     enrich_item_summary,
@@ -1031,6 +1034,75 @@ class CnbetaRssTests(unittest.TestCase):
         )
         overview = card["body"]["elements"][0]["content"]
         self.assertIn("2 feeds failed: Bad", overview)
+
+    def _sample_news_items(self, count: int, *, categories: list[str] | None = None) -> list[NewsItem]:
+        categories = categories or ["tech_cn"]
+        return [
+            NewsItem(
+                item_id=f"https://example.com/{i}",
+                title=f"Title {i}",
+                link=f"https://example.com/{i}",
+                published="2026-09-18T10:00:00+00:00",
+                category="tech",
+                summary="summary",
+                feed_url="https://example.com/feed",
+                source_category=categories[i % len(categories)],
+            )
+            for i in range(count)
+        ]
+
+    def test_count_collapsible_card_elements_matches_layout(self):
+        items = self._sample_news_items(3, categories=["tech_cn", "ai"])
+        self.assertEqual(count_collapsible_card_elements(items), 1 + 2 + 3)
+
+    def test_chunk_items_for_collapsible_card_splits_large_batch(self):
+        categories = [
+            "finance_cn",
+            "insights",
+            "politics_econ_intl",
+            "tech_cn",
+            "finance_intl",
+            "tech_en",
+            "politics_econ_cn",
+            "ai",
+        ]
+        items = self._sample_news_items(50, categories=categories)
+        self.assertEqual(count_collapsible_card_elements(items), 59)
+
+        chunks = chunk_items_for_collapsible_card(items, max_elements=45)
+        self.assertGreater(len(chunks), 1)
+        self.assertEqual(sum(len(chunk) for chunk in chunks), 50)
+        for chunk in chunks:
+            self.assertLessEqual(count_collapsible_card_elements(chunk), 45)
+
+    def test_build_feishu_card_payloads_chunks_50_items_under_element_limit(self):
+        categories = [
+            "finance_cn",
+            "insights",
+            "politics_econ_intl",
+            "tech_cn",
+            "finance_intl",
+            "tech_en",
+            "politics_econ_cn",
+            "ai",
+        ]
+        items = self._sample_news_items(50, categories=categories)
+        cards = build_feishu_card_payloads(
+            items,
+            feed_count=44,
+            fetch_footer="采集: 44 成功, 1 空, 0 失败",
+        )
+        self.assertGreater(len(cards), 1)
+        for card in cards:
+            self.assertEqual(card.get("schema"), "2.0")
+            self.assertLessEqual(len(card["body"]["elements"]), 45)
+        footer_cards = [
+            card
+            for card in cards
+            if "采集: 44 成功, 1 空, 0 失败" in card["body"]["elements"][0]["content"]
+        ]
+        self.assertEqual(len(footer_cards), 1)
+        self.assertIn("(2/", cards[-1]["header"]["title"]["content"])
 
     @patch("cnbeta_rss._fetch_page_excerpt")
     def test_enrich_item_summary_fallback_when_fetch_fails(self, mock_excerpt):
