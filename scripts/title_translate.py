@@ -66,6 +66,23 @@ def _rate_limit_pause(min_interval: float = 0.35) -> None:
     _last_request_at = time.time()
 
 
+def _translate_with_mymemory(text: str) -> str:
+    from deep_translator import MyMemoryTranslator
+
+    _rate_limit_pause()
+    return MyMemoryTranslator(
+        source="japanese",
+        target="chinese simplified",
+    ).translate(text[:500])
+
+
+def _translate_with_google(text: str) -> str:
+    from deep_translator import GoogleTranslator
+
+    _rate_limit_pause(0.5)
+    return GoogleTranslator(source="ja", target="zh-CN").translate(text[:500])
+
+
 def translate_ja_to_zh(text: str) -> str:
     text = (text or "").strip()
     if not text or not has_japanese(text):
@@ -76,20 +93,18 @@ def translate_ja_to_zh(text: str) -> str:
     if text in _cache:
         return _cache[text]
     try:
-        from deep_translator import MyMemoryTranslator
-
-        _rate_limit_pause()
-        zh = MyMemoryTranslator(
-            source="japanese",
-            target="chinese simplified",
-        ).translate(text[:500])
-        _cache[text] = zh or ""
-        _save_disk_cache()
-        return _cache[text]
+        zh = (_translate_with_mymemory(text) or "").strip()
     except Exception:
-        _cache[text] = ""
+        zh = ""
+    if not zh:
+        try:
+            zh = (_translate_with_google(text) or "").strip()
+        except Exception:
+            return ""
+    if zh:
+        _cache[text] = zh
         _save_disk_cache()
-        return ""
+    return zh
 
 
 def _magnet_dn_text(item: dict[str, Any]) -> str:

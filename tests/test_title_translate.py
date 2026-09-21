@@ -10,7 +10,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from submit_gate import build_submit_probe  # noqa: E402
-from title_translate import source_text_for_item, translate_title_for_item  # noqa: E402
+from title_translate import (  # noqa: E402
+    source_text_for_item,
+    translate_ja_to_zh,
+    translate_title_for_item,
+)
 
 
 class TitleTranslatePerNumberTests(unittest.TestCase):
@@ -75,6 +79,56 @@ class TitleTranslatePerNumberTests(unittest.TestCase):
                 translate_title_for_item(item_b),
                 "ZH:貞淑な地味妻がドM覚醒",
             )
+
+    @patch("title_translate._translate_with_google")
+    @patch("title_translate._translate_with_mymemory")
+    def test_translate_ja_to_zh_falls_back_to_google_on_mymemory_error(
+        self,
+        mock_mymemory,
+        mock_google,
+    ):
+        mock_mymemory.side_effect = RuntimeError("quota")
+        mock_google.return_value = "昔日喜欢的同学"
+        with patch("title_translate.TRANSLATE_ENABLED", True):
+            with patch("title_translate._cache", {}):
+                with patch("title_translate._cache_loaded", True):
+                    with patch("title_translate._save_disk_cache"):
+                        result = translate_ja_to_zh("昔好きだった同級生")
+        self.assertEqual(result, "昔日喜欢的同学")
+        mock_google.assert_called_once()
+
+    @patch("title_translate._translate_with_google")
+    @patch("title_translate._translate_with_mymemory")
+    def test_translate_ja_to_zh_falls_back_to_google_on_empty_mymemory(
+        self,
+        mock_mymemory,
+        mock_google,
+    ):
+        mock_mymemory.return_value = ""
+        mock_google.return_value = "贞淑的地味妻"
+        with patch("title_translate.TRANSLATE_ENABLED", True):
+            with patch("title_translate._cache", {}):
+                with patch("title_translate._cache_loaded", True):
+                    with patch("title_translate._save_disk_cache"):
+                        result = translate_ja_to_zh("貞淑な地味妻")
+        self.assertEqual(result, "贞淑的地味妻")
+        mock_google.assert_called_once()
+
+    @patch("title_translate._translate_with_google")
+    @patch("title_translate._translate_with_mymemory")
+    def test_translate_ja_to_zh_skips_google_when_mymemory_succeeds(
+        self,
+        mock_mymemory,
+        mock_google,
+    ):
+        mock_mymemory.return_value = "昔日喜欢的同学"
+        with patch("title_translate.TRANSLATE_ENABLED", True):
+            with patch("title_translate._cache", {}):
+                with patch("title_translate._cache_loaded", True):
+                    with patch("title_translate._save_disk_cache"):
+                        result = translate_ja_to_zh("昔好きだった同級生")
+        self.assertEqual(result, "昔日喜欢的同学")
+        mock_google.assert_not_called()
 
 
 if __name__ == "__main__":

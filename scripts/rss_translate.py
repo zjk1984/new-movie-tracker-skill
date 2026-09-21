@@ -121,13 +121,14 @@ def translate_to_zh(text: str) -> str:
     if cached:
         return cached
     try:
-        zh = _translate_with_mymemory(text)
+        zh = (_translate_with_mymemory(text) or "").strip()
     except Exception:
+        zh = ""
+    if not zh:
         try:
-            zh = _translate_with_google(text)
+            zh = (_translate_with_google(text) or "").strip()
         except Exception:
             return ""
-    zh = (zh or "").strip()
     if zh:
         _cache[text] = zh
         _save_disk_cache()
