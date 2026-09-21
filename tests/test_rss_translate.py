@@ -18,10 +18,14 @@ from cnbeta_rss import (  # noqa: E402
     translate_items_for_output,
 )
 from rss_translate import (  # noqa: E402
+    _is_rate_limit_error,
+    _is_valid_zh_translation,
+    _translate_with_backoff,
     apply_translations_to_items,
     chinese_ratio,
     is_primarily_chinese,
     translate_batch,
+    translate_to_zh,
 )
 
 
@@ -79,6 +83,85 @@ class RssTranslateTests(unittest.TestCase):
         apply_translations_to_items([item])
         self.assertEqual(item.title_zh, "美联储加息")
         self.assertEqual(item.summary_zh, "摘要中文")
+
+    def test_is_rate_limit_error_detects_429_variants(self):
+        self.assertTrue(_is_rate_limit_error(Exception("TooManyRequests Server Error")))
+        self.assertTrue(_is_rate_limit_error(Exception("HTTP 429 Too Many Requests")))
+        self.assertFalse(_is_rate_limit_error(Exception("Connection reset")))
+
+    def test_is_valid_zh_translation_rejects_english_and_empty(self):
+        self.assertTrue(_is_valid_zh_translation("Fed hike", "美联储加息"))
+        self.assertFalse(_is_valid_zh_translation("Fed hike", "Fed hike"))
+        self.assertFalse(_is_valid_zh_translation("Fed hike", ""))
+
+    @patch("rss_translate._translate_with_google")
+    @patch("rss_translate._translate_with_mymemory")
+    def test_translate_with_backoff_retries_on_rate_limit(
+        self,
+        mock_mymemory,
+        mock_google,
+    ):
+        mock_mymemory.side_effect = [
+            Exception("TooManyRequests"),
+            Exception("429"),
+            "美联储加息",
+        ]
+        with patch("rss_translate.BACKOFF_DELAYS", (0.0, 0.0, 0.0)):
+            with patch("time.sleep"):
+                result = _translate_with_backoff("Fed hike", provider="mymemory")
+        self.assertEqual(result, "美联储加息")
+        self.assertEqual(mock_mymemory.call_count, 3)
+        mock_google.assert_not_called()
+
+    @patch("rss_translate._translate_with_google")
+    @patch("rss_translate._translate_with_mymemory")
+    def test_translate_to_zh_falls_back_to_google(self, mock_mymemory, mock_google):
+        mock_mymemory.side_effect = Exception("TooManyRequests")
+        mock_google.return_value = "美联储加息"
+        with patch("rss_translate._cache", {}):
+            with patch("rss_translate._cache_loaded", True):
+                with patch("rss_translate.TRANSLATE_ENABLED", True):
+                    with patch("rss_translate._translate_with_backoff") as mock_backoff:
+                        mock_backoff.side_effect = [
+                            Exception("TooManyRequests"),
+                            "美联储加息",
+                        ]
+                        result = translate_to_zh("Fed hike")
+        self.assertEqual(result, "美联储加息")
+        self.assertEqual(mock_backoff.call_count, 2)
+
+    @patch("rss_translate.translate_to_zh")
+    def test_translate_batch_applies_batch_cooldown(self, mock_translate):
+        mock_translate.return_value = "中文标题"
+        texts = [f"Headline {index}" for index in range(9)]
+        with patch("rss_translate.BATCH_SIZE", 4):
+            with patch("rss_translate.BATCH_COOLDOWN", 2.5):
+                with patch("rss_translate._cache", {}):
+                    with patch("rss_translate._cache_loaded", True):
+                        with patch("rss_translate.TRANSLATE_ENABLED", True):
+                            with patch("time.sleep") as mock_sleep:
+                                translate_batch(texts)
+        cooldown_calls = [
+            call.args for call in mock_sleep.call_args_list if call.args == (2.5,)
+        ]
+        self.assertEqual(len(cooldown_calls), 2)
+
+    @patch("rss_translate.translate_batch")
+    def test_apply_translations_keeps_empty_zh_on_failure(self, mock_batch):
+        mock_batch.return_value = ["", ""]
+        item = NewsItem(
+            item_id="1",
+            title="Fed hike",
+            link="https://example.com/1",
+            published="2026-09-18T10:00:00+00:00",
+            category="finance",
+            summary="Short summary",
+            feed_url="https://example.com/feed",
+            source_category="finance_intl",
+        )
+        apply_translations_to_items([item])
+        self.assertEqual(item.title_zh, "")
+        self.assertEqual(item.summary_zh, "")
 
     @patch("rss_translate.apply_translations_to_items")
     def test_translate_items_for_output_delegates(self, mock_apply):
