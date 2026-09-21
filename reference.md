@@ -403,6 +403,25 @@ Custom slots: `./scripts/setup_cron.sh --time 07:00 --time 13:00 --time 20:00` o
 
 Verify: `crontab -l | grep new-movie-tracker-daily` · Logs: `data/daily_run.log`, `data/cron_health.log`, `data/cron_reboot.log` · Dry-run: `./scripts/setup_cron.sh --dry-run` · Health check / auto-fix: `./scripts/setup_cron.sh --ensure-only` or `./scripts/ensure_cron_running.sh`
 
+### Linux cron — forum-37 batch (Tue/Thu/Sat 18:00 Asia/Shanghai)
+
+Separate from daily_run slots. Scans the next 10 forum-37 list pages via `scripts/forum37_batch_run.sh` (auto-advances page cursor in `data/forum37_batch_state.json`).
+
+```bash
+./scripts/setup_forum37_cron.sh
+```
+
+| Item | Value |
+|------|-------|
+| Schedule | **Tue, Thu, Sat 18:00** Beijing (`FORUM37_CRON_WEEKDAYS=2,4,6`) |
+| Crontab line | `0 18 * * 2,4,6 TZ=Asia/Shanghai /path/to/scripts/forum37_batch_run.sh # new-movie-tracker-forum37-batch` |
+| Log | `data/forum37_batch_run.log` |
+| Cron VM | `bc-d4fb1f8c` — run after merge: `git pull && ./scripts/setup_forum37_cron.sh` |
+
+Does not modify daily_run crontab lines. Optional **Cursor `subscribe_timer`** wake at **17:55 Beijing** on Tue/Thu/Sat (`55 9 * * 2,4,6` UTC) so the cron VM is unfrozen before the 18:00 slot — see project doc `daily-run-external-schedule.md`.
+
+Verify: `crontab -l | grep forum37` · Dry-run: `./scripts/setup_forum37_cron.sh --dry-run` · Remove: `./scripts/setup_forum37_cron.sh --remove`
+
 ### GitHub Actions schedule (07:00 Asia/Shanghai, optional)
 
 Only if you run `daily_run` in CI with the required secrets and browser setup. **07:00 北京时间** equals:
