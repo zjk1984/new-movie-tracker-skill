@@ -297,6 +297,8 @@ tmux new-session -d -s daily-supervisor -c /path/to/repo \
 
 Between Beijing slot starts it **sleeps** (no 24/7 polling). From each slot time (07:00, 13:00, 20:00) it polls every 5 min, runs `ensure_cron_running.sh` (belt-and-suspenders), and triggers `daily_run.sh` when `data/daily_run.log` has no start entry for that slot today (idempotent). While `daily_run.sh` is running it waits for completion, then sleeps until the next slot. Also apply repo `environment.json` on the cron VM (`"start": "./scripts/restart_daily_supervisor.sh"`) so each VM wake restarts the supervisor and runs missed-slot catch-up after checkpoint restore. System timezone should be **Asia/Shanghai**. Logs: `data/daily_run.log`, `data/cron_health.log`, `data/supervisor.log`. If restart fails after install, run **`sudo service cron restart`** manually. See [reference.md](reference.md) and project doc `daily-run-external-schedule.md` for Cursor `subscribe_timer` as an optional third layer.
 
+**Forum-37 batch (Tue/Thu/Sat 18:00 Beijing):** `./scripts/setup_forum37_cron.sh` installs a separate crontab line for `./scripts/forum37_batch_run.sh` (10-page batch scan, log `data/forum37_batch_run.log`). Not managed by the daily supervisor — cron-only. Optional timer wake 5 min before (17:55) on Tue/Thu/Sat; see project doc.
+
 **One-time setup**
 1. Save PikPak token: `python scripts/pikpak_login.py login` (stored in `pikpak_auth.json`).
 2. Pass Cloudflare once: `python scripts/daily_run.py --no-headless` (uses `data/chrome_profile/`).
