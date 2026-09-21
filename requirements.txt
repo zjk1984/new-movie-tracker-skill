@@ -2,3 +2,4 @@ playwright
 requests
 curl_cffi
 deep-translator
+trafilatura>=2.1.0

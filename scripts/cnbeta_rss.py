@@ -15,7 +15,8 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import unquote_plus, urlsplit, urlunsplit
 from xml.etree import ElementTree as ET
 
 import requests
@@ -30,6 +31,26 @@ DEFAULT_UPDATE_DIR = SKILL_DIR / "update"
 DEFAULT_MAX_ITEMS = 50
 DEFAULT_MAX_ITEMS_PER_CATEGORY = 7
 DEFAULT_LOOKBACK_DAYS = 2
+DEFAULT_COLLAPSIBLE_THRESHOLD = 10
+DEFAULT_ENRICH_TIMEOUT = 8
+DEFAULT_ENRICH_MIN_SUMMARY = 80
+DEFAULT_LOG_PATH = SKILL_DIR / "data" / "cnbeta_rss.log"
+TRACKING_QUERY_PARAMETERS = frozenset(
+    {
+        "_ga",
+        "dclid",
+        "fbclid",
+        "gclid",
+        "igshid",
+        "li_fat_id",
+        "mc_cid",
+        "mc_eid",
+        "msclkid",
+        "ttclid",
+        "twclid",
+        "vero_id",
+    }
+)
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 UPDATE_NAME_RE = re.compile(r"^(\d{8}-\d{6})(?:_\d+)?\.md$")
 UPDATE_LINK_LINE_RE = re.compile(r"^\s*-\s*\*\*链接\*\*:\s*(\S+)\s*$", re.MULTILINE)
@@ -65,6 +86,23 @@ class FeedSource:
     url: str
     category: str
     notes: str = ""
+    enrich: bool = False
+
+
+@dataclass(frozen=True)
+class SourceFetchOutcome:
+    id: str
+    name: str
+    url: str
+    status: Literal["success", "empty", "failure", "timeout"]
+    item_count: int
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class FetchAllResult:
+    items: list["NewsItem"]
+    outcomes: list[SourceFetchOutcome]
 
 
 @dataclass(frozen=True)
@@ -223,6 +261,7 @@ def load_feed_sources() -> list[FeedSource]:
         url = str(entry.get("url") or "").strip()
         if not url:
             continue
+        enrich = bool(entry.get("enrich") or entry.get("content_extractor") == "trafilatura")
         feeds.append(
             FeedSource(
                 id=str(entry.get("id") or url),
@@ -230,6 +269,7 @@ def load_feed_sources() -> list[FeedSource]:
                 url=url,
                 category=category,
                 notes=str(entry.get("notes") or ""),
+                enrich=enrich,
             )
         )
     return feeds
@@ -290,12 +330,68 @@ def load_seen_ids(
         return set(), None, None
 
     state = load_state(state_path)
-    seen_ids = set(state.get("seen_ids") or [])
+    seen_ids = _expand_seen_ids(set(state.get("seen_ids") or []))
     dedup_md = find_latest_dedup_md(update_dir)
     if dedup_md is not None:
         seen_ids.update(parse_item_ids_from_update_md(dedup_md))
     previous_md = find_latest_update_md(update_dir)
     return seen_ids, previous_md, dedup_md
+
+
+def _canonical_url(link: str) -> str:
+    """Normalize a URL for cross-source dedup (strip tracking params, normalize path)."""
+    raw = (link or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return raw
+
+    scheme = (parsed.scheme or "https").lower()
+    host = (parsed.hostname or "").lower()
+    port = parsed.port
+    if (scheme, port) in {("http", 80), ("https", 443)}:
+        port = None
+
+    path = parsed.path.rstrip("/") or "/"
+    query_parts: list[str] = []
+    for part in parsed.query.split("&") if parsed.query else []:
+        if not part:
+            continue
+        name = unquote_plus(part.partition("=")[0]).lower()
+        if name.startswith("utm_") or name in TRACKING_QUERY_PARAMETERS:
+            continue
+        query_parts.append(part)
+
+    netloc = host
+    if port is not None:
+        netloc = f"{host}:{port}"
+    if parsed.username:
+        auth = parsed.username
+        if parsed.password:
+            auth = f"{auth}:{parsed.password}"
+        netloc = f"{auth}@{netloc}"
+
+    return urlunsplit(
+        (
+            scheme,
+            netloc,
+            path,
+            "&".join(query_parts),
+            "",
+        )
+    )
+
+
+def _expand_seen_ids(seen_ids: set[str]) -> set[str]:
+    expanded = set(seen_ids)
+    for value in seen_ids:
+        if value.startswith("http"):
+            canonical = _canonical_url(value)
+            if canonical:
+                expanded.add(canonical)
+    return expanded
 
 
 def parse_item_ids_from_update_md(path: Path) -> set[str]:
@@ -308,12 +404,12 @@ def parse_item_ids_from_update_md(path: Path) -> set[str]:
     for match in UPDATE_LINK_LINE_RE.finditer(text):
         ids.add(match.group(1).strip())
     if ids:
-        return ids
+        return _expand_seen_ids(ids)
     for match in UPDATE_LINK_RE.finditer(text):
         link = match.group(1).strip()
         if link:
             ids.add(link)
-    return ids
+    return _expand_seen_ids(ids)
 
 
 def _unique_backup_dest(backup_dir: Path, name: str) -> Path:
@@ -631,19 +727,134 @@ def _parse_atom_feed(
     return items
 
 
-def fetch_all_feeds(sources: list[FeedSource]) -> list[NewsItem]:
+def _merge_fetched_item(merged: dict[str, NewsItem], item: NewsItem) -> None:
+    key = _canonical_url(item.link) or item.item_id
+    existing = merged.get(key)
+    if existing is None:
+        merged[key] = item
+        return
+    if (item.published or "") > (existing.published or ""):
+        merged[key] = item
+
+
+def _fetch_page_excerpt(link: str, *, timeout: int = DEFAULT_ENRICH_TIMEOUT) -> str:
+    if not link:
+        return ""
+    try:
+        import trafilatura
+    except ImportError:
+        return ""
+    headers = {"User-Agent": "RSSAggregator/2.0 (+multi-source)"}
+    verify = resolve_verify_ssl()
+    try:
+        resp = requests.get(link, headers=headers, timeout=timeout, verify=verify)
+        resp.raise_for_status()
+        text = trafilatura.extract(
+            resp.text,
+            include_comments=False,
+            include_tables=False,
+        )
+        return (text or "").strip()
+    except Exception:
+        return ""
+
+
+def enrich_item_summary(item: NewsItem, *, timeout: int = DEFAULT_ENRICH_TIMEOUT) -> NewsItem:
+    summary = (item.summary or "").strip()
+    if len(summary) >= DEFAULT_ENRICH_MIN_SUMMARY:
+        return item
+    excerpt = _fetch_page_excerpt(item.link, timeout=timeout)
+    if not excerpt:
+        return item
+    merged_summary = excerpt[:500]
+    return NewsItem(
+        item_id=item.item_id,
+        title=item.title,
+        link=item.link,
+        published=item.published,
+        category=item.category,
+        summary=merged_summary,
+        feed_url=item.feed_url,
+        source_category=item.source_category,
+        source_name=item.source_name,
+        title_zh=item.title_zh,
+        summary_zh=item.summary_zh,
+    )
+
+
+def enrich_items_from_sources(
+    items: list[NewsItem],
+    sources: list[FeedSource],
+    *,
+    timeout: int = DEFAULT_ENRICH_TIMEOUT,
+) -> list[NewsItem]:
+    enrich_feeds = {source.url for source in sources if source.enrich}
+    if not enrich_feeds:
+        return items
+    enriched: list[NewsItem] = []
+    for item in items:
+        if item.feed_url in enrich_feeds:
+            enriched.append(enrich_item_summary(item, timeout=timeout))
+        else:
+            enriched.append(item)
+    return enriched
+
+
+def fetch_all_feeds(
+    sources: list[FeedSource],
+    *,
+    timeout: int = 30,
+) -> FetchAllResult:
     merged: dict[str, NewsItem] = {}
+    outcomes: list[SourceFetchOutcome] = []
     for source in sources:
         try:
-            xml_text = fetch_feed(source.url)
-            for item in parse_feed(xml_text, feed_url=source.url, source=source):
-                merged[item.item_id] = item
+            xml_text = fetch_feed(source.url, timeout=timeout)
+            parsed = parse_feed(xml_text, feed_url=source.url, source=source)
+            parsed = enrich_items_from_sources(parsed, [source], timeout=DEFAULT_ENRICH_TIMEOUT)
+            for item in parsed:
+                _merge_fetched_item(merged, item)
+            status: Literal["success", "empty"] = "success" if parsed else "empty"
+            outcomes.append(
+                SourceFetchOutcome(
+                    id=source.id,
+                    name=source.name,
+                    url=source.url,
+                    status=status,
+                    item_count=len(parsed),
+                )
+            )
+        except requests.exceptions.Timeout as exc:
+            print(
+                f"[warn] timeout fetching {source.name} ({source.url}): {exc}",
+                file=sys.stderr,
+            )
+            outcomes.append(
+                SourceFetchOutcome(
+                    id=source.id,
+                    name=source.name,
+                    url=source.url,
+                    status="timeout",
+                    item_count=0,
+                    error=str(exc),
+                )
+            )
         except Exception as exc:
             print(
                 f"[warn] failed to fetch {source.name} ({source.url}): {exc}",
                 file=sys.stderr,
             )
-    return list(merged.values())
+            outcomes.append(
+                SourceFetchOutcome(
+                    id=source.id,
+                    name=source.name,
+                    url=source.url,
+                    status="failure",
+                    item_count=0,
+                    error=str(exc),
+                )
+            )
+    return FetchAllResult(items=list(merged.values()), outcomes=outcomes)
 
 
 def load_state(path: Path) -> dict[str, Any]:
@@ -690,7 +901,15 @@ def filter_by_lookback(
 
 
 def select_new_items(items: list[NewsItem], seen_ids: set[str]) -> list[NewsItem]:
-    fresh = [item for item in items if item.item_id not in seen_ids]
+    expanded = _expand_seen_ids(seen_ids)
+    fresh: list[NewsItem] = []
+    for item in items:
+        canonical = _canonical_url(item.link)
+        if item.item_id in expanded:
+            continue
+        if canonical and canonical in expanded:
+            continue
+        fresh.append(item)
     fresh.sort(key=lambda item: item.published or "", reverse=True)
     return fresh
 
@@ -767,7 +986,141 @@ def build_text_message(items: list[NewsItem], *, feed_count: int) -> str:
     return "\n".join(lines).strip()
 
 
-def build_interactive_card(items: list[NewsItem], *, feed_count: int) -> dict[str, Any]:
+def resolve_feishu_collapsible_threshold() -> int:
+    raw = _env("FEISHU_COLLAPSIBLE_THRESHOLD")
+    if not raw:
+        return DEFAULT_COLLAPSIBLE_THRESHOLD
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_COLLAPSIBLE_THRESHOLD
+
+
+def resolve_feishu_collapsible_mode() -> bool | None:
+    raw = _env("FEISHU_COLLAPSIBLE").lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
+def should_use_collapsible_card(item_count: int) -> bool:
+    forced = resolve_feishu_collapsible_mode()
+    if forced is not None:
+        return forced
+    return item_count >= resolve_feishu_collapsible_threshold()
+
+
+def format_fetch_status_summary(outcomes: list[SourceFetchOutcome]) -> str:
+    if not outcomes:
+        return ""
+    failed = [o for o in outcomes if o.status in ("failure", "timeout")]
+    if not failed:
+        ok = sum(1 for o in outcomes if o.status == "success")
+        empty = sum(1 for o in outcomes if o.status == "empty")
+        return f"采集: {ok} 成功, {empty} 空, 0 失败"
+    names = ", ".join(o.name for o in failed[:5])
+    extra = f" (+{len(failed) - 5} more)" if len(failed) > 5 else ""
+    return f"{len(failed)} feeds failed: {names}{extra}"
+
+
+def fetch_outcomes_to_dict(outcomes: list[SourceFetchOutcome]) -> list[dict[str, Any]]:
+    return [asdict(outcome) for outcome in outcomes]
+
+
+def append_fetch_report_to_log(summary: str, *, log_path: Path | None = None) -> None:
+    text = (summary or "").strip()
+    if not text:
+        return
+    path = log_path or DEFAULT_LOG_PATH
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"[fetch-report] {text}\n")
+    except OSError as exc:
+        print(f"[warn] could not append fetch report to log: {exc}", file=sys.stderr)
+
+
+def _collapsible_panel(title: str, content: str) -> dict[str, Any]:
+    return {
+        "tag": "collapsible_panel",
+        "expanded": False,
+        "header": {
+            "title": {"tag": "plain_text", "content": title},
+            "icon": {
+                "tag": "standard_icon",
+                "token": "down-small-ccm_outlined",
+                "size": "16px 16px",
+            },
+            "icon_position": "right",
+            "icon_expanded_angle": -180,
+        },
+        "border": {"color": "grey", "corner_radius": "5px"},
+        "elements": [{"tag": "markdown", "content": content}],
+    }
+
+
+def _build_item_panel_markdown(item: NewsItem, *, index: int) -> str:
+    when = format_beijing_time(item.published, with_label=False) or "未知时间"
+    lines = [
+        f"**[{item.display_label}]** [{_format_item_title(item)}]({item.link})",
+        f"_{when}_",
+    ]
+    if item.display_summary:
+        lines.append(_format_item_summary(item, limit=300))
+    lines.append(f"\n[阅读原文]({item.link})")
+    return "\n".join(lines)
+
+
+def build_collapsible_interactive_card(
+    items: list[NewsItem],
+    *,
+    feed_count: int,
+    fetch_footer: str = "",
+) -> dict[str, Any]:
+    overview_lines = [
+        f"**抓取时间** {format_beijing_time(beijing_now(), with_label=True)}",
+        f"**来源** {feed_count} 个 RSS feed | **新增** {len(items)} 条",
+        "",
+        "点击下方折叠面板查看各条详情。",
+    ]
+    if fetch_footer:
+        overview_lines.extend(["", f"_{fetch_footer}_"])
+    elements: list[dict[str, Any]] = [
+        {"tag": "markdown", "content": "\n".join(overview_lines)},
+    ]
+    index = 1
+    for category_label, group in group_items_by_category(items):
+        elements.append(
+            {"tag": "markdown", "content": f"## 【{category_label}】 ({len(group)})"}
+        )
+        for item in group:
+            panel_title = f"{index}. [{item.display_label}] {_format_item_title(item)}"
+            elements.append(
+                _collapsible_panel(
+                    truncate(panel_title, 120),
+                    _build_item_panel_markdown(item, index=index),
+                )
+            )
+            index += 1
+    return {
+        "schema": "2.0",
+        "config": {"wide_screen_mode": True, "update_multi": True},
+        "header": {
+            "template": "blue",
+            "title": {"tag": "plain_text", "content": "📰 RSS 新闻更新"},
+        },
+        "body": {"elements": elements},
+    }
+
+
+def build_interactive_card(
+    items: list[NewsItem],
+    *,
+    feed_count: int,
+    fetch_footer: str = "",
+) -> dict[str, Any]:
     body_lines = [
         f"**抓取时间** {format_beijing_time(beijing_now(), with_label=True)}",
         f"**来源** {feed_count} 个 RSS feed | **新增** {len(items)} 条",
@@ -787,6 +1140,8 @@ def build_interactive_card(items: list[NewsItem], *, feed_count: int) -> dict[st
                 body_lines.append(_format_item_summary(item, limit=120))
             body_lines.append("")
             index += 1
+    if fetch_footer:
+        body_lines.extend(["", f"_{fetch_footer}_"])
     return {
         "config": {"wide_screen_mode": True},
         "header": {
@@ -800,6 +1155,25 @@ def build_interactive_card(items: list[NewsItem], *, feed_count: int) -> dict[st
             },
         ],
     }
+
+
+def build_feishu_card_payload(
+    items: list[NewsItem],
+    *,
+    feed_count: int,
+    fetch_footer: str = "",
+) -> dict[str, Any]:
+    if should_use_collapsible_card(len(items)):
+        return build_collapsible_interactive_card(
+            items,
+            feed_count=feed_count,
+            fetch_footer=fetch_footer,
+        )
+    return build_interactive_card(
+        items,
+        feed_count=feed_count,
+        fetch_footer=fetch_footer,
+    )
 
 
 def resolve_webhook_url() -> str:
@@ -874,33 +1248,63 @@ def send_feishu_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def send_feishu_app(items: list[NewsItem], *, feed_count: int, use_card: bool) -> dict[str, Any]:
+def send_feishu_app(
+    items: list[NewsItem],
+    *,
+    feed_count: int,
+    use_card: bool,
+    fetch_footer: str = "",
+) -> dict[str, Any]:
     from feishu_notify import send_interactive_card, send_text as send_app_text
 
     resolve_app_credentials()
     receive_id, receive_id_type = resolve_app_receive_target()
     kwargs = {"receive_id": receive_id, "receive_id_type": receive_id_type}
     if use_card:
-        card = build_interactive_card(items, feed_count=feed_count)
+        card = build_feishu_card_payload(
+            items,
+            feed_count=feed_count,
+            fetch_footer=fetch_footer,
+        )
         return send_interactive_card(card, **kwargs)
     text = build_text_message(items, feed_count=feed_count)
+    if fetch_footer:
+        text = f"{text}\n\n{fetch_footer}"
     return send_app_text(text, **kwargs)
 
 
-def send_items_to_feishu(items: list[NewsItem], *, feed_count: int, use_card: bool) -> dict[str, Any]:
+def send_items_to_feishu(
+    items: list[NewsItem],
+    *,
+    feed_count: int,
+    use_card: bool,
+    fetch_footer: str = "",
+) -> dict[str, Any]:
     mode = resolve_auth_mode()
     if mode == "app":
-        return send_feishu_app(items, feed_count=feed_count, use_card=use_card)
+        return send_feishu_app(
+            items,
+            feed_count=feed_count,
+            use_card=use_card,
+            fetch_footer=fetch_footer,
+        )
 
     if use_card:
         payload = {
             "msg_type": "interactive",
-            "card": build_interactive_card(items, feed_count=feed_count),
+            "card": build_feishu_card_payload(
+                items,
+                feed_count=feed_count,
+                fetch_footer=fetch_footer,
+            ),
         }
     else:
+        text = build_text_message(items, feed_count=feed_count)
+        if fetch_footer:
+            text = f"{text}\n\n{fetch_footer}"
         payload = {
             "msg_type": "text",
-            "content": {"text": build_text_message(items, feed_count=feed_count)},
+            "content": {"text": text},
         }
     return send_feishu_webhook(payload)
 
@@ -925,7 +1329,10 @@ def run(
         reset_state=reset_state,
     )
 
-    all_items = fetch_all_feeds(sources)
+    fetch_result = fetch_all_feeds(sources)
+    all_items = fetch_result.items
+    fetch_outcomes = fetch_result.outcomes
+    fetch_status_summary = format_fetch_status_summary(fetch_outcomes)
     recent_items = filter_by_lookback(all_items, lookback_days=lookback_days)
     fresh_items = select_new_items(recent_items, seen_ids)
     new_items = apply_item_limits(
@@ -938,6 +1345,8 @@ def run(
     result = {
         "feeds": [source.url for source in sources],
         "sources": [asdict(source) for source in sources],
+        "fetch_report": fetch_outcomes_to_dict(fetch_outcomes),
+        "fetch_status_summary": fetch_status_summary,
         "enabled_categories": sorted(resolve_enabled_categories() or []),
         "fetched_total": len(all_items),
         "lookback_days": lookback_days,
@@ -953,6 +1362,9 @@ def run(
         "update_path": None,
         "items": [asdict(item) for item in new_items],
     }
+    if fetch_status_summary:
+        print(f"[info] fetch status: {fetch_status_summary}")
+        append_fetch_report_to_log(fetch_status_summary)
 
     if fetch_only:
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -979,7 +1391,12 @@ def run(
             )
         return result
 
-    send_items_to_feishu(new_items, feed_count=len(sources), use_card=use_card)
+    send_items_to_feishu(
+        new_items,
+        feed_count=len(sources),
+        use_card=use_card,
+        fetch_footer=fetch_status_summary,
+    )
     result["sent"] = True
     update_path: Path | None = None
     if not skip_update_md:
@@ -992,6 +1409,9 @@ def run(
         result["update_path"] = update_path.name if update_path else None
     for item in new_items:
         seen_ids.add(item.item_id)
+        canonical = _canonical_url(item.link)
+        if canonical:
+            seen_ids.add(canonical)
     save_state(state_path, list(seen_ids))
     if update_path:
         try:

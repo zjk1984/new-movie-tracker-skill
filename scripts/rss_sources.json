@@ -89,7 +89,8 @@
       "name": "TechCrunch",
       "url": "https://techcrunch.com/feed/",
       "category": "tech_en",
-      "notes": "Official RSS."
+      "enrich": true,
+      "notes": "Official RSS. Optional trafilatura excerpt when RSS summary is short."
     },
     {
       "id": "theverge",
@@ -110,7 +111,8 @@
       "name": "Hacker News Front Page",
       "url": "https://hnrss.org/frontpage",
       "category": "tech_en",
-      "notes": "Unofficial RSS via hnrss.org."
+      "enrich": true,
+      "notes": "Unofficial RSS via hnrss.org. Optional trafilatura excerpt when RSS summary is short."
     },
     {
       "id": "wired",
