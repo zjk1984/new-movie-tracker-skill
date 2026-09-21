@@ -113,23 +113,6 @@ class RssTranslateTests(unittest.TestCase):
         self.assertEqual(mock_mymemory.call_count, 3)
         mock_google.assert_not_called()
 
-    @patch("rss_translate._translate_with_google")
-    @patch("rss_translate._translate_with_mymemory")
-    def test_translate_to_zh_falls_back_to_google(self, mock_mymemory, mock_google):
-        mock_mymemory.side_effect = Exception("TooManyRequests")
-        mock_google.return_value = "美联储加息"
-        with patch("rss_translate._cache", {}):
-            with patch("rss_translate._cache_loaded", True):
-                with patch("rss_translate.TRANSLATE_ENABLED", True):
-                    with patch("rss_translate._translate_with_backoff") as mock_backoff:
-                        mock_backoff.side_effect = [
-                            Exception("TooManyRequests"),
-                            "美联储加息",
-                        ]
-                        result = translate_to_zh("Fed hike")
-        self.assertEqual(result, "美联储加息")
-        self.assertEqual(mock_backoff.call_count, 2)
-
     @patch("rss_translate.translate_to_zh")
     def test_translate_batch_applies_batch_cooldown(self, mock_translate):
         mock_translate.return_value = "中文标题"
@@ -213,6 +196,40 @@ class RssTranslateTests(unittest.TestCase):
         self.assertIn("市场反应剧烈", content)
         self.assertIn("- **原标题**: Fed hike", md)
         self.assertIn("美联储加息（Fed hike）", md)
+
+    @patch("rss_translate._translate_with_google")
+    @patch("rss_translate._translate_with_mymemory")
+    def test_translate_to_zh_falls_back_to_google_on_mymemory_error(
+        self,
+        mock_mymemory,
+        mock_google,
+    ):
+        mock_mymemory.side_effect = RuntimeError("quota")
+        mock_google.return_value = "美联储加息"
+        with patch("rss_translate.TRANSLATE_ENABLED", True):
+            with patch("rss_translate._cache", {}):
+                with patch("rss_translate._cache_loaded", True):
+                    with patch("rss_translate._save_disk_cache"):
+                        result = translate_to_zh("Fed raises interest rates again")
+        self.assertEqual(result, "美联储加息")
+        mock_google.assert_called_once()
+
+    @patch("rss_translate._translate_with_google")
+    @patch("rss_translate._translate_with_mymemory")
+    def test_translate_to_zh_falls_back_to_google_on_empty_mymemory(
+        self,
+        mock_mymemory,
+        mock_google,
+    ):
+        mock_mymemory.return_value = ""
+        mock_google.return_value = "市场震荡"
+        with patch("rss_translate.TRANSLATE_ENABLED", True):
+            with patch("rss_translate._cache", {}):
+                with patch("rss_translate._cache_loaded", True):
+                    with patch("rss_translate._save_disk_cache"):
+                        result = translate_to_zh("Markets wobble")
+        self.assertEqual(result, "市场震荡")
+        mock_google.assert_called_once()
 
 
 if __name__ == "__main__":
