@@ -548,5 +548,72 @@ class JavDBReviewsGateTests(unittest.TestCase):
             self.assertNotIn("selected_magnet", item)
 
 
+class DomesticJavDBGateTests(unittest.TestCase):
+    MOCK_YEAR = 2025
+
+    def _domestic_item(self, **query_fields):
+        item = {
+            "content_region": "domestic_leak",
+            "domestic_subtype": "泄密",
+            "title": "[国产] 泄密 HMN-900 4K",
+            "av_number": "HMN-900",
+            "selected_magnet": "magnet:?xt=urn:btih:abc",
+            "javdb_query": {
+                "query_status": "ok",
+                "number": "HMN-900",
+                "release_date": f"{self.MOCK_YEAR - 1}-06-01",
+                "reviews_count": 1500,
+                "watched_count": 600,
+                "tags": ["巨乳", "人妻"],
+                "score": 4.5,
+                **query_fields,
+            },
+        }
+        return item
+
+    def test_domestic_without_av_number_skips_gate(self):
+        item = {
+            "content_region": "domestic_leak",
+            "domestic_subtype": "酒店偷拍",
+            "title": "[国产] 酒店偷拍 某女",
+            "selected_magnet": "magnet:?xt=urn:btih:abc",
+        }
+        self.assertFalse(needs_javdb_query(item))
+        self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
+
+    def test_domestic_with_av_number_and_javdb_error_skips_gate(self):
+        item = self._domestic_item(query_status="error", score=None)
+        with patch("javdb_client.attach_javdb_query"):
+            self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
+        self.assertNotIn("skip_reason", item)
+        self.assertIn("selected_magnet", item)
+
+    def test_domestic_with_javdb_ok_passes_gate(self):
+        item = self._domestic_item()
+        with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):
+            self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
+
+    def test_domestic_with_javdb_ok_fails_low_score(self):
+        item = self._domestic_item(score=3.2)
+        with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):
+            self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
+        self.assertEqual(item["skip_reason"], "javdb_score_low_3.20")
+        self.assertNotIn("selected_magnet", item)
+
+    def test_domestic_with_javdb_ok_fails_excluded_tag(self):
+        item = self._domestic_item(tags=["多P", "巨乳"], score=4.8)
+        with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):
+            self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
+        self.assertEqual(item["skip_reason"], "javdb_tag_excluded_多P")
+
+    def test_domestic_candidate_needs_javdb_query(self):
+        item = {
+            "content_region": "domestic_leak",
+            "title": "[国产] 泄密 HMN-900",
+            "av_number": "HMN-900",
+        }
+        self.assertTrue(needs_javdb_query(item))
+
+
 if __name__ == "__main__":
     unittest.main()
