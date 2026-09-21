@@ -203,9 +203,11 @@ Each kept 有码/无码 item gets `javdb_query`:
 
 Disable with `--no-javdb-query`.
 
-### JavDB download gates (Japanese items)
+### JavDB download gates (Japanese + gated domestic)
 
 Before PikPak submit, `scripts/javdb_client.py` applies gates in order: **tags** → **reviews_count** → **watched_count** → **score** (default min 4.0, `JAVDB_MIN_DOWNLOAD_SCORE`).
+
+Applies to Japanese **有码/无码/FC2** and to **国产** (`domestic_leak`) posts that have an AV number **and** a successful JavDB lookup (`query_status: ok`). Domestic posts without a number, or when JavDB lookup fails, keep the previous behavior (no JavDB gate).
 
 **Popularity gates** (`reviews_count` = rating count, `watched_count` = App「评价」/看过人数; Asia/Shanghai calendar):
 

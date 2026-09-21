@@ -862,7 +862,7 @@ def _clear_download_selection(item: dict[str, Any]) -> None:
     item.pop("download_source", None)
 
 
-def item_needs_javdb_score(item: dict[str, Any]) -> bool:
+def _is_jav_report_region(item: dict[str, Any]) -> bool:
     region = item.get("content_region") or ""
     if region in JAV_REPORT_REGIONS:
         return True
@@ -873,6 +873,31 @@ def item_needs_javdb_score(item: dict[str, Any]) -> bool:
     from content_filter import classify_region
 
     return classify_region({"title": title, "av_number": number}) in JAV_REPORT_REGIONS
+
+
+def _domestic_javdb_candidate(item: dict[str, Any]) -> bool:
+    """Domestic kept item with an extractable AV number (may query JavDB)."""
+    region = item.get("content_region") or ""
+    if region != "domestic_leak":
+        return False
+    title = item.get("title") or item.get("name") or ""
+    return bool(item.get("av_number") or extract_av_number(title))
+
+
+def _javdb_gate_applies(item: dict[str, Any]) -> bool:
+    """True when tag/reviews/watched/score gates should run on this item."""
+    if _is_jav_report_region(item):
+        return True
+    if not _domestic_javdb_candidate(item):
+        return False
+    q = item.get("javdb_query") or {}
+    return q.get("query_status") == "ok"
+
+
+def item_needs_javdb_score(item: dict[str, Any]) -> bool:
+    if _is_jav_report_region(item):
+        return True
+    return _domestic_javdb_candidate(item)
 
 
 def find_excluded_javdb_tag(tags: list[str] | None) -> str | None:
@@ -887,8 +912,8 @@ def find_excluded_javdb_tag(tags: list[str] | None) -> str | None:
 
 
 def javdb_tags_ok(item: dict[str, Any]) -> bool | None:
-    """Return True/False when JavDB tag gate applies; None if item is not Japanese JAV."""
-    if not item_needs_javdb_score(item):
+    """Return True/False when JavDB tag gate applies; None when gate does not apply."""
+    if not _javdb_gate_applies(item):
         return None
     q = item.get("javdb_query") or {}
     if q.get("query_status") != "ok":
@@ -897,8 +922,8 @@ def javdb_tags_ok(item: dict[str, Any]) -> bool | None:
 
 
 def _javdb_popularity_count_ok(item: dict[str, Any], count_field: str) -> bool | None:
-    """Return True/False when a popularity-count gate applies; None if not Japanese JAV."""
-    if not item_needs_javdb_score(item):
+    """Return True/False when a popularity-count gate applies; None when gate does not apply."""
+    if not _javdb_gate_applies(item):
         return None
     q = item.get("javdb_query") or {}
     if q.get("query_status") != "ok":
@@ -961,7 +986,7 @@ def _javdb_popularity_count_skip_reason(
 
 
 def javdb_reviews_ok(item: dict[str, Any]) -> bool | None:
-    """Return True/False when JavDB reviews (rating count) gate applies; None if not Japanese JAV."""
+    """Return True/False when JavDB reviews (rating count) gate applies; None when gate does not apply."""
     return _javdb_popularity_count_ok(item, "reviews_count")
 
 
@@ -976,7 +1001,7 @@ def javdb_reviews_skip_reason(item: dict[str, Any]) -> str:
 
 
 def javdb_watched_ok(item: dict[str, Any]) -> bool | None:
-    """Return True/False when JavDB watched (App 评价) gate applies; None if not Japanese JAV."""
+    """Return True/False when JavDB watched (App 评价) gate applies; None when gate does not apply."""
     return _javdb_popularity_count_ok(item, "watched_count")
 
 
@@ -995,8 +1020,8 @@ def javdb_score_ok(
     *,
     min_score: float = JAVDB_MIN_DOWNLOAD_SCORE,
 ) -> bool | None:
-    """Return True/False when JavDB score applies; None if item is not Japanese JAV."""
-    if not item_needs_javdb_score(item):
+    """Return True/False when JavDB score applies; None when gate does not apply."""
+    if not _javdb_gate_applies(item):
         return None
     q = item.get("javdb_query") or {}
     if q.get("query_status") != "ok":
@@ -1035,11 +1060,13 @@ def ensure_javdb_score_gate(
         return True
 
     number = item.get("av_number") or extract_av_number(item.get("title") or item.get("name") or "")
-    if not number:
+    is_jav = _is_jav_report_region(item)
+    if is_jav and not number:
         item["skip_reason"] = "javdb_no_number"
         _clear_download_selection(item)
         return False
-    item["av_number"] = number
+    if number:
+        item["av_number"] = number
 
     q = item.get("javdb_query") or {}
     q_number = (q.get("number") or "").strip().upper()
@@ -1047,11 +1074,14 @@ def ensure_javdb_score_gate(
         item.pop("javdb_query", None)
         item.pop("javdb", None)
 
-    if query_if_missing and not item.get("javdb_query"):
+    if query_if_missing and number and not item.get("javdb_query"):
         own_client = client is None
         if own_client:
             client = JavDBClient()
         attach_javdb_query(item, client)
+
+    if _domestic_javdb_candidate(item) and not _javdb_gate_applies(item):
+        return True
 
     tag_ok = javdb_tags_ok(item)
     if tag_ok is False:
@@ -1096,7 +1126,7 @@ def is_submit_eligible(
     min_score: float = JAVDB_MIN_DOWNLOAD_SCORE,
     query_if_missing: bool = False,
 ) -> bool:
-    """Region filter (国产保留规则) + JavDB score gate for Japanese items."""
+    """Region filter (国产保留规则) + JavDB score gate for Japanese and gated domestic items."""
     from content_filter import is_downloadable
 
     if not is_downloadable(item):
