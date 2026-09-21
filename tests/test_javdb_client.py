@@ -111,7 +111,8 @@ class JavDBTagTests(unittest.TestCase):
         self.assertEqual(report["series_name"], "人妻系列")
 
     def test_find_excluded_javdb_tag(self):
-        self.assertEqual(find_excluded_javdb_tag(["巨乳", "多P"]), "多P")
+        self.assertIsNone(find_excluded_javdb_tag(["巨乳", "多P"]))
+        self.assertIsNone(find_excluded_javdb_tag(["巨乳", "乳交"]))
         self.assertEqual(find_excluded_javdb_tag(["恋乳癖"]), "恋乳癖")
         self.assertEqual(find_excluded_javdb_tag(["淫语", "人妻"]), "淫语")
         self.assertEqual(find_excluded_javdb_tag(["巨乳", "颜射"]), "颜射")
@@ -158,12 +159,12 @@ class JavDBTagTests(unittest.TestCase):
             "javdb_query": {
                 "query_status": "ok",
                 "number": "HMN-900",
-                "tags": ["多P", "巨乳"],
+                "tags": ["捆绑", "巨乳"],
                 "score": 4.8,
             },
         }
         self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
-        self.assertEqual(item["skip_reason"], "javdb_tag_excluded_多P")
+        self.assertEqual(item["skip_reason"], "javdb_tag_excluded_捆绑")
         self.assertNotIn("selected_magnet", item)
 
     def test_ensure_javdb_score_gate_tag_before_score(self):
@@ -222,6 +223,22 @@ class JavDBTagTests(unittest.TestCase):
                 "query_status": "ok",
                 "number": "HMN-900",
                 "tags": ["巨乳"],
+                "release_date": "2026-01-01",
+                "reviews_count": 200,
+                "watched_count": 200,
+                "score": 4.5,
+            },
+        }
+        self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
+
+    def test_ensure_javdb_score_gate_allows_duop_and_rujiao_tags(self):
+        item = {
+            "content_region": "jav_censored",
+            "av_number": "HMN-900",
+            "javdb_query": {
+                "query_status": "ok",
+                "number": "HMN-900",
+                "tags": ["多P", "乳交", "巨乳"],
                 "release_date": "2026-01-01",
                 "reviews_count": 200,
                 "watched_count": 200,
