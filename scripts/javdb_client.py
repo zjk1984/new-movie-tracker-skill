@@ -831,9 +831,7 @@ JAV_REPORT_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
 JAVDB_MIN_DOWNLOAD_SCORE = float(os.environ.get("JAVDB_MIN_DOWNLOAD_SCORE", "4"))
 JAVDB_EXCLUDED_TAGS = frozenset({
     "SM",
-    "多P",
     "业余",
-    "乳交",
     "捆绑",
     "拘束",
     "局部特写",
