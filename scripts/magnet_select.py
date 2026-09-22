@@ -390,3 +390,51 @@ def apply_selection(item: dict[str, Any], javdb_client=None) -> bool:
     if not selection:
         return False
     return _apply_download_dict(item, selection)
+
+
+def maybe_javdb_magnet_fallback(item: dict[str, Any], javdb_client=None) -> bool:
+    """Fetch JavDB magnets when the post has an AV number but no download yet."""
+    if not javdb_client:
+        return bool(item.get("selected_download"))
+    if item.get("selected_download") or item.get("selected_magnet"):
+        return True
+    if item.get("skip_reason") or item.get("_pre_gate_failed"):
+        return False
+
+    from javdb_client import build_query_report, extract_av_number
+
+    number = item.get("av_number") or extract_av_number(item.get("title", ""))
+    if not number:
+        return False
+    item["av_number"] = number
+
+    try:
+        info = javdb_client.lookup(number, fetch_magnets=True, best_only=True)
+    except Exception as exc:
+        item["javdb_error"] = str(exc)
+        return False
+
+    item["javdb_query"] = build_query_report(info)
+    item["javdb"] = {
+        "id": info.get("javdb_id"),
+        "number": info.get("number"),
+        "title": info.get("title"),
+        "release_date": info.get("release_date"),
+        "content_type": info.get("content_type"),
+        "content_type_label": info.get("content_type_label"),
+        "has_cnsub": info.get("has_cnsub"),
+        "cnsub_magnet_count": info.get("cnsub_magnet_count", 0),
+        "score": info.get("score"),
+        "reviews_count": info.get("reviews_count"),
+        "watched_count": info.get("watched_count"),
+    }
+    if info.get("release_date") and not item.get("release_date"):
+        item["release_date"] = info["release_date"]
+
+    magnets = info.get("magnets") or []
+    if not magnets:
+        return False
+
+    item["javdb_magnets"] = magnets
+    item["magnets"] = list(dict.fromkeys((item.get("magnets") or []) + magnets))
+    return apply_selection(item, javdb_client)

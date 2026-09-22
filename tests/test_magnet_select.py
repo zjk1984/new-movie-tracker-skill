@@ -13,6 +13,7 @@ from magnet_select import (  # noqa: E402
     apply_selection,
     build_number_downloads,
     magnet_has_cnsub,
+    maybe_javdb_magnet_fallback,
     number_from_magnet,
     select_magnet,
 )
@@ -100,6 +101,57 @@ class MagnetCnsubTests(unittest.TestCase):
 
         selection = select_magnet(item, javdb_client=FakeJavDB())
         self.assertEqual(selection["source"], "forum_fallback")
+
+    def test_maybe_javdb_magnet_fallback_fetches_when_no_forum_links(self):
+        item = {
+            "title": "[有码] ROE-556 测试标题",
+            "magnets": [],
+        }
+
+        class FakeJavDB:
+            def lookup(self, number, *, fetch_magnets=False, cnsub=False, best_only=False):
+                self.last_fetch_magnets = fetch_magnets
+                self.last_best_only = best_only
+                return {
+                    "magnets": ["magnet:?xt=urn:btih:roe556"],
+                    "javdb_id": "1",
+                    "number": number,
+                    "title": "t",
+                    "release_date": "2026-09-22",
+                    "content_type": "jav_censored",
+                    "content_type_label": "有码",
+                    "has_cnsub": False,
+                    "cnsub_magnet_count": 0,
+                    "score": 4.34,
+                    "reviews_count": 1329,
+                    "watched_count": 130,
+                    "query_status": "ok",
+                    "magnet_status": "available",
+                    "magnet_total": 3,
+                    "magnet_filtered": 1,
+                    "best_magnet": "magnet:?xt=urn:btih:roe556",
+                }
+
+        client = FakeJavDB()
+        self.assertTrue(maybe_javdb_magnet_fallback(item, client))
+        self.assertTrue(client.last_fetch_magnets)
+        self.assertTrue(client.last_best_only)
+        self.assertEqual(item["selected_magnet"], "magnet:?xt=urn:btih:roe556")
+        self.assertEqual(item["av_number"], "ROE-556")
+        self.assertEqual(item["javdb_query"]["number"], "ROE-556")
+
+    def test_maybe_javdb_magnet_fallback_skips_when_gate_failed(self):
+        item = {
+            "title": "[有码] ROE-556",
+            "skip_reason": "javdb_score_low_3.00",
+            "magnets": [],
+        }
+
+        class FakeJavDB:
+            def lookup(self, *args, **kwargs):
+                raise AssertionError("lookup should not run when gate failed")
+
+        self.assertFalse(maybe_javdb_magnet_fallback(item, FakeJavDB()))
 
     def test_javdb_non_cnsub_when_post_has_no_magnets(self):
         item = {

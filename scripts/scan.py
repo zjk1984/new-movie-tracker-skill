@@ -1091,11 +1091,15 @@ def enrich_matched_post(page, item: dict, args, javdb_client) -> dict:
             item["ed2k"] = links["ed2k"]
             item["pikpak_sha"] = links["pikpak_sha"]
             item["hash_entries"] = links.get("hash_entries", [])
-            from magnet_select import apply_selection
+            from javdb_client import extract_av_number
+            from magnet_select import apply_selection, maybe_javdb_magnet_fallback
 
-            jd = javdb_client if getattr(args, "cnsub_priority", False) else None
+            number = extract_av_number(item.get("title") or "")
+            if number:
+                item["av_number"] = number
+
             scan_log(f"[info] selecting download: {item['title'][:40]}...")
-            if apply_selection(item, jd):
+            if apply_selection(item, javdb_client):
                 src = item.get("magnet_source") or item.get("download_source", "?")
                 scan_log(f"[info]   -> {src}")
             elif not item.get("magnets"):
@@ -1107,11 +1111,31 @@ def enrich_matched_post(page, item: dict, args, javdb_client) -> dict:
                 scan_log(f"[info]   -> no magnet; collected {n_alt} alternative(s)")
             else:
                 scan_log("[info]   -> no download selected")
+
+            if not item.get("selected_download") and maybe_javdb_magnet_fallback(
+                item, javdb_client,
+            ):
+                src = item.get("magnet_source") or item.get("download_source", "?")
+                scan_log(f"[info]   -> javdb fallback: {src}")
     elif javdb_client:
         scan_log(f"[info] javdb lookup: {item['title'][:40]}...")
         enrich_with_javdb(item, javdb_client, args)
 
     apply_item_filters(item, javdb_client, args)
+
+    if (
+        args.fetch_magnets
+        and href
+        and not item.get("selected_download")
+        and not item.get("skip_reason")
+        and not item.get("_pre_gate_failed")
+    ):
+        from magnet_select import maybe_javdb_magnet_fallback
+
+        if maybe_javdb_magnet_fallback(item, javdb_client):
+            src = item.get("magnet_source") or item.get("download_source", "?")
+            scan_log(f"[info]   -> javdb fallback (post-gate): {src}")
+
     return item
 
 

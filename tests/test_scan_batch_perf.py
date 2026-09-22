@@ -99,6 +99,37 @@ class GateBeforeFetchTests(unittest.TestCase):
         mock_attach.assert_not_called()
         mock_gate.assert_not_called()
 
+    @patch("scan.apply_item_filters")
+    @patch("magnet_select.maybe_javdb_magnet_fallback", return_value=False)
+    @patch("scan.try_gate_before_thread_fetch", return_value=True)
+    @patch("scan.extract_thread_links")
+    @patch("magnet_select.apply_selection", return_value=False)
+    def test_enrich_uses_javdb_client_for_selection(
+        self,
+        mock_apply,
+        mock_extract,
+        mock_gate,
+        mock_fallback,
+        _mock_filters,
+    ):
+        mock_extract.return_value = {
+            "magnets": [],
+            "ed2k": [],
+            "pikpak_sha": [],
+            "hash_entries": [],
+        }
+        item = {
+            "title": "[有码] ROE-556 测试",
+            "href": "thread-4.html",
+            "forum": "https://example.org/forum-37-1.html",
+        }
+        client = MagicMock()
+        args = self._args(fetch_magnets=True, cnsub_priority=False)
+        enrich_matched_post(MagicMock(), item, args, client)
+        mock_apply.assert_called_once_with(item, client)
+        self.assertEqual(item.get("av_number"), "ROE-556")
+        self.assertGreaterEqual(mock_fallback.call_count, 1)
+
     @patch("scan.extract_thread_links")
     @patch("javdb_client.ensure_javdb_score_gate", return_value=False)
     @patch("javdb_client.attach_javdb_query")
