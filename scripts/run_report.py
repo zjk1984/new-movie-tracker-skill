@@ -796,6 +796,7 @@ def _build_undownloaded_entries(
     download_report: dict[str, Any],
     *,
     output_dir: Path | str | None = None,
+    no_title_translate: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     from content_filter import is_downloadable
 
@@ -865,8 +866,6 @@ def _build_undownloaded_entries(
             if region in JAV_REGIONS:
                 _ensure_item_skip_reason(probe)
 
-            from title_translate import translate_title_for_item
-
             reason = _skip_reason_label(probe, failed_error=failed_error)
             if not group_links and reason == "未成功下载":
                 reason = "链接未抓取"
@@ -881,9 +880,16 @@ def _build_undownloaded_entries(
                 or item.get("av_number")
                 or _truncate(item.get("title", ""), 40)
             )
+            raw_title = (item.get("title") or "").replace("\n", " ").strip()
+            if no_title_translate:
+                title_zh = raw_title
+            else:
+                from title_translate import translate_title_for_item
+
+                title_zh = translate_title_for_item(probe)
             entry = {
-                "title": (item.get("title") or "").replace("\n", " ").strip(),
-                "title_zh": translate_title_for_item(probe),
+                "title": raw_title,
+                "title_zh": title_zh,
                 "label": label,
                 "release_date": _item_release_date(probe) or _item_release_date(item),
                 "reason": reason,
@@ -947,11 +953,13 @@ def _md_undownloaded_posts(
     download_report: dict[str, Any],
     *,
     output_dir: Path | str | None = None,
+    no_title_translate: bool = False,
 ) -> str:
     jav_entries, domestic_entries = _build_undownloaded_entries(
         matched,
         download_report,
         output_dir=output_dir,
+        no_title_translate=no_title_translate,
     )
     total = len(jav_entries) + len(domestic_entries)
     if total == 0:
@@ -1418,7 +1426,12 @@ def write_run_report(
 
 {_md_fail_links(failed_items)}
 
-{_md_undownloaded_posts(scan_stats.get("matched") or [], download_report, output_dir=output_dir)}
+{_md_undownloaded_posts(
+        scan_stats.get("matched") or [],
+        download_report,
+        output_dir=output_dir,
+        no_title_translate=bool(scan_stats.get("batch_mode")),
+    )}
 
 ## 下载成功
 

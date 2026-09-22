@@ -15,6 +15,7 @@ SCRIPTS_DIR = SKILL_DIR / "scripts"
 DEFAULT_FORUM_URL = "https://www.sehuatang.org/forum-37-1.html"
 DEFAULT_INITIAL_PAGE = 960
 PAGES_PER_RUN = 10
+DEFAULT_FETCH_WORKERS = 5
 STATE_FILENAME = "forum37_batch_state.json"
 
 
@@ -127,6 +128,7 @@ def run_batch(args: argparse.Namespace) -> int:
         cmd.append("--no-feishu")
     if args.output_dir:
         cmd.extend(["--output-dir", str(output_dir)])
+    cmd.extend(["--batch-mode", "--fetch-workers", str(args.fetch_workers)])
 
     print("[info] running:", " ".join(cmd))
     rc = subprocess.call(cmd, cwd=str(SKILL_DIR))
@@ -225,6 +227,15 @@ def main() -> int:
         action="store_true",
         help="Clear saved page cursor (next run uses --initial-page)",
     )
+    parser.add_argument(
+        "--fetch-workers",
+        type=int,
+        default=DEFAULT_FETCH_WORKERS,
+        help=(
+            f"Parallel thread-fetch workers for batch scan "
+            f"(default: {DEFAULT_FETCH_WORKERS})"
+        ),
+    )
     args = parser.parse_args()
     if args.no_headless:
         args.headless = False
@@ -233,6 +244,9 @@ def main() -> int:
         return 2
     if args.initial_page < 1:
         print("[err] --initial-page must be >= 1", file=sys.stderr)
+        return 2
+    if args.fetch_workers < 1:
+        print("[err] --fetch-workers must be >= 1", file=sys.stderr)
         return 2
     return run_batch(args)
 

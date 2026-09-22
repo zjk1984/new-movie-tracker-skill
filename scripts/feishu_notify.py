@@ -206,11 +206,14 @@ def analyze_scan(
 
     matched = _load_matched_paths(result_paths)
     scan_times: list[str] = []
+    batch_mode = False
     for path in result_paths:
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
             if data.get("scan_time"):
                 scan_times.append(data["scan_time"])
+            if data.get("batch_mode"):
+                batch_mode = True
 
     # Merge ed2k from refetch by href
     ed2k_by_href: dict[str, list[str]] = {}
@@ -293,6 +296,7 @@ def analyze_scan(
         "matched": matched,
         "javdb_summary": javdb_summary,
         "skipped_jav_score": skipped_jav_score,
+        "batch_mode": batch_mode,
     }
 
 
