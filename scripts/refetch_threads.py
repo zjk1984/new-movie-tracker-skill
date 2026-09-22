@@ -14,7 +14,8 @@ sys.path.insert(0, str(SKILL_DIR / "scripts"))
 
 from content_filter import apply_region_filter
 from forum_browser import pass_age_gate
-from magnet_select import apply_selection
+from javdb_client import JavDBClient
+from magnet_select import apply_selection, maybe_javdb_magnet_fallback
 from scan import extract_thread_links
 
 
@@ -57,7 +58,10 @@ def refetch_threads(
                 continue
             links = extract_thread_links(page, href, forum_url)
             item.update(links)
-            apply_selection(item, javdb_client=None)
+            javdb_client = JavDBClient()
+            apply_selection(item, javdb_client)
+            if not item.get("selected_download"):
+                maybe_javdb_magnet_fallback(item, javdb_client)
             apply_region_filter(item, region_filter=True)
             m = len(item.get("magnets") or [])
             e = len(item.get("ed2k") or [])
