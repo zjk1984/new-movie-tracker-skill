@@ -722,7 +722,7 @@ class BatchSplitByNumberTests(unittest.TestCase):
         matched = [_mida783_batch_thread()]
         download_report = {"succeeded": [], "failed": []}
 
-        def fake_attach(item, _client):
+        def fake_attach(item, _client, **kwargs):
             number = (item.get("av_number") or "").upper()
             scores = {
                 "MIDA-783": 4.2,

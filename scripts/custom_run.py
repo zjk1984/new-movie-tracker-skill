@@ -102,6 +102,17 @@ def main() -> int:
         action="store_true",
         help="Disable Feishu notify even if FEISHU_RECEIVE_ID is set",
     )
+    parser.add_argument(
+        "--batch-mode",
+        action="store_true",
+        help="Enable forum-37 batch performance optimizations in scan.py",
+    )
+    parser.add_argument(
+        "--fetch-workers",
+        type=int,
+        default=None,
+        help="Parallel thread-fetch workers for batch/two-phase scan (default: scan.py default)",
+    )
     args = parser.parse_args()
     if args.no_headless:
         args.headless = False
@@ -129,6 +140,8 @@ def main() -> int:
         max_pages=args.max_pages,
         headless=args.headless,
         pikpak_folder=args.pikpak_folder,
+        batch_mode=args.batch_mode,
+        fetch_workers=args.fetch_workers,
     )
 
     feishu_enabled = args.feishu or (

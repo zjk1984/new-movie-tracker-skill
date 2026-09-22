@@ -57,6 +57,8 @@ def run_scan(
             cmd.extend(["--list-workers", str(list_workers)])
         if fetch_workers is not None:
             cmd.extend(["--fetch-workers", str(fetch_workers)])
+    if getattr(args, "batch_mode", False):
+        cmd.append("--batch-mode")
     print("[info] running scan:", " ".join(cmd))
     return subprocess.call(cmd, cwd=str(SKILL_DIR))
 

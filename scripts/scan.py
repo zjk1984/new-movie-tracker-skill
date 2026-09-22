@@ -566,7 +566,17 @@ def _wait_past_cloudflare_page(page, *, timeout_s: int = 45) -> bool:
     return False
 
 
-def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
+def _thread_fetch_wait_ms(args) -> int:
+    return 1000 if getattr(args, "batch_mode", False) else 2000
+
+
+def extract_thread_links(
+    page,
+    href: str,
+    forum_url: str,
+    *,
+    args=None,
+) -> dict[str, list]:
     if not href:
         return {"magnets": [], "ed2k": [], "pikpak_sha": [], "hash_entries": []}
     from forum_browser import canonical_thread_href
@@ -579,7 +589,7 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
     hash_entries: list[dict] = []
     try:
         page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(_thread_fetch_wait_ms(args))
         pass_age_gate(page)
         page.wait_for_timeout(1000)
         if not _wait_past_cloudflare_page(page):
@@ -643,8 +653,8 @@ def extract_thread_links(page, href: str, forum_url: str) -> dict[str, list]:
     }
 
 
-def extract_magnets(page, href: str, forum_url: str) -> list[str]:
-    return extract_thread_links(page, href, forum_url)["magnets"]
+def extract_magnets(page, href: str, forum_url: str, *, args=None) -> list[str]:
+    return extract_thread_links(page, href, forum_url, args=args)["magnets"]
 
 
 def build_javdb_summary(matched: list[dict]) -> dict:
@@ -960,7 +970,11 @@ def list_forum_pages(
                 break
 
         if page_num < end_page:
-            page.wait_for_timeout(4000 if match_ctx.since or start_page > 1 else 2000)
+            if getattr(args, "batch_mode", False):
+                delay_ms = 2000 if match_ctx.since or start_page > 1 else 2000
+            else:
+                delay_ms = 4000 if match_ctx.since or start_page > 1 else 2000
+            page.wait_for_timeout(delay_ms)
 
     return ForumListResult(forum_url, candidates, total_posts, pages_scanned, stopped)
 
@@ -997,6 +1011,8 @@ def apply_item_filters(item: dict, javdb_client, args) -> None:
     if not is_downloadable(item):
         scan_log(f"[skip] {item.get('content_region')}: {item['title'][:50]}")
         return
+    if item.get("_pre_gate_failed"):
+        return
     if javdb_client and getattr(args, "javdb_query", True):
         from content_filter import is_downloadable as _is_dl
         from javdb_client import attach_javdb_query, ensure_javdb_score_gate
@@ -1006,7 +1022,7 @@ def apply_item_filters(item: dict, javdb_client, args) -> None:
             scan_log(f"[info]   javdb: deferred per-magnet gate ({n} code(s))")
             return
         if _is_dl(item) and not item.get("javdb_query"):
-            attach_javdb_query(item, javdb_client)
+            attach_javdb_query(item, javdb_client, fetch_magnets=False)
             q = item.get("javdb_query") or {}
             scan_log(f"[info]   javdb: {q.get('summary', '')}")
         if _is_dl(item) and not ensure_javdb_score_gate(item, javdb_client):
@@ -1016,33 +1032,81 @@ def apply_item_filters(item: dict, javdb_client, args) -> None:
             )
 
 
+def try_gate_before_thread_fetch(item: dict, javdb_client, args) -> bool:
+    """Pre-gate from title AV number; return False to skip opening the thread."""
+    if not getattr(args, "gate_before_fetch", False):
+        return True
+    if not javdb_client or not getattr(args, "region_filter", True):
+        return True
+
+    from content_filter import apply_region_filter, is_downloadable
+    from javdb_client import attach_javdb_query, ensure_javdb_score_gate, extract_av_number
+
+    apply_region_filter(item, region_filter=True)
+    if not is_downloadable(item):
+        scan_log(f"[skip] {item.get('content_region')}: {item['title'][:50]}")
+        item["_pre_gate_failed"] = True
+        return False
+
+    if _thread_defers_javdb_gate(item):
+        return True
+
+    number = extract_av_number(item.get("title") or "")
+    if not number:
+        return True
+
+    item["av_number"] = number
+    if not getattr(args, "javdb_query", True):
+        return True
+
+    if not item.get("javdb_query"):
+        attach_javdb_query(item, javdb_client, fetch_magnets=False)
+        q = item.get("javdb_query") or {}
+        scan_log(f"[info]   javdb (pre-gate): {q.get('summary', '')}")
+
+    if not ensure_javdb_score_gate(item, javdb_client):
+        item["_pre_gate_failed"] = True
+        scan_log(
+            f"[skip] gate-before-fetch: {item.get('skip_reason', '?')} "
+            f"{item['title'][:50]}",
+        )
+        return False
+    return True
+
+
 def enrich_matched_post(page, item: dict, args, javdb_client) -> dict:
     """Phase 2: open thread, extract links, apply selection and content filters."""
     forum_url = item.get("forum") or ""
     href = item.get("href") or ""
     if args.fetch_magnets and href:
-        scan_log(f"[info] fetching links for: {item['title'][:40]}...")
-        links = extract_thread_links(page, href, forum_url)
-        item["magnets"] = links["magnets"]
-        item["ed2k"] = links["ed2k"]
-        item["pikpak_sha"] = links["pikpak_sha"]
-        item["hash_entries"] = links.get("hash_entries", [])
-        from magnet_select import apply_selection
-
-        jd = javdb_client if getattr(args, "cnsub_priority", False) else None
-        scan_log(f"[info] selecting download: {item['title'][:40]}...")
-        if apply_selection(item, jd):
-            src = item.get("magnet_source") or item.get("download_source", "?")
-            scan_log(f"[info]   -> {src}")
-        elif not item.get("magnets"):
-            n_alt = (
-                len(item.get("ed2k") or [])
-                + len(item.get("pikpak_sha") or [])
-                + len(item.get("hash_entries") or [])
-            )
-            scan_log(f"[info]   -> no magnet; collected {n_alt} alternative(s)")
+        if not try_gate_before_thread_fetch(item, javdb_client, args):
+            item["magnets"] = []
+            item["ed2k"] = []
+            item["pikpak_sha"] = []
+            item["hash_entries"] = []
         else:
-            scan_log("[info]   -> no download selected")
+            scan_log(f"[info] fetching links for: {item['title'][:40]}...")
+            links = extract_thread_links(page, href, forum_url, args=args)
+            item["magnets"] = links["magnets"]
+            item["ed2k"] = links["ed2k"]
+            item["pikpak_sha"] = links["pikpak_sha"]
+            item["hash_entries"] = links.get("hash_entries", [])
+            from magnet_select import apply_selection
+
+            jd = javdb_client if getattr(args, "cnsub_priority", False) else None
+            scan_log(f"[info] selecting download: {item['title'][:40]}...")
+            if apply_selection(item, jd):
+                src = item.get("magnet_source") or item.get("download_source", "?")
+                scan_log(f"[info]   -> {src}")
+            elif not item.get("magnets"):
+                n_alt = (
+                    len(item.get("ed2k") or [])
+                    + len(item.get("pikpak_sha") or [])
+                    + len(item.get("hash_entries") or [])
+                )
+                scan_log(f"[info]   -> no magnet; collected {n_alt} alternative(s)")
+            else:
+                scan_log("[info]   -> no download selected")
     elif javdb_client:
         scan_log(f"[info] javdb lookup: {item['title'][:40]}...")
         enrich_with_javdb(item, javdb_client, args)
@@ -1309,6 +1373,7 @@ def save_scan_results(
                 "scan_time": beijing_now_iso(),
                 "cutoff": cutoff.strftime("%Y-%m-%d"),
                 "today": today.strftime("%Y-%m-%d"),
+                "batch_mode": bool(getattr(args, "batch_mode", False)),
                 "matched": all_matched,
                 "javdb_summary": javdb_summary,
                 "total_posts": total_posts,
@@ -1412,12 +1477,22 @@ def prepare_scrape_setup(args):
     return actors, match_names, javdb_client, match_ctx, cutoff, today, since, until
 
 
+def use_two_phase_scan(args) -> bool:
+    """True when scan should use parallel list/enrich workers."""
+    if getattr(args, "serial", False):
+        return False
+    if not getattr(args, "two_phase", False):
+        return False
+    if len(args.urls) > 1:
+        return True
+    return bool(
+        getattr(args, "parallel_enrich", False)
+        or getattr(args, "batch_mode", False),
+    )
+
+
 def scrape(args):
-    if (
-        getattr(args, "two_phase", False)
-        and len(args.urls) > 1
-        and not getattr(args, "serial", False)
-    ):
+    if use_two_phase_scan(args):
         from scan_phases import scrape_two_phase
 
         scrape_two_phase(args)
@@ -1687,6 +1762,24 @@ def main():
         default=int(os.environ.get("SCAN_FETCH_WORKERS", "4")),
         help="Parallel thread-fetch workers in two-phase mode (default: 4)",
     )
+    parser.add_argument(
+        "--batch-mode",
+        action="store_true",
+        help=(
+            "Forum-37 batch optimizations: title pre-gate, parallel enrich, "
+            "tighter Playwright waits, skip undownloaded title translation"
+        ),
+    )
+    parser.add_argument(
+        "--parallel-enrich",
+        action="store_true",
+        help="Enable two-phase parallel thread enrich for single-forum scans",
+    )
+    parser.add_argument(
+        "--gate-before-fetch",
+        action="store_true",
+        help="Run JavDB gate from title before opening forum threads",
+    )
     args = parser.parse_args()
     from env_utils import load_env_local
 
@@ -1699,8 +1792,16 @@ def main():
         args.javdb = True
     if args.cnsub_priority:
         args.fetch_magnets = True
+    if args.batch_mode:
+        args.gate_before_fetch = True
+        args.parallel_enrich = True
     args.region_filter = not args.all_regions
     args.javdb_query = not args.no_javdb_query
+    if args.batch_mode:
+        print(
+            "[info] batch mode: gate-before-fetch, parallel enrich, "
+            "tighter waits, no undownloaded title translation",
+        )
     if args.region_filter:
         print("[info] download filter: JAV 有码/无码 + 国产/ed2k(泄密/流出/AI短剧/熟女/酒店偷拍/ed2k; 排除私拍/厕拍/黑人/情色分享/伪番号/OnlyFans/AI增强)")
     if args.javdb_query:

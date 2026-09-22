@@ -798,14 +798,19 @@ def build_error_report(number: str, error: str) -> dict[str, Any]:
     }
 
 
-def attach_javdb_query(item: dict[str, Any], client: JavDBClient) -> None:
+def attach_javdb_query(
+    item: dict[str, Any],
+    client: JavDBClient,
+    *,
+    fetch_magnets: bool = True,
+) -> None:
     """Query JavDB by number and attach javdb_query report to item."""
     number = item.get("av_number") or extract_av_number(item.get("title", ""))
     if not number:
         return
     item["av_number"] = number
     try:
-        info = client.lookup(number, fetch_magnets=True, best_only=True)
+        info = client.lookup(number, fetch_magnets=fetch_magnets, best_only=True)
         item["javdb_query"] = build_query_report(info)
         item["javdb"] = {
             "id": info.get("javdb_id"),
@@ -1076,7 +1081,7 @@ def ensure_javdb_score_gate(
         own_client = client is None
         if own_client:
             client = JavDBClient()
-        attach_javdb_query(item, client)
+        attach_javdb_query(item, client, fetch_magnets=False)
 
     if _domestic_javdb_candidate(item) and not _javdb_gate_applies(item):
         return True
