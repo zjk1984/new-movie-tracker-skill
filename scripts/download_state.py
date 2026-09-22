@@ -28,6 +28,7 @@ def empty_state() -> dict[str, Any]:
         "magnets": {},
         "hashes": {},
         "threads": {},
+        "av_numbers": {},
     }
 
 
@@ -43,6 +44,7 @@ def load_state(path: Path) -> dict[str, Any]:
     data.setdefault("magnets", {})
     data.setdefault("hashes", {})
     data.setdefault("threads", {})
+    data.setdefault("av_numbers", {})
     return data
 
 
@@ -54,6 +56,46 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 def item_thread_key(item: dict[str, Any]) -> str | None:
     href = (item.get("href") or "").strip()
     return href or None
+
+
+def item_av_number(item: dict[str, Any]) -> str | None:
+    av = (item.get("av_number") or "").strip().upper()
+    if av:
+        return av
+    try:
+        from javdb_client import extract_av_number
+    except ImportError:
+        extract_av_number = None  # type: ignore[assignment,misc]
+    if extract_av_number is None:
+        return None
+    for field in ("name", "title", "uri", "url", "magnet"):
+        number = extract_av_number(str(item.get(field) or ""))
+        if number:
+            return number
+    return None
+
+
+def _item_magnet_text(item: dict[str, Any]) -> str:
+    return str(
+        item.get("magnet")
+        or item.get("url")
+        or item.get("uri")
+        or "",
+    )
+
+
+def _prefer_cnsub_download(
+    existing: dict[str, Any],
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    """When two download rows share a number, keep the cnsub magnet."""
+    from magnet_select import magnet_has_cnsub
+
+    old_mag = _item_magnet_text(existing)
+    new_mag = _item_magnet_text(candidate)
+    if magnet_has_cnsub(new_mag) and not magnet_has_cnsub(old_mag):
+        return candidate
+    return existing
 
 
 def item_download_key(item: dict[str, Any]) -> str | None:
@@ -81,6 +123,9 @@ def is_already_submitted(item: dict[str, Any], state: dict[str, Any]) -> bool:
         thread_key = item_thread_key(item)
         if thread_key and thread_key in state.get("threads", {}):
             return True
+    av = item_av_number(item)
+    if av and av in state.get("av_numbers", {}):
+        return True
     return False
 
 
@@ -98,7 +143,33 @@ def _thread_dedup_enabled() -> bool:
 
 
 def filter_new_items(items: list[dict[str, Any]], state: dict[str, Any]) -> list[dict[str, Any]]:
-    return [item for item in items if not is_already_submitted(item, state)]
+    kept: list[dict[str, Any]] = []
+    seen_av: dict[str, int] = {}
+    av_bucket = state.get("av_numbers") or {}
+
+    for item in items:
+        av = item_av_number(item)
+        if is_already_submitted(item, state):
+            if av and av in av_bucket:
+                item["skip_reason"] = "repeat_av_number"
+            continue
+
+        if av:
+            if av in seen_av:
+                idx = seen_av[av]
+                existing = kept[idx]
+                preferred = _prefer_cnsub_download(existing, item)
+                if preferred is existing:
+                    item["skip_reason"] = "duplicate_av_number"
+                else:
+                    existing["skip_reason"] = "duplicate_av_number"
+                    kept[idx] = preferred
+                continue
+            seen_av[av] = len(kept)
+
+        kept.append(item)
+
+    return kept
 
 
 def mark_submitted(
@@ -111,6 +182,7 @@ def mark_submitted(
     magnets = state.setdefault("magnets", {})
     hashes = state.setdefault("hashes", {})
     threads = state.setdefault("threads", {})
+    av_numbers = state.setdefault("av_numbers", {})
     for item in items:
         uri = item.get("uri") or item.get("pikpak_sha") or item.get("url") or item.get("magnet") or ""
         record = {
@@ -130,6 +202,9 @@ def mark_submitted(
         thread_key = item_thread_key(item)
         if thread_key:
             threads[thread_key] = key or uri
+        av = item_av_number(item)
+        if av:
+            av_numbers[av] = record
 
 
 def touch_run(state: dict[str, Any], *, when: datetime | None = None) -> None:
