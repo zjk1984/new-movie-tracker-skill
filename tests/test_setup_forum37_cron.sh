@@ -21,10 +21,10 @@ echo "$DRY" | grep -q 'would install forum37 cron line:'
 echo "$DRY" | grep -q 'new-movie-tracker-forum37-batch'
 echo "$DRY" | grep -q 'forum37_batch_run.sh'
 echo "$DRY" | grep -q 'forum37_batch_run.log'
-echo "$DRY" | grep -q '0 18 \* \* 2,4,6'
+echo "$DRY" | grep -q '0 18 \* \* \*'
 echo "$DRY" | grep -q 'TZ=Asia/Shanghai'
 
-"$SCRIPT" --help | grep -qi 'Tue/Thu/Sat'
+"$SCRIPT" --help | grep -qi 'daily'
 "$SCRIPT" --help | grep -qi '18:00'
 "$SCRIPT" --help | grep -qi 'bc-d4fb1f8c'
 
