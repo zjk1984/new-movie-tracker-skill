@@ -397,8 +397,8 @@ class JavDBReviewsGateTests(unittest.TestCase):
             )
             self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
 
-    def test_flva_054_watched_gate_fails_despite_high_reviews_count(self):
-        """FLVA-054: App 评价 318 (watched_count) vs 1784 评分人数 (reviews_count)."""
+    def test_flva_054_watched_compensation_passes_at_318(self):
+        """FLVA-054: watched 318 < 500 but passes compensation (reviews 1784, score ≥4.0)."""
         with patch("javdb_client.current_beijing_year", return_value=2026):
             item = self._item(
                 release_date="2024-06-05",
@@ -408,9 +408,63 @@ class JavDBReviewsGateTests(unittest.TestCase):
                 av_number="FLVA-054",
             )
             self.assertTrue(javdb_reviews_ok(item))
-            self.assertFalse(javdb_watched_ok(item))
+            self.assertTrue(javdb_watched_ok(item))
+            self.assertEqual(
+                item["javdb_query"]["javdb_gate_path"],
+                "watched_compensation",
+            )
+            self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
+
+    def test_roe_224_watched_compensation_passes(self):
+        """ROE-224: watched 267 < 500, reviews 1586, score 4.34 → compensation pass."""
+        with patch("javdb_client.current_beijing_year", return_value=2026):
+            item = self._item(
+                release_date="2024-03-12",
+                reviews_count=1586,
+                watched_count=267,
+                score=4.34,
+                av_number="ROE-224",
+            )
+            self.assertTrue(javdb_reviews_ok(item))
+            self.assertTrue(javdb_watched_ok(item))
+            self.assertEqual(
+                item["javdb_query"]["javdb_gate_path"],
+                "watched_compensation",
+            )
+            self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
+
+    def test_juq_664_watched_compensation_passes(self):
+        """JUQ-664: watched 355 < 500, reviews 1325, score 4.02 → compensation pass."""
+        with patch("javdb_client.current_beijing_year", return_value=2026):
+            item = self._item(
+                release_date="2024-05-28",
+                reviews_count=1325,
+                watched_count=355,
+                score=4.02,
+                av_number="JUQ-664",
+            )
+            self.assertTrue(javdb_reviews_ok(item))
+            self.assertTrue(javdb_watched_ok(item))
+            self.assertEqual(
+                item["javdb_query"]["javdb_gate_path"],
+                "watched_compensation",
+            )
+            self.assertTrue(ensure_javdb_score_gate(item, query_if_missing=False))
+
+    def test_aldn_313_reviews_fail_blocks_compensation(self):
+        """ALDN-313: reviews 348 < 1000 → blocked at reviews, never reaches compensation."""
+        with patch("javdb_client.current_beijing_year", return_value=2026):
+            item = self._item(
+                release_date="2024-08-06",
+                reviews_count=348,
+                watched_count=120,
+                score=4.5,
+                av_number="ALDN-313",
+            )
+            self.assertFalse(javdb_reviews_ok(item))
             self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
-            self.assertEqual(item["skip_reason"], "javdb_watched_low_318")
+            self.assertEqual(item["skip_reason"], "javdb_reviews_low_348")
+            self.assertNotIn("javdb_gate_path", item.get("javdb_query", {}))
 
     def test_is_recent_release_within_thirty_days(self):
         from datetime import datetime
@@ -518,15 +572,19 @@ class JavDBReviewsGateTests(unittest.TestCase):
     def test_javdb_watched_ok_prior_year_needs_500(self):
         y = self.MOCK_YEAR
         with patch("javdb_client.current_beijing_year", return_value=y):
-            with self.subTest("below threshold"):
+            with self.subTest("below standard but compensation passes"):
                 item = self._item(
                     release_date=f"{y - 1}-06-01",
                     reviews_count=5000,
                     watched_count=499,
                 )
                 self.assertTrue(javdb_reviews_ok(item))
-                self.assertFalse(javdb_watched_ok(item))
-            with self.subTest("at threshold"):
+                self.assertTrue(javdb_watched_ok(item))
+                self.assertEqual(
+                    item["javdb_query"]["javdb_gate_path"],
+                    "watched_compensation",
+                )
+            with self.subTest("at standard threshold"):
                 item = self._item(
                     release_date=f"{y - 1}-06-01",
                     reviews_count=5000,

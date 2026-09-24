@@ -834,6 +834,8 @@ def attach_javdb_query(
 
 JAV_REPORT_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
 JAVDB_MIN_DOWNLOAD_SCORE = float(os.environ.get("JAVDB_MIN_DOWNLOAD_SCORE", "4"))
+JAVDB_COMP_WATCHED_FLOOR = int(os.environ.get("JAVDB_COMP_WATCHED_FLOOR", "250"))
+JAVDB_COMP_MIN_SCORE = float(os.environ.get("JAVDB_COMP_MIN_SCORE", "4.0"))
 JAVDB_EXCLUDED_TAGS = frozenset({
     "SM",
     "业余",
@@ -1005,7 +1007,54 @@ def javdb_reviews_skip_reason(item: dict[str, Any]) -> str:
 
 def javdb_watched_ok(item: dict[str, Any]) -> bool | None:
     """Return True/False when JavDB watched (App 评价) gate applies; None when gate does not apply."""
-    return _javdb_popularity_count_ok(item, "watched_count")
+    if not _javdb_gate_applies(item):
+        return None
+    q = item.get("javdb_query") or {}
+    if q.get("query_status") != "ok":
+        return True
+
+    release_date = q.get("release_date")
+    if parse_release_date(release_date) is None:
+        return False
+
+    days = days_since_release(release_date)
+    if days is None:
+        return False
+
+    if is_zero_reviews_ok_release(release_date):
+        return True
+
+    count = _parse_reviews_count(q.get("watched_count"))
+    if count is None:
+        return False
+
+    if days <= JAVDB_RECENT_RELEASE_DAYS:
+        return count >= JAVDB_RECENT_MIN_REVIEWS
+
+    release_year = parse_release_date_year(release_date)
+    if release_year is None:
+        return False
+
+    if count >= watched_threshold_for_year(release_year):
+        return True
+
+    current_year = current_beijing_year()
+    if release_year < current_year:
+        rt = reviews_threshold_for_year(release_year, current_year=current_year)
+        reviews = _parse_reviews_count(q.get("reviews_count"))
+        score = q.get("score")
+        score_val = float(score) if score is not None else None
+        if (
+            reviews is not None
+            and reviews >= rt
+            and score_val is not None
+            and score_val >= JAVDB_COMP_MIN_SCORE
+            and count >= JAVDB_COMP_WATCHED_FLOOR
+        ):
+            q["javdb_gate_path"] = "watched_compensation"
+            return True
+
+    return False
 
 
 def javdb_watched_skip_reason(item: dict[str, Any]) -> str:

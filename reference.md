@@ -218,7 +218,9 @@ Applies to Japanese **有码/无码/FC2** and to **国产** (`domestic_leak`) po
 | Current year (older than 30 days) | ≥ 100 | ≥ 100 |
 | Prior years | ≥ 1000 | ≥ 500 |
 
-Missing `release_date` fails. Missing count fails for releases older than 7 days. Constants: `JAVDB_ZERO_REVIEWS_DAYS`, `JAVDB_RECENT_RELEASE_DAYS`, `JAVDB_RECENT_MIN_REVIEWS`.
+**Watched compensation track** (prior years only, when standard watched threshold fails): `reviews_count` ≥ prior-year threshold, `score` ≥ `JAVDB_COMP_MIN_SCORE` (default 4.0), `watched_count` ≥ `JAVDB_COMP_WATCHED_FLOOR` (default 250). Sets `javdb_query.javdb_gate_path` to `watched_compensation`. Pipeline order unchanged (`reviews` must pass before compensation is evaluated).
+
+Missing `release_date` fails. Missing count fails for releases older than 7 days. Constants: `JAVDB_ZERO_REVIEWS_DAYS`, `JAVDB_RECENT_RELEASE_DAYS`, `JAVDB_RECENT_MIN_REVIEWS`, `JAVDB_COMP_WATCHED_FLOOR`, `JAVDB_COMP_MIN_SCORE`.
 
 Skip reasons: `javdb_no_release_date`, `javdb_no_reviews_count`, `javdb_reviews_low_{n}`, `javdb_no_watched_count`, `javdb_watched_low_{n}`.
 
@@ -232,6 +234,8 @@ Summary labels: `watched_count` → 「看过 N 人」; `reviews_count` → 「�
 | `JAVDB_TOKEN` | Optional bearer token (overrides saved login) |
 | `JAVDB_AUTH_FILE` | Path to saved login JSON (default `<skill-dir>/javdb_auth.json`) |
 | `JAVDB_DEVICE_UUID` | Stable device id for API params |
+| `JAVDB_COMP_WATCHED_FLOOR` | Prior-year watched compensation floor (default `250`) |
+| `JAVDB_COMP_MIN_SCORE` | Min score for watched compensation track (default `4.0`) |
 
 ### Login
 
