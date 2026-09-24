@@ -239,7 +239,7 @@ When the user wants **Chinese-subtitled magnets** from forum posts and automatic
 5. No-magnet fallback order: PikPak SHA → ed2k → JavDB cnsub (when `--cnsub-priority`)
 6. Submit `selected_download` (magnet / ed2k / feature code) to PikPak **My Pack** (有码 + 无码 JAV only)
 
-**JavDB download gates (日本有码/无码 + 国产有番号且 JavDB 有数据):** tags → `reviews_count`（评分人数）→ `watched_count`（App「评价」/看过人数）→ score (≥ 4.0). Popularity thresholds (Asia/Shanghai, 北京时间): within **7 calendar days** of release, count may be **0 or missing** (pass); **8–30 days** requires ≥ **10**; older current-year releases ≥ 100. Prior years: `reviews_count` ≥ **1000**, `watched_count` ≥ **500**. Missing `release_date` fails. 国产无番号或 JavDB 查不到/失败时仍跳过 JavDB 门控（沿用原国产规则）。
+**JavDB download gates (日本有码/无码 + 国产有番号且 JavDB 有数据):** tags → `reviews_count`（评分人数）→ `watched_count`（App「评价」/看过人数）→ score (≥ 4.0). Popularity thresholds (Asia/Shanghai, 北京时间): within **7 calendar days** of release, count may be **0 or missing** (pass); **8–30 days** requires ≥ **10**; older current-year releases ≥ 100. Prior years: `reviews_count` ≥ **1000**, `watched_count` ≥ **500**. **补偿轨（仅往年、标准 watched 未过）：** `reviews_count` 仍 ≥ 往年阈值、`score` ≥ 4.0、`watched_count` ≥ **250**（`JAVDB_COMP_WATCHED_FLOOR`）→ 通过并在 `javdb_query.javdb_gate_path` 标记 `watched_compensation`。Missing `release_date` fails. 国产无番号或 JavDB 查不到/失败时仍跳过 JavDB 门控（沿用原国产规则）。
 
 **Save PikPak token once (persisted in skill directory):**
 ```bash

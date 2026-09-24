@@ -727,8 +727,12 @@ def _match_reason_label(
             if not number or not q_number or q_number == number.upper():
                 score = q.get("score")
         if score is not None:
-            return f"JavDB 通过 · {float(score):.2f}"
-        return "JavDB 通过"
+            label = f"JavDB 通过 · {float(score):.2f}"
+        else:
+            label = "JavDB 通过"
+        if q.get("javdb_gate_path") == "watched_compensation":
+            label += " (补偿)"
+        return label
     subtype = _success_item_subtype(item, matched_by_href)
     return f"匹配: {subtype}"
 
