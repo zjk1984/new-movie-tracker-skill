@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install forum-37 batch scan cron (Tue/Thu/Sat 18:00 Asia/Shanghai by default).
+# Install forum-37 batch scan cron (daily 18:00 Asia/Shanghai by default).
 # Usage: ./scripts/setup_forum37_cron.sh [--dry-run] [--repair-crontab] [--remove]
 set -euo pipefail
 
@@ -8,7 +8,7 @@ WRAPPER="$ROOT/scripts/forum37_batch_run.sh"
 MARK="# new-movie-tracker-forum37-batch"
 CRON_USER_FILE="$ROOT/data/cron_install_user"
 TZ_NAME="${FORUM37_CRON_TZ:-Asia/Shanghai}"
-WEEKDAYS="${FORUM37_CRON_WEEKDAYS:-2,4,6}"
+WEEKDAYS="${FORUM37_CRON_WEEKDAYS:-*}"
 TIME="${FORUM37_CRON_TIME:-18:00}"
 
 while [[ $# -gt 0 ]]; do
@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
       cat <<EOF
 Install cron job for scripts/forum37_batch_run.sh (forum-37 custom batch scan).
 
-Default schedule: Tue/Thu/Sat 18:00 Asia/Shanghai (Beijing time).
+Default schedule: daily 18:00 Asia/Shanghai (Beijing time).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically.
 
@@ -41,7 +41,7 @@ Usage:
 Environment overrides:
   FORUM37_CRON_TZ=Asia/Shanghai
   FORUM37_CRON_TIME=18:00
-  FORUM37_CRON_WEEKDAYS=2,4,6    cron DOW (0=Sun … 6=Sat; default Tue/Thu/Sat)
+  FORUM37_CRON_WEEKDAYS=*        cron DOW (0=Sun … 6=Sat; * = every day; default daily)
 
 Deploy on cron VM bc-d4fb1f8c after merge:
   cd /workspace && git pull origin main
@@ -188,7 +188,7 @@ fi
 echo "[ok] forum37 cron installed for $install_user:"
 echo "     $line"
 echo "     timezone: $TZ_NAME (system TZ should match for correct schedule)"
-echo "     weekdays: $WEEKDAYS (2=Tue, 4=Thu, 6=Sat)"
+echo "     schedule: daily at $TIME (weekdays field: $WEEKDAYS)"
 echo "     log: $ROOT/data/forum37_batch_run.log"
 crontab -l 2>/dev/null | grep -E 'new-movie-tracker-forum37|forum37_batch_run' || true
 
