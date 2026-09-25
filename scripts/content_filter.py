@@ -41,7 +41,7 @@ ONLYFANS_RE = re.compile(
     r"OnlyFans|HongKongDoll|Hong Kong Doll|玩偶姐姐",
     re.IGNORECASE,
 )
-DOMESTIC_EXCLUDED_KEYWORDS = ("私拍", "厕拍", "黑人", "情色分享")
+DOMESTIC_EXCLUDED_KEYWORDS = ("私拍", "厕拍", "黑人", "情色分享", "AI短剧", "AI真人短剧")
 ED2K_TITLE_RE = re.compile(
     r"ed2k://|115\s*[eE]?\s*[dD]2[kK]|[eE][dD]2[kK]",
     re.IGNORECASE,
@@ -90,7 +90,7 @@ def is_domestic_context(title: str) -> bool:
     text = title or ""
     if is_domestic_uncensored(text):
         return True
-    if any(kw in text for kw in ("AI短剧", "AI真人短剧", "熟女", "酒店偷拍", "泄密", "泄露")):
+    if any(kw in text for kw in ("熟女", "酒店偷拍", "泄密", "泄露")):
         return True
     if DOMESTIC_LEAK_OUT_RE.search(text):
         return True
@@ -105,8 +105,6 @@ def _domestic_keyword_subtype(title: str, number: str = "") -> str | None:
     num = (number or extract_av_number(text) or "").upper()
     if is_domestic_excluded(text, num):
         return None
-    if "AI短剧" in text or "AI真人短剧" in text:
-        return "AI短剧"
     if "熟女" in text:
         return "熟女自拍"
     if "酒店偷拍" in text:

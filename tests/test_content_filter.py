@@ -143,5 +143,64 @@ class DomesticAiEnhancedExclusionTests(unittest.TestCase):
         self.assertTrue(is_downloadable(item))
 
 
+class DomesticAiDuanjuExclusionTests(unittest.TestCase):
+    @staticmethod
+    def _ed2k_item(title: str) -> dict:
+        return {
+            "title": title,
+            "ed2k": ["ed2k://|file|sample.mkv|123|ABCDEF0123456789ABCDEF0123456789|/"],
+        }
+
+    def test_ai_zhenren_duanju_excluded(self):
+        title = "[国产] AI真人短剧 某女 4K"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
+        item = {"title": title}
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+        self.assertNotIn("domestic_subtype", item)
+
+    def test_ai_zhenren_duanju_excluded_even_with_ed2k(self):
+        title = "[国产] AI真人短剧 115ed2k"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title, has_ed2k=True))
+        item = self._ed2k_item(title)
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+
+    def test_ai_zhenren_duanju_blocks_other_domestic_keep_tags(self):
+        title = "[国产] 泄密 AI真人短剧 某女"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
+        self.assertEqual(classify_region({"title": title}), "domestic_other")
+
+    def test_ai_duanju_excluded(self):
+        title = "[国产] AI短剧 某女 1080P"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
+        item = {"title": title}
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+        self.assertNotIn("domestic_subtype", item)
+
+    def test_ai_duanju_excluded_even_with_ed2k(self):
+        title = "[国产] AI短剧 115ed2k"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title, has_ed2k=True))
+        item = self._ed2k_item(title)
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+
+    def test_ai_duanju_blocks_other_domestic_keep_tags(self):
+        title = "[国产] 泄密 AI短剧 某女"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
+        self.assertEqual(classify_region({"title": title}), "domestic_other")
+
+
 if __name__ == "__main__":
     unittest.main()
