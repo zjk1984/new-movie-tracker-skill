@@ -172,11 +172,51 @@ class Forum142BatchRunTests(unittest.TestCase):
             self.assertEqual(empty["ok"], 0)
             self.assertEqual(empty["total"], 0)
 
+    @patch.dict("os.environ", {"FEISHU_RECEIVE_ID": "oc_test"}, clear=False)
+    @patch("forum142_batch_run.maybe_feishu_forum142_summary")
+    @patch("forum142_batch_run.write_forum142_daily_report")
+    @patch("forum142_batch_run.subprocess.call", return_value=0)
+    @patch("forum142_batch_run.load_state", return_value={})
+    def test_run_batch_defers_feishu_summary_and_notifies_with_forum142_report(
+        self, _load, mock_call, mock_report, mock_feishu
+    ):
+        from argparse import Namespace
+
+        from forum142_batch_run import run_batch
+
+        report_path = Path("/tmp/reports/forum-142_2026-09-26.md")
+        mock_report.return_value = report_path
+        with tempfile.TemporaryDirectory() as tmp:
+            args = Namespace(
+                status=False,
+                reset=False,
+                output_dir=tmp,
+                forum_url=DEFAULT_FORUM_URL,
+                initial_page=200,
+                max_pages=PAGES_PER_RUN,
+                set_page=None,
+                headless=True,
+                scan_only=False,
+                feishu=False,
+                no_feishu=False,
+                fetch_workers=5,
+            )
+            self.assertEqual(run_batch(args), 0)
+        cmd = mock_call.call_args[0][0]
+        self.assertIn("--defer-feishu-summary", cmd)
+        self.assertIn("--run-label", cmd)
+        self.assertEqual(cmd[cmd.index("--run-label") + 1], "forum-142")
+        self.assertIn("--feishu", cmd)
+        mock_feishu.assert_called_once()
+        self.assertEqual(mock_feishu.call_args.args[1], report_path)
+        self.assertTrue(mock_feishu.call_args.kwargs["enabled"])
+
+    @patch("forum142_batch_run.maybe_feishu_forum142_summary")
     @patch("forum142_batch_run.write_forum142_daily_report")
     @patch("forum142_batch_run.subprocess.call", return_value=0)
     @patch("forum142_batch_run.load_state", return_value={})
     def test_run_batch_passes_batch_mode_and_fetch_workers(
-        self, _load, mock_call, mock_report
+        self, _load, mock_call, mock_report, _feishu
     ):
         from argparse import Namespace
 
@@ -194,7 +234,7 @@ class Forum142BatchRunTests(unittest.TestCase):
                 headless=True,
                 scan_only=False,
                 feishu=False,
-                no_feishu=False,
+                no_feishu=True,
                 fetch_workers=5,
             )
             self.assertEqual(run_batch(args), 0)
