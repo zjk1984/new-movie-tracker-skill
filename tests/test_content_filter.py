@@ -52,33 +52,35 @@ class DomesticKeywordExclusionTests(unittest.TestCase):
         self.assertTrue(is_domestic_excluded(title))
         self.assertIsNone(domestic_keep_reason(title, has_ed2k=True))
 
-    def test_qingsefenxiang_with_liuchu_kept(self):
+    def test_qingsefenxiang_excluded_even_with_liuchu(self):
         title = "[国产] 情色分享 流出"
-        self.assertFalse(is_domestic_excluded(title))
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
         item = self._ed2k_item(title)
         apply_region_filter(item)
-        self.assertEqual(item["content_region"], "domestic_leak")
-        self.assertEqual(item.get("domestic_subtype"), "流出")
-        self.assertTrue(is_downloadable(item))
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+        self.assertNotIn("domestic_subtype", item)
 
-    def test_qingsefenxiang_plain_title_kept(self):
+    def test_qingsefenxiang_plain_title_excluded(self):
         title = "[情色分享] 某女 4K"
-        self.assertFalse(is_domestic_excluded(title))
-        self.assertEqual(domestic_keep_reason(title), "情色分享")
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
         item = self._ed2k_item(title)
         apply_region_filter(item)
-        self.assertEqual(item["content_region"], "domestic_leak")
-        self.assertEqual(item.get("domestic_subtype"), "情色分享")
-        self.assertTrue(is_downloadable(item))
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+        self.assertNotIn("domestic_subtype", item)
 
-    def test_qingsefenxiang_with_115ed2k_kept(self):
+    def test_qingsefenxiang_with_115ed2k_excluded(self):
         title = "[情色分享] 【自转】【115ED2K】某女 4K"
-        self.assertFalse(is_domestic_excluded(title))
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title, has_ed2k=True))
         item = self._ed2k_item(title)
         apply_region_filter(item)
-        self.assertEqual(item["content_region"], "domestic_leak")
-        self.assertEqual(item.get("domestic_subtype"), "情色分享")
-        self.assertTrue(is_downloadable(item))
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+        self.assertNotIn("selected_ed2k", item)
 
     def test_sipai_still_excluded(self):
         title = "[国产] 私拍 某女"
