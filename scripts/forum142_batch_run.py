@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Forum-142 batch scan: one command scans the next 10 list pages, auto-advancing."""
+"""Forum-142 batch scan: one command scans the next 10 list pages, auto-advancing.
+
+Scheduled via scripts/setup_forum142_cron.sh (default daily 14:00 Asia/Shanghai).
+"""
 from __future__ import annotations
 
 import argparse

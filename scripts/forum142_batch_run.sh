@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Scan the next 10 forum-142 list pages (auto-advances page cursor after each run).
+# Install cron: scripts/setup_forum142_cron.sh  (default daily 14:00 Asia/Shanghai)
 # Usage:
 #   ./scripts/forum142_batch_run.sh
 #   ./scripts/forum142_batch_run.sh --status

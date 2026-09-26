@@ -61,7 +61,7 @@ class Forum142BatchRunTests(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8").strip().startswith("{"), True)
 
     def test_forum142_report_path_uses_date(self):
-        when = datetime(2026, 9, 26, 13, 0, 0)
+        when = datetime(2026, 9, 26, 14, 0, 0)
         with tempfile.TemporaryDirectory() as tmp:
             path = forum142_report_path(reports_dir=Path(tmp), when=when)
             self.assertEqual(path.name, "forum-142_2026-09-26.md")
