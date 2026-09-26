@@ -422,7 +422,7 @@ Verify: `crontab -l | grep new-movie-tracker-daily` · Logs: `data/daily_run.log
 
 ### Linux cron — forum-37 batch (daily 18:00 Asia/Shanghai)
 
-Separate from daily_run slots. Scans the next 10 forum-37 list pages via `scripts/forum37_batch_run.sh` (auto-advances page cursor in `data/forum37_batch_state.json`).
+Separate from daily_run slots. Scans the next 20 forum-37 list pages via `scripts/forum37_batch_run.sh` (auto-advances page cursor in `data/forum37_batch_state.json`). Default batch size is 20 pages (`PAGES_PER_RUN` / `--max-pages`); no env var override — only cron schedule uses `FORUM37_CRON_*`. An existing state file may still show `"pages_per_run": 10` from earlier runs; that field is record-only — each run uses the current default unless you pass `--max-pages`.
 
 ```bash
 ./scripts/setup_forum37_cron.sh
