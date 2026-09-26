@@ -1827,7 +1827,7 @@ def main():
             "tighter waits, no undownloaded title translation",
         )
     if args.region_filter:
-        print("[info] download filter: JAV 有码/无码 + 国产/ed2k(泄密/流出/熟女/酒店偷拍/ed2k; 排除私拍/厕拍/黑人/情色分享/伪番号/OnlyFans/AI增强/AI短剧/AI真人短剧; 115ed2k不因情色分享排除)")
+        print("[info] download filter: JAV 有码/无码 + 国产/ed2k(泄密/流出/熟女/酒店偷拍/情色分享/ed2k; 排除私拍/厕拍/黑人/伪番号/OnlyFans/AI增强/AI短剧/AI真人短剧)")
     if args.javdb_query:
         print("[info] javdb query report: enabled for matched 有码/无码 items")
     scrape(args)

@@ -41,7 +41,7 @@ ONLYFANS_RE = re.compile(
     r"OnlyFans|HongKongDoll|Hong Kong Doll|玩偶姐姐",
     re.IGNORECASE,
 )
-DOMESTIC_EXCLUDED_KEYWORDS = ("私拍", "厕拍", "黑人", "情色分享", "AI短剧", "AI真人短剧")
+DOMESTIC_EXCLUDED_KEYWORDS = ("私拍", "厕拍", "黑人", "AI短剧", "AI真人短剧")
 ED2K_TITLE_RE = re.compile(
     r"ed2k://|115\s*[eE]?\s*[dD]2[kK]|[eE][dD]2[kK]",
     re.IGNORECASE,
@@ -72,12 +72,7 @@ def is_domestic_excluded(title: str, number: str = "") -> bool:
     text = title or ""
     if title_has_ai_enhanced(text):
         return True
-    for kw in DOMESTIC_EXCLUDED_KEYWORDS:
-        if kw not in text:
-            continue
-        # 115ed2k titles bypass 情色分享 only; other exclusions still apply
-        if kw == "情色分享" and title_has_ed2k(text):
-            continue
+    if any(kw in text for kw in DOMESTIC_EXCLUDED_KEYWORDS):
         return True
     if ONLYFANS_RE.search(text):
         return True
@@ -118,11 +113,13 @@ def _domestic_keyword_subtype(title: str, number: str = "") -> str | None:
         return "泄密"
     if DOMESTIC_LEAK_OUT_RE.search(text):
         return "流出"
+    if "情色分享" in text:
+        return "情色分享"
     return None
 
 
 def domestic_keep_reason(title: str, number: str = "", *, has_ed2k: bool = False) -> str | None:
-    """Return keep label for domestic posts (excludes 私拍/厕拍/黑人/情色分享/伪番号/OnlyFans)."""
+    """Return keep label for domestic posts (excludes 私拍/厕拍/黑人/伪番号/OnlyFans)."""
     subtype = _domestic_keyword_subtype(title, number)
     if subtype:
         return subtype
