@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install forum-142 batch scan cron (daily 13:00 Asia/Shanghai by default).
+# Install forum-142 batch scan cron (daily 14:00 Asia/Shanghai by default).
 # Usage: ./scripts/setup_forum142_cron.sh [--dry-run] [--repair-crontab] [--remove]
 set -euo pipefail
 
@@ -9,7 +9,7 @@ MARK="# new-movie-tracker-forum142-batch"
 CRON_USER_FILE="$ROOT/data/cron_install_user"
 TZ_NAME="${FORUM142_CRON_TZ:-Asia/Shanghai}"
 WEEKDAYS="${FORUM142_CRON_WEEKDAYS:-*}"
-TIME="${FORUM142_CRON_TIME:-13:00}"
+TIME="${FORUM142_CRON_TIME:-14:00}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
       cat <<EOF
 Install cron job for scripts/forum142_batch_run.sh (forum-142 custom batch scan).
 
-Default schedule: daily 13:00 Asia/Shanghai (Beijing time).
+Default schedule: daily 14:00 Asia/Shanghai (Beijing time).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically.
 
@@ -40,7 +40,7 @@ Usage:
 
 Environment overrides:
   FORUM142_CRON_TZ=Asia/Shanghai
-  FORUM142_CRON_TIME=13:00
+  FORUM142_CRON_TIME=14:00
   FORUM142_CRON_WEEKDAYS=*        cron DOW (0=Sun … 6=Sat; * = every day; default daily)
 
 Deploy on cron VM bc-d4fb1f8c after merge:
