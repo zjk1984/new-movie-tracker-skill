@@ -103,6 +103,16 @@ def main() -> int:
         help="Disable Feishu notify even if FEISHU_RECEIVE_ID is set",
     )
     parser.add_argument(
+        "--run-label",
+        default="custom",
+        help="Label for Feishu cards and run reports (default: custom)",
+    )
+    parser.add_argument(
+        "--defer-feishu-summary",
+        action="store_true",
+        help="Skip final Feishu summary card (caller sends after custom report)",
+    )
+    parser.add_argument(
         "--batch-mode",
         action="store_true",
         help="Enable forum-37 batch performance optimizations in scan.py",
@@ -158,11 +168,15 @@ def main() -> int:
             start_page=args.start_page,
             max_pages=args.max_pages,
             no_date_filter=True,
-            run_label="custom",
+            run_label=args.run_label,
         )
         if rc != 0:
             return rc
-        maybe_feishu_scan_done(output_dir, enabled=feishu_enabled, run_label="custom")
+        maybe_feishu_scan_done(
+            output_dir,
+            enabled=feishu_enabled,
+            run_label=args.run_label,
+        )
 
     if not args.scan_only:
         dl_rc, pikpak_ok, pikpak_total = run_download(args, output_dir)
@@ -172,16 +186,17 @@ def main() -> int:
             enabled=feishu_enabled,
             pikpak_ok=pikpak_ok,
             pikpak_total=pikpak_total,
-            run_label="custom",
+            run_label=args.run_label,
         )
 
-    maybe_feishu_notify(
-        output_dir,
-        enabled=feishu_enabled,
-        pikpak_ok=pikpak_ok,
-        pikpak_total=pikpak_total,
-        run_label="custom",
-    )
+    if not args.defer_feishu_summary:
+        maybe_feishu_notify(
+            output_dir,
+            enabled=feishu_enabled,
+            pikpak_ok=pikpak_ok,
+            pikpak_total=pikpak_total,
+            run_label=args.run_label,
+        )
     return rc
 
 
