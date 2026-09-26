@@ -307,7 +307,7 @@ Between Beijing slot starts it **sleeps** (no 24/7 polling). From each slot time
 
 **Forum-37 batch (daily 18:00 Beijing):** `./scripts/setup_forum37_cron.sh` installs a separate crontab line for `./scripts/forum37_batch_run.sh` (20-page batch scan, log `data/forum37_batch_run.log`). Not managed by the daily supervisor — cron-only. Optional timer wake 5 min before (17:55) daily; see project doc.
 
-**Forum-142 batch (daily 14:00 Beijing):** `./scripts/setup_forum142_cron.sh` installs `./scripts/forum142_batch_run.sh` (10-page batch scan from page 200 on `https://www.sehuatang.net/forum.php?mod=forumdisplay&fid=142&mobile=2`, log `data/forum142_batch_run.log`, per-run report `reports/forum-142_YYYY-MM-DD.md`). Cron-only; deploy on cron VM after merge — reset state (`--reset`) or set `next_start_page=200` before re-run.
+**Forum-142 batch (daily 14:00 Beijing):** `./scripts/setup_forum142_cron.sh` installs `./scripts/forum142_batch_run.sh` (10-page batch scan from page 200 on `https://www.sehuatang.net/forum-142-1.html`, log `data/forum142_batch_run.log`, per-run report `reports/forum-142_YYYY-MM-DD.md`). Cron-only; deploy on cron VM after merge — reset state (`--reset`) or set `next_start_page=200` before re-run; smoke-test page 1 after URL/parser changes.
 
 **One-time setup**
 1. Save PikPak token: `python scripts/pikpak_login.py login` (stored in `pikpak_auth.json`).

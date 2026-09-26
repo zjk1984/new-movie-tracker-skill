@@ -637,6 +637,14 @@ def submit_from_result(
         print(f"[info] new-only: {len(items)}/{before} download(s) since last run")
     if not items:
         print("[info] no downloads to submit")
+        report_path = result_path.parent / "download_report.json"
+        save_download_report(
+            report_path,
+            succeeded=[],
+            failed=[],
+            folder=folder,
+            source=str(result_path),
+        )
         if new_only and state is not None:
             touch_run(state)
             save_state(state_path, state)
