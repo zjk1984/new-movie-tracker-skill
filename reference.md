@@ -141,6 +141,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | AI增强 | AI增强 / AI 增强 |
 | AI短剧 | AI短剧 / AI真人短剧 |
 | 酒店偷拍 | 酒店偷拍 |
+| 主播录制 | 主播录制 |
 | 伪番号 | XJX, JDSY, MDSY, MDSR, JDSC, CNXX, RXAJ, TMW, TMG, YCM + 数字 |
 | OnlyFans | OnlyFans, HongKongDoll, 玩偶姐姐 |
 
@@ -153,7 +154,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `western` | Blacked, Brazzers, 欧美 |
 | `fc2` | FC2-PPV-* |
 | `amateur` | MAAN-*, 348NTR-*, 200GANA-*, 229SCUTE-* |
-| `other` | [主播录制] 等 |
+| `other` | 无明确区域标签的杂项 |
 
 Implementation: `scripts/content_filter.py`. Disable all filters: `--all-regions`.
 

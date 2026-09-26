@@ -143,6 +143,31 @@ class DomesticAiEnhancedExclusionTests(unittest.TestCase):
         self.assertFalse(is_downloadable(item))
         self.assertNotIn("domestic_subtype", item)
 
+    def test_zhubo_luzhi_excluded(self):
+        title = "[国产] 主播录制 某女 4K"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
+        item = {"title": title}
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+        self.assertNotIn("domestic_subtype", item)
+
+    def test_zhubo_luzhi_excluded_even_with_ed2k(self):
+        title = "[国产] 主播录制 115ed2k"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title, has_ed2k=True))
+        item = DomesticKeywordExclusionTests._ed2k_item(title)
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+
+    def test_zhubo_luzhi_blocks_other_domestic_keep_tags(self):
+        title = "[国产] 泄密 主播录制 某女"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
+        self.assertEqual(classify_region({"title": title}), "domestic_other")
+
 
 class DomesticKeepKeywordSubtypeTests(unittest.TestCase):
     @staticmethod
