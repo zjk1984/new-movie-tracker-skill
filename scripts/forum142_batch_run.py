@@ -147,6 +147,44 @@ def write_forum142_daily_report(
     return report_path
 
 
+def feishu_enabled_for_args(args: argparse.Namespace) -> bool:
+    return args.feishu or (
+        not args.no_feishu and bool(os.environ.get("FEISHU_RECEIVE_ID"))
+    )
+
+
+def maybe_feishu_forum142_summary(
+    output_dir: Path,
+    report_path: Path,
+    *,
+    enabled: bool,
+) -> None:
+    """Send Feishu summary linking to reports/forum-142_YYYY-MM-DD.md."""
+    if not enabled:
+        return
+    from feishu_notify import is_configured, notify_cards
+
+    if not is_configured():
+        print("[info] feishu: credentials or FEISHU_RECEIVE_ID not set, skip notify")
+        return
+    result_path = output_dir / "last_result.json"
+    if not result_path.exists():
+        print("[warn] feishu: no last_result.json to summarize")
+        return
+    try:
+        download_report_path = output_dir / "download_report.json"
+        _, md_path, md_url = notify_cards(
+            [result_path],
+            download_report_path=download_report_path if download_report_path.exists() else None,
+            existing_report_path=report_path,
+        )
+        print(f"[ok] feishu summary sent; report: {md_path}")
+        if md_url:
+            print(f"[ok] github: {md_url}")
+    except Exception as exc:
+        print(f"[warn] feishu notify failed: {exc}")
+
+
 def run_batch(args: argparse.Namespace) -> int:
     from env_utils import load_env_local
 
@@ -196,10 +234,10 @@ def run_batch(args: argparse.Namespace) -> int:
     ]
     if args.scan_only:
         cmd.append("--scan-only")
-    if args.feishu:
-        cmd.append("--feishu")
     if args.no_feishu:
         cmd.append("--no-feishu")
+    elif feishu_enabled_for_args(args):
+        cmd.extend(["--feishu", "--run-label", "forum-142", "--defer-feishu-summary"])
     if args.output_dir:
         cmd.extend(["--output-dir", str(output_dir)])
     cmd.extend(["--batch-mode", "--fetch-workers", str(args.fetch_workers)])
@@ -218,12 +256,17 @@ def run_batch(args: argparse.Namespace) -> int:
         previous=state,
     )
     save_state(state_file, new_state)
-    write_forum142_daily_report(
+    report_path = write_forum142_daily_report(
         output_dir,
         start_page=start_page,
         end_page=end_page,
         batch_state=new_state,
         exit_code=rc,
+    )
+    maybe_feishu_forum142_summary(
+        output_dir,
+        report_path,
+        enabled=feishu_enabled_for_args(args),
     )
     print(
         f"[ok] forum-142 batch done: scanned {start_page}~{end_page}; "
