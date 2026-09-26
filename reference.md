@@ -129,7 +129,6 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | 学生 | 学生 |
 | 老师 | 老师 |
 | ed2k | 标题 ed2k/115Ed2k/115eD2k 或帖内 `ed2k://` 链接 |
-| 情色分享 | 情色分享 |
 
 **排除** `domestic_other` — 命中即排除（优先级高于保留标签）：
 
@@ -142,6 +141,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | AI短剧 | AI短剧 / AI真人短剧 |
 | 酒店偷拍 | 酒店偷拍 |
 | 主播录制 | 主播录制 |
+| 情色分享 | 情色分享 |
 | 伪番号 | XJX, JDSY, MDSY, MDSR, JDSC, CNXX, RXAJ, TMW, TMG, YCM + 数字 |
 | OnlyFans | OnlyFans, HongKongDoll, 玩偶姐姐 |
 
