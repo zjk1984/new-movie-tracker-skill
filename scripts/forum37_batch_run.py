@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Forum-37 batch scan: one command scans the next 10 list pages, auto-advancing."""
+"""Forum-37 batch scan: one command scans the next 20 list pages, auto-advancing."""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +14,7 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = SKILL_DIR / "scripts"
 DEFAULT_FORUM_URL = "https://www.sehuatang.org/forum-37-1.html"
 DEFAULT_INITIAL_PAGE = 960
-PAGES_PER_RUN = 10
+PAGES_PER_RUN = 20
 DEFAULT_FETCH_WORKERS = 5
 STATE_FILENAME = "forum37_batch_state.json"
 
@@ -159,8 +159,8 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(
         description=(
-            "Forum-37 batch scan: each run scans the next 10 list pages "
-            "(960~969, then 970~979, …). State is saved between runs."
+            "Forum-37 batch scan: each run scans the next 20 list pages "
+            "(960~979, then 980~999, …). State is saved between runs."
         ),
     )
     parser.add_argument(

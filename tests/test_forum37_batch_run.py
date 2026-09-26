@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from forum37_batch_run import (  # noqa: E402
+    PAGES_PER_RUN,
     build_state_after_run,
     resolve_next_start_page,
     save_state,
@@ -33,17 +34,21 @@ class Forum37BatchRunTests(unittest.TestCase):
             960,
         )
 
+    def test_pages_per_run_default(self):
+        self.assertEqual(PAGES_PER_RUN, 20)
+
     def test_build_state_after_run_advances_cursor(self):
         out = build_state_after_run(
             forum_url="https://www.sehuatang.org/forum-37-1.html",
             initial_page=960,
             start_page=960,
-            max_pages=10,
+            max_pages=PAGES_PER_RUN,
             previous={"runs_completed": 2},
         )
         self.assertEqual(out["last_start_page"], 960)
-        self.assertEqual(out["last_end_page"], 969)
-        self.assertEqual(out["next_start_page"], 970)
+        self.assertEqual(out["last_end_page"], 979)
+        self.assertEqual(out["next_start_page"], 980)
+        self.assertEqual(out["pages_per_run"], 20)
         self.assertEqual(out["runs_completed"], 3)
 
     def test_save_and_load_state_roundtrip(self):
@@ -66,7 +71,7 @@ class Forum37BatchRunTests(unittest.TestCase):
                 output_dir=tmp,
                 forum_url="https://www.sehuatang.org/forum-37-1.html",
                 initial_page=960,
-                max_pages=10,
+                max_pages=PAGES_PER_RUN,
                 set_page=None,
                 headless=True,
                 scan_only=False,

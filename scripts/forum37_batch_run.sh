@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Scan the next 10 forum-37 list pages (auto-advances page cursor after each run).
+# Scan the next 20 forum-37 list pages (auto-advances page cursor after each run).
 # Usage:
 #   ./scripts/forum37_batch_run.sh
 #   ./scripts/forum37_batch_run.sh --status
