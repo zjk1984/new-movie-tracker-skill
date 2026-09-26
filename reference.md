@@ -439,6 +439,24 @@ Does not modify daily_run crontab lines. Optional **Cursor `subscribe_timer`** w
 
 Verify: `crontab -l | grep forum37` · Dry-run: `./scripts/setup_forum37_cron.sh --dry-run` · Remove: `./scripts/setup_forum37_cron.sh --remove`
 
+### Linux cron — forum-142 batch (daily 13:00 Asia/Shanghai)
+
+Separate from daily_run and forum-37 batch. Scans the next 10 forum-142 list pages via `scripts/forum142_batch_run.sh` (auto-advances page cursor in `data/forum142_batch_state.json`; first run pages 200–209).
+
+```bash
+./scripts/setup_forum142_cron.sh
+```
+
+| Item | Value |
+|------|-------|
+| Schedule | **Daily 13:00** Beijing (`FORUM142_CRON_WEEKDAYS=*`) |
+| Crontab line | `0 13 * * * TZ=Asia/Shanghai /path/to/scripts/forum142_batch_run.sh # new-movie-tracker-forum142-batch` |
+| Log | `data/forum142_batch_run.log` |
+| Per-run report | `reports/forum-142_YYYY-MM-DD.md` |
+| Cron VM | `bc-d4fb1f8c` — run after merge: `git pull && ./scripts/setup_forum142_cron.sh` |
+
+Verify: `crontab -l | grep forum142` · Dry-run: `./scripts/setup_forum142_cron.sh --dry-run` · Remove: `./scripts/setup_forum142_cron.sh --remove`
+
 ### GitHub Actions schedule (07:00 Asia/Shanghai, optional)
 
 Only if you run `daily_run` in CI with the required secrets and browser setup. **07:00 北京时间** equals:
