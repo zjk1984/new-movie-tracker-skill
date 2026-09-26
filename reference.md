@@ -121,7 +121,13 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | 流出 | 流出（不含「未流出」） |
 | AI增强 | AI增强 / AI 增强 |
 | 熟女自拍 | 熟女 |
-| 酒店偷拍 | 酒店偷拍 |
+| 露脸 | 露脸 |
+| 真实 | 真实 |
+| 大胸 | 大胸 |
+| 少妇 | 少妇 |
+| 美女 | 美女 |
+| 学生 | 学生 |
+| 老师 | 老师 |
 | ed2k | 标题 ed2k/115Ed2k/115eD2k 或帖内 `ed2k://` 链接 |
 | 情色分享 | 情色分享 |
 
@@ -134,6 +140,8 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | 黑人 | 黑人 |
 | AI增强 | AI增强 / AI 增强 |
 | AI短剧 | AI短剧 / AI真人短剧 |
+| 酒店偷拍 | 酒店偷拍 |
+| 主播录制 | 主播录制 |
 | 伪番号 | XJX, JDSY, MDSY, MDSR, JDSC, CNXX, RXAJ, TMW, TMG, YCM + 数字 |
 | OnlyFans | OnlyFans, HongKongDoll, 玩偶姐姐 |
 
@@ -146,7 +154,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | `western` | Blacked, Brazzers, 欧美 |
 | `fc2` | FC2-PPV-* |
 | `amateur` | MAAN-*, 348NTR-*, 200GANA-*, 229SCUTE-* |
-| `other` | [主播录制] 等 |
+| `other` | 无明确区域标签的杂项 |
 
 Implementation: `scripts/content_filter.py`. Disable all filters: `--all-regions`.
 
@@ -415,7 +423,7 @@ Verify: `crontab -l | grep new-movie-tracker-daily` · Logs: `data/daily_run.log
 
 ### Linux cron — forum-37 batch (daily 18:00 Asia/Shanghai)
 
-Separate from daily_run slots. Scans the next 10 forum-37 list pages via `scripts/forum37_batch_run.sh` (auto-advances page cursor in `data/forum37_batch_state.json`).
+Separate from daily_run slots. Scans the next 20 forum-37 list pages via `scripts/forum37_batch_run.sh` (auto-advances page cursor in `data/forum37_batch_state.json`). Default batch size is 20 pages (`PAGES_PER_RUN` / `--max-pages`); no env var override — only cron schedule uses `FORUM37_CRON_*`. An existing state file may still show `"pages_per_run": 10` from earlier runs; that field is record-only — each run uses the current default unless you pass `--max-pages`.
 
 ```bash
 ./scripts/setup_forum37_cron.sh
@@ -431,6 +439,25 @@ Separate from daily_run slots. Scans the next 10 forum-37 list pages via `script
 Does not modify daily_run crontab lines. Optional **Cursor `subscribe_timer`** wake at **17:55 Beijing** daily (`55 9 * * *` UTC) so the cron VM is unfrozen before the 18:00 slot — see project doc `daily-run-external-schedule.md`.
 
 Verify: `crontab -l | grep forum37` · Dry-run: `./scripts/setup_forum37_cron.sh --dry-run` · Remove: `./scripts/setup_forum37_cron.sh --remove`
+
+### Linux cron — forum-142 batch (daily 14:00 Asia/Shanghai)
+
+Separate from daily_run and forum-37 batch. Scans the next 10 forum-142 list pages via `scripts/forum142_batch_run.sh` on **sehuatang.net** (`https://www.sehuatang.net/forum-142-1.html`; page 200 → `forum-142-200.html`) — auto-advances page cursor in `data/forum142_batch_state.json`; first run pages 200–209.
+
+```bash
+./scripts/setup_forum142_cron.sh
+```
+
+| Item | Value |
+|------|-------|
+| Schedule | **Daily 14:00** Beijing (`FORUM142_CRON_WEEKDAYS=*`) |
+| Crontab line | `0 14 * * * TZ=Asia/Shanghai /path/to/scripts/forum142_batch_run.sh # new-movie-tracker-forum142-batch` |
+| Log | `data/forum142_batch_run.log` |
+| Per-run report | `reports/forum-142_YYYY-MM-DD.md` |
+| Forum URL | `https://www.sehuatang.net/forum-142-1.html` |
+| Cron VM | `bc-d4fb1f8c` — run after merge: `git pull && ./scripts/setup_forum142_cron.sh` (optional); **reset state** with `./scripts/forum142_batch_run.sh --reset` or set `next_start_page=200` in `data/forum142_batch_state.json` before re-run |
+
+Verify: `crontab -l | grep forum142` · Dry-run: `./scripts/setup_forum142_cron.sh --dry-run` · Remove: `./scripts/setup_forum142_cron.sh --remove`
 
 ### GitHub Actions schedule (07:00 Asia/Shanghai, optional)
 

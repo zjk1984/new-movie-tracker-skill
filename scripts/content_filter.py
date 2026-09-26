@@ -41,7 +41,22 @@ ONLYFANS_RE = re.compile(
     r"OnlyFans|HongKongDoll|Hong Kong Doll|玩偶姐姐",
     re.IGNORECASE,
 )
-DOMESTIC_EXCLUDED_KEYWORDS = ("私拍", "厕拍", "黑人", "AI短剧", "AI真人短剧")
+DOMESTIC_EXCLUDED_KEYWORDS = ("私拍", "厕拍", "黑人", "AI短剧", "AI真人短剧", "酒店偷拍", "主播录制")
+DOMESTIC_CONTEXT_KEYWORDS = (
+    "熟女", "泄密", "泄露", "露脸", "真实", "大胸", "少妇", "美女", "学生", "老师",
+)
+DOMESTIC_KEEP_KEYWORD_SUBTYPES = (
+    ("熟女", "熟女自拍"),
+    ("泄密", "泄密"),
+    ("泄露", "泄密"),
+    ("露脸", "露脸"),
+    ("真实", "真实"),
+    ("大胸", "大胸"),
+    ("少妇", "少妇"),
+    ("美女", "美女"),
+    ("学生", "学生"),
+    ("老师", "老师"),
+)
 ED2K_TITLE_RE = re.compile(
     r"ed2k://|115\s*[eE]?\s*[dD]2[kK]|[eE][dD]2[kK]",
     re.IGNORECASE,
@@ -90,7 +105,7 @@ def is_domestic_context(title: str) -> bool:
     text = title or ""
     if is_domestic_uncensored(text):
         return True
-    if any(kw in text for kw in ("熟女", "酒店偷拍", "泄密", "泄露")):
+    if any(kw in text for kw in DOMESTIC_CONTEXT_KEYWORDS):
         return True
     if DOMESTIC_LEAK_OUT_RE.search(text):
         return True
@@ -105,12 +120,9 @@ def _domestic_keyword_subtype(title: str, number: str = "") -> str | None:
     num = (number or extract_av_number(text) or "").upper()
     if is_domestic_excluded(text, num):
         return None
-    if "熟女" in text:
-        return "熟女自拍"
-    if "酒店偷拍" in text:
-        return "酒店偷拍"
-    if "泄密" in text or "泄露" in text:
-        return "泄密"
+    for keyword, subtype in DOMESTIC_KEEP_KEYWORD_SUBTYPES:
+        if keyword in text:
+            return subtype
     if DOMESTIC_LEAK_OUT_RE.search(text):
         return "流出"
     if "情色分享" in text:
@@ -119,7 +131,7 @@ def _domestic_keyword_subtype(title: str, number: str = "") -> str | None:
 
 
 def domestic_keep_reason(title: str, number: str = "", *, has_ed2k: bool = False) -> str | None:
-    """Return keep label for domestic posts (excludes 私拍/厕拍/黑人/伪番号/OnlyFans)."""
+    """Return keep label for domestic posts (excludes 私拍/厕拍/黑人/酒店偷拍/主播录制/伪番号/OnlyFans)."""
     subtype = _domestic_keyword_subtype(title, number)
     if subtype:
         return subtype

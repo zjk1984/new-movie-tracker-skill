@@ -150,6 +150,7 @@ def maybe_feishu_notify(
     pikpak_ok: int | None = None,
     pikpak_total: int | None = None,
     run_label: str = "daily",
+    existing_report_path: Path | None = None,
 ) -> None:
     if not enabled:
         return
@@ -169,6 +170,7 @@ def maybe_feishu_notify(
             [result_path],
             download_report_path=report_path if report_path.exists() else None,
             run_label=run_label,
+            existing_report_path=existing_report_path,
         )
         print(f"[ok] feishu summary sent; report: {md_path}")
         if md_url:

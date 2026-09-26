@@ -126,8 +126,14 @@ def send_interactive_card(card: dict[str, Any], **kwargs: Any) -> dict[str, Any]
 
 
 def _forum_key(forum_url: str) -> str:
-    match = re.search(r"forum-(\d+)", forum_url or "")
-    return f"forum-{match.group(1)}" if match else "unknown"
+    url = forum_url or ""
+    match = re.search(r"forum-(\d+)", url)
+    if match:
+        return f"forum-{match.group(1)}"
+    match = re.search(r"[?&]fid=(\d+)", url)
+    if match:
+        return f"forum-{match.group(1)}"
+    return "unknown"
 
 
 def _forum_label(forum_url: str) -> str:
@@ -434,21 +440,14 @@ def build_scan_summary_card(
     }
 
 
-def notify_cards(
+def _prepare_notify_payload(
     result_paths: list[Path],
     *,
     download_report_path: Path | None = None,
     extra_download_reports: list[Path] | None = None,
     ed2k_refetch_path: Path | None = None,
-    push_report: bool = True,
-    run_label: str = "scan",
-) -> tuple[list[dict[str, Any]], Path, str | None]:
-    from run_report import (
-        commit_and_push_report,
-        github_blob_url,
-        merge_download_reports,
-        write_run_report,
-    )
+) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    from run_report import merge_download_reports
 
     scan_stats = analyze_scan(
         result_paths,
@@ -471,13 +470,12 @@ def notify_cards(
         )
 
     from javdb_client import filter_download_report_by_jav_score
+    from scan_delta import apply_scan_dedup, compute_submit_funnel_stats
 
     download_report = filter_download_report_by_jav_score(
         download_report,
         scan_stats.get("matched") or [],
     )
-
-    from scan_delta import apply_scan_dedup, compute_submit_funnel_stats
 
     output_dir = result_paths[0].parent if result_paths else SKILL_DIR / "data"
     scan_stats, download_report = apply_scan_dedup(
@@ -501,28 +499,29 @@ def notify_cards(
             f"[info] scan dedup: hid {repeat} item(s) already in previous scan; "
             f"showing {scan_stats.get('matched_total', 0)} new",
         )
+    return scan_stats, download_report, output_dir
 
-    report_result = write_run_report(
-        scan_stats,
-        download_report,
-        run_label=run_label,
-        output_dir=output_dir,
-    )
-    report_path = report_result.path
+
+def _push_report_and_url(
+    report_path: Path,
+    *,
+    push_report: bool,
+    archived_paths: list[Path] | None = None,
+) -> str | None:
+    from run_report import commit_and_push_report, github_blob_url, report_github_branch
+
     rel = report_path.relative_to(SKILL_DIR)
     report_url: str | None = None
     if push_report:
         if commit_and_push_report(
             report_path,
-            archived_paths=report_result.archived_paths,
+            archived_paths=archived_paths or [],
         ):
-            from run_report import report_github_branch
-
             report_url = github_blob_url(str(rel), branch=report_github_branch())
             print(f"[ok] report pushed: {rel}")
-            if report_result.archived_paths:
+            if archived_paths:
                 print(
-                    f"[info] archived {len(report_result.archived_paths)} report(s) "
+                    f"[info] archived {len(archived_paths)} report(s) "
                     f"to reports/backup/",
                 )
         else:
@@ -532,6 +531,46 @@ def notify_cards(
             )
     else:
         print(f"[info] report saved locally only (--no-push): {rel}")
+    return report_url
+
+
+def notify_cards(
+    result_paths: list[Path],
+    *,
+    download_report_path: Path | None = None,
+    extra_download_reports: list[Path] | None = None,
+    ed2k_refetch_path: Path | None = None,
+    push_report: bool = True,
+    run_label: str = "scan",
+    existing_report_path: Path | None = None,
+) -> tuple[list[dict[str, Any]], Path, str | None]:
+    from run_report import write_run_report
+
+    scan_stats, download_report, output_dir = _prepare_notify_payload(
+        result_paths,
+        download_report_path=download_report_path,
+        extra_download_reports=extra_download_reports,
+        ed2k_refetch_path=ed2k_refetch_path,
+    )
+
+    if existing_report_path is not None:
+        report_path = existing_report_path.resolve()
+        archived_paths: list[Path] = []
+    else:
+        report_result = write_run_report(
+            scan_stats,
+            download_report,
+            run_label=run_label,
+            output_dir=output_dir,
+        )
+        report_path = report_result.path
+        archived_paths = report_result.archived_paths
+
+    report_url = _push_report_and_url(
+        report_path,
+        push_report=push_report,
+        archived_paths=archived_paths,
+    )
 
     card = build_scan_summary_card(scan_stats, download_report, report_url=report_url)
     result = send_interactive_card(card)
@@ -628,6 +667,8 @@ def _run_label_title(run_label: str) -> str:
         "daily": "日常扫描",
         "custom": "自定义扫描",
         "scan": "论坛扫描",
+        "forum-142": "forum-142 批量扫描",
+        "forum-37": "forum-37 批量扫描",
     }
     return title_map.get(run_label, run_label or "论坛扫描")
 

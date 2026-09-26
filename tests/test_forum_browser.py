@@ -28,6 +28,10 @@ class CanonicalThreadHrefTests(unittest.TestCase):
     def test_thread_id_from_href(self):
         self.assertEqual(thread_id_from_href("thread-3762119-1-5.html"), "3762119")
 
+    def test_viewthread_mobile_extra_page_param_uses_kind_one(self):
+        href = "forum.php?mod=viewthread&tid=3647981&extra=page%3D200&mobile=2"
+        self.assertEqual(canonical_thread_href(href), "thread-3647981-1-1.html")
+
 
 class DedupeCandidatesTests(unittest.TestCase):
     def test_same_thread_different_pages_deduped(self):

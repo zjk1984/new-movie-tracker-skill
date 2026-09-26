@@ -8,11 +8,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from forum142_batch_run import DEFAULT_FORUM_URL  # noqa: E402
 from feishu_notify import (  # noqa: E402
+    _forum_key,
+    _forum_label,
     build_pikpak_done_card,
     build_scan_done_card,
     build_scan_summary_card,
 )
+
+
+class FeishuForumKeyTests(unittest.TestCase):
+    def test_forum_key_from_fid_query_param(self):
+        self.assertEqual(_forum_key(DEFAULT_FORUM_URL), "forum-142")
+        self.assertEqual(_forum_label(DEFAULT_FORUM_URL), "forum-142 有码")
+
+    def test_forum_key_from_legacy_html_path(self):
+        self.assertEqual(
+            _forum_key("https://www.sehuatang.org/forum-142-1.html"),
+            "forum-142",
+        )
 
 
 class FeishuMilestoneCardTests(unittest.TestCase):

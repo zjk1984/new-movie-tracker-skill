@@ -127,7 +127,7 @@ javdb_query_summary:
 Explain clearly:
 - **有码** = standard censored JAV (`jav_censored`)
 - **无码** = Japanese uncensored / 无码破解 (`uncensored`)
-- **国产保留** = `[国产无码]` kept as `domestic_leak` — show `domestic_subtype` (泄密 / 流出 / AI增强 / 熟女自拍 / 酒店偷拍 / ed2k)
+- **国产保留** = `[国产无码]` kept as `domestic_leak` — show `domestic_subtype` (泄密 / 流出 / 熟女自拍 / 露脸 / 真实 / 大胸 / 少妇 / 美女 / 学生 / 老师 / ed2k)
 - **国产排除** = `domestic_other` — 私拍、伪番号、OnlyFans、探花、推特、剧情等（见下方规则）
 - **JavDB 无磁力** = number found on JavDB but magnet list empty (forum magnet may still exist)
 - **查询失败** = number not on JavDB or API error
@@ -154,7 +154,13 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 | **流出** | 含「流出」（**不含**「未流出」） |
 | **AI增强** | 含「AI增强」或「AI 增强」 |
 | **熟女自拍** | 含「熟女」 |
-| **酒店偷拍** | 含「酒店偷拍」（含乐橙酒店偷拍等） |
+| **露脸** | 含「露脸」 |
+| **真实** | 含「真实」 |
+| **大胸** | 含「大胸」 |
+| **少妇** | 含「少妇」 |
+| **美女** | 含「美女」 |
+| **学生** | 含「学生」 |
+| **老师** | 含「老师」 |
 | **ed2k** | 国产帖：标题含 ed2k/115Ed2k/115eD2k 等，或帖内 `ed2k://`（须命中国产上下文，非 blanket domestic） |
 | **情色分享** | 含「情色分享」（forum-37 等版块常见标签） |
 
@@ -171,6 +177,8 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 | **黑人** | 标题含「黑人」 |
 | **AI增强** | 标题含「AI增强」或「AI 增强」 |
 | **AI短剧** | 标题含「AI短剧」或「AI真人短剧」 |
+| **酒店偷拍** | 标题含「酒店偷拍」（含乐橙酒店偷拍等） |
+| **主播录制** | 标题含「主播录制」 |
 | **伪JAV番号** | 番号前缀 XJX、JDSY、MDSY、MDSR、JDSC、CNXX、RXAJ、TMW、TMG、YCM 等（如 `XJX-380`、`MDSR-0009-1`） |
 | **OnlyFans** | OnlyFans、HongKongDoll、Hong Kong Doll、玩偶姐姐 |
 
@@ -182,7 +190,7 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 |------|------------------|------|
 | 日本有码 | `jav_censored` | MIDA-749、SNOS-270 等标准番号 |
 | 日本无码 | `uncensored` | 无码破解、HEYZO 等 |
-| 国产保留 | `domestic_leak` | 泄密 / 流出 / AI增强 / 熟女自拍 / 酒店偷拍 / ed2k（且非排除项） |
+| 国产保留 | `domestic_leak` | 泄密 / 流出 / 熟女自拍 / 露脸 / 真实 / 大胸 / 少妇 / 美女 / 学生 / 老师 / ed2k（且非排除项） |
 | 国产排除 | `domestic_other` | 有磁力但不下载 |
 
 #### 汇报示例
@@ -229,7 +237,7 @@ Optional env: `JAVDB_HOST`, `JAVDB_TOKEN`, `JAVDB_AUTH_FILE`, `JAVDB_DEVICE_UUID
 
 When the user wants **Chinese-subtitled magnets** from forum posts and automatic PikPak download:
 
-**Content filter (default):** Japanese **有码** + **无码破解** + **国产/ed2k**（泄密/流出/熟女自拍/酒店偷拍/情色分享/ed2k；排除私拍/厕拍/黑人/AI增强/AI短剧/AI真人短剧/伪番号/OnlyFans）。详见 **§6 国产无码规则**。Western、FC2、素人 JAV 排除。`--all-regions` 关闭全部过滤。
+**Content filter (default):** Japanese **有码** + **无码破解** + **国产/ed2k**（泄密/流出/熟女自拍/露脸/真实/大胸/少妇/美女/学生/老师/情色分享/ed2k；排除私拍/厕拍/黑人/酒店偷拍/主播录制/AI增强/AI短剧/AI真人短剧/伪番号/OnlyFans）。详见 **§6 国产无码规则**。Western、FC2、素人 JAV 排除。`--all-regions` 关闭全部过滤。
 
 **Download policy (in order):**
 1. Forum title indicates cnsub (中字/字幕/中文…) and thread has magnets → use forum magnet
@@ -297,7 +305,9 @@ tmux new-session -d -s daily-supervisor -c /path/to/repo \
 
 Between Beijing slot starts it **sleeps** (no 24/7 polling). From each slot time (07:00, 13:00, 20:00) it polls every 5 min, runs `ensure_cron_running.sh` (belt-and-suspenders), and triggers `daily_run.sh` when `data/daily_run.log` has no start entry for that slot today (idempotent). While `daily_run.sh` is running it waits for completion, then sleeps until the next slot. Also apply repo `environment.json` on the cron VM (`"start": "./scripts/restart_daily_supervisor.sh"`) so each VM wake restarts the supervisor and runs missed-slot catch-up after checkpoint restore. System timezone should be **Asia/Shanghai**. Logs: `data/daily_run.log`, `data/cron_health.log`, `data/supervisor.log`. If restart fails after install, run **`sudo service cron restart`** manually. See [reference.md](reference.md) and project doc `daily-run-external-schedule.md` for Cursor `subscribe_timer` as an optional third layer.
 
-**Forum-37 batch (daily 18:00 Beijing):** `./scripts/setup_forum37_cron.sh` installs a separate crontab line for `./scripts/forum37_batch_run.sh` (10-page batch scan, log `data/forum37_batch_run.log`). Not managed by the daily supervisor — cron-only. Optional timer wake 5 min before (17:55) daily; see project doc.
+**Forum-37 batch (daily 18:00 Beijing):** `./scripts/setup_forum37_cron.sh` installs a separate crontab line for `./scripts/forum37_batch_run.sh` (20-page batch scan, log `data/forum37_batch_run.log`). Not managed by the daily supervisor — cron-only. Optional timer wake 5 min before (17:55) daily; see project doc.
+
+**Forum-142 batch (daily 14:00 Beijing):** `./scripts/setup_forum142_cron.sh` installs `./scripts/forum142_batch_run.sh` (10-page batch scan from page 200 on `https://www.sehuatang.net/forum-142-1.html`, log `data/forum142_batch_run.log`, per-run report `reports/forum-142_YYYY-MM-DD.md`). Cron-only; deploy on cron VM after merge — reset state (`--reset`) or set `next_start_page=200` before re-run; smoke-test page 1 after URL/parser changes.
 
 **One-time setup**
 1. Save PikPak token: `python scripts/pikpak_login.py login` (stored in `pikpak_auth.json`).

@@ -39,7 +39,7 @@ class BuildSubmitProbeTests(unittest.TestCase):
         self.assertEqual(probe.get("av_number"), "MIDA-744")
         self.assertIn(probe.get("content_region"), {"jav_censored", "uncensored", "fc2"})
 
-    def test_domestic_hotel_row_stays_domestic(self):
+    def test_domestic_hotel_row_excluded(self):
         matched = {
             "thread-3761025-1-1.html": {
                 "href": "thread-3761025-1-1.html",
@@ -55,8 +55,8 @@ class BuildSubmitProbeTests(unittest.TestCase):
             "uri": "magnet:?xt=urn:btih:abc",
         }
         probe = build_submit_probe(row, matched)
-        self.assertEqual(probe.get("content_region"), "domestic_leak")
-        self.assertEqual(probe.get("domestic_subtype"), "酒店偷拍")
+        self.assertEqual(probe.get("content_region"), "domestic_other")
+        self.assertNotIn("domestic_subtype", probe)
 
 
 class FilterDownloadReportTests(unittest.TestCase):

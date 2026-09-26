@@ -155,13 +155,68 @@ class DomesticAiEnhancedExclusionTests(unittest.TestCase):
         self.assertTrue(is_downloadable(item))
         self.assertNotIn("skip_reason", item)
 
-    def test_domestic_leak_without_ai_enhanced_still_kept(self):
+    def test_jiudian_toupai_excluded(self):
         title = "[国产] 酒店偷拍 小少妇"
+        self.assertTrue(is_domestic_excluded(title))
         item = {"title": title}
         apply_region_filter(item)
-        self.assertEqual(item["content_region"], "domestic_leak")
-        self.assertEqual(item.get("domestic_subtype"), "酒店偷拍")
-        self.assertTrue(is_downloadable(item))
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+        self.assertNotIn("domestic_subtype", item)
+
+    def test_zhubo_luzhi_excluded(self):
+        title = "[国产] 主播录制 某女 4K"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
+        item = {"title": title}
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+        self.assertNotIn("domestic_subtype", item)
+
+    def test_zhubo_luzhi_excluded_even_with_ed2k(self):
+        title = "[国产] 主播录制 115ed2k"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title, has_ed2k=True))
+        item = DomesticKeywordExclusionTests._ed2k_item(title)
+        apply_region_filter(item)
+        self.assertEqual(item["content_region"], "domestic_other")
+        self.assertFalse(is_downloadable(item))
+
+    def test_zhubo_luzhi_blocks_other_domestic_keep_tags(self):
+        title = "[国产] 泄密 主播录制 某女"
+        self.assertTrue(is_domestic_excluded(title))
+        self.assertIsNone(domestic_keep_reason(title))
+        self.assertEqual(classify_region({"title": title}), "domestic_other")
+
+
+class DomesticKeepKeywordSubtypeTests(unittest.TestCase):
+    @staticmethod
+    def _item(title: str) -> dict:
+        return {"title": title}
+
+    def test_new_keep_keywords(self):
+        cases = [
+            ("[国产] 露脸 某女", "露脸"),
+            ("[国产] 真实 某女", "真实"),
+            ("[国产] 大胸 某女", "大胸"),
+            ("[国产] 小少妇", "少妇"),
+            ("[国产] 美女 某女", "美女"),
+            ("[国产] 学生 某女", "学生"),
+            ("[国产] 老师 某女", "老师"),
+        ]
+        for title, expected_subtype in cases:
+            with self.subTest(title=title):
+                item = self._item(title)
+                apply_region_filter(item)
+                self.assertEqual(item["content_region"], "domestic_leak")
+                self.assertEqual(item.get("domestic_subtype"), expected_subtype)
+                self.assertTrue(is_downloadable(item))
+
+    def test_shunv_selfie_subtype_unchanged(self):
+        item = self._item("[国产] 熟女 自拍")
+        apply_region_filter(item)
+        self.assertEqual(item.get("domestic_subtype"), "熟女自拍")
 
 
 class DomesticAiDuanjuExclusionTests(unittest.TestCase):

@@ -5,6 +5,7 @@ Supports multiple actor input methods: json file, directory, or direct arguments
 Uses local Chrome with persistent context to reduce Cloudflare friction.
 Supports multi-page, multi-forum scanning, and optional magnet link extraction.
 """
+import html
 import os
 import sys
 import re
@@ -384,10 +385,97 @@ def build_page_url(base_url: str, page: int) -> str:
     return replaced
 
 
+def _strip_html_tags(text: str) -> str:
+    return re.sub(r"<[^>]+>", "", text or "").strip()
+
+
+def _append_parsed_post(
+    posts: list[dict],
+    seen: set[str],
+    *,
+    title: str,
+    href: str,
+    date_text: str = "",
+) -> None:
+    from forum_browser import canonical_thread_href
+
+    title = _strip_html_tags(html.unescape(title or ""))
+    href = canonical_thread_href(html.unescape(str(href or "")))
+    if not title or not href or len(title) <= 4:
+        return
+    dedupe_key = href or title
+    if dedupe_key in seen:
+        return
+    seen.add(dedupe_key)
+    posts.append({
+        "title": title,
+        "date_text": (date_text or "").strip(),
+        "href": href,
+    })
+
+
+def parse_posts_from_html(html: str) -> list[dict]:
+    """Parse forum list rows from raw HTML (desktop + mobile Discuz)."""
+    posts: list[dict] = []
+    seen: set[str] = set()
+
+    for block in re.finditer(
+        r"<tbody\s+id=[\"']normalthread_\d+[\"'][^>]*>(.*?)</tbody>",
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        body = block.group(1)
+        title_match = re.search(
+            r"<a[^>]+href=[\"']([^\"']*thread[^\"']*)[\"'][^>]*class=[\"'][^\"']*\bxst\b[^\"']*[\"'][^>]*>(.*?)</a>",
+            body,
+            flags=re.IGNORECASE | re.DOTALL,
+        ) or re.search(
+            r"<a[^>]+class=[\"'][^\"']*\bxst\b[^\"']*[\"'][^>]+href=[\"']([^\"']*thread[^\"']*)[\"'][^>]*>(.*?)</a>",
+            body,
+            flags=re.IGNORECASE | re.DOTALL,
+        ) or re.search(
+            r"<th[^>]*>.*?<a[^>]+href=[\"']([^\"']*thread[^\"']*)[\"'][^>]*>(.*?)</a>",
+            body,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not title_match:
+            continue
+        href, title = title_match.group(1), _strip_html_tags(title_match.group(2))
+        category_match = re.search(
+            r"<th[^>]*>\s*<em>\s*<a[^>]*>(.*?)</a>",
+            body,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        category = _strip_html_tags(category_match.group(1)) if category_match else ""
+        if category:
+            title = f"[{category}] {title}"
+        date_match = re.search(
+            r"<td[^>]*class=[\"'][^\"']*\bby\b[^\"']*[\"'][^>]*>.*?<(?:em|span)[^>]*>(.*?)</(?:em|span)>",
+            body,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        date_text = _strip_html_tags(date_match.group(1)) if date_match else ""
+        _append_parsed_post(posts, seen, title=title, href=href, date_text=date_text)
+
+    if not posts:
+        for match in re.finditer(
+            r"<a[^>]+href=[\"']([^\"']*(?:viewthread|thread-\d+)[^\"']*)[\"'][^>]*>(.*?)</a>",
+            html,
+            flags=re.IGNORECASE | re.DOTALL,
+        ):
+            href, title = match.group(1), _strip_html_tags(match.group(2))
+            _append_parsed_post(posts, seen, title=title, href=href)
+
+    return posts
+
+
 def parse_posts_from_page(page):
     posts = []
     try:
-        page.wait_for_selector("table#threadlisttableid, #threadlist, tbody[id^='normalthread']", timeout=10000)
+        page.wait_for_selector(
+            "table#threadlisttableid, #threadlist, tbody[id^='normalthread']",
+            timeout=10000,
+        )
     except PlaywrightTimeout:
         pass
 
@@ -417,7 +505,14 @@ def parse_posts_from_page(page):
             except Exception:
                 continue
     else:
-        links = page.locator("a[href*='thread']")
+        links = page.locator(
+            "#threadlist a[href*='viewthread'], "
+            "#threadlist a[href*='thread-'], "
+            ".threadlist a[href*='viewthread'], "
+            ".threadlist a[href*='thread-'], "
+            "a[href*='viewthread'], "
+            "a[href*='thread-']",
+        )
         n = links.count()
         seen = set()
         for i in range(min(n, 200)):
@@ -444,6 +539,12 @@ def parse_posts_from_page(page):
                     })
             except Exception:
                 continue
+
+    if not posts:
+        try:
+            posts = parse_posts_from_html(page.content())
+        except Exception:
+            pass
     return posts
 
 
@@ -1282,6 +1383,27 @@ def save_scan_results(
         result_text = "\n".join(lines)
         print("\n" + result_text)
         (out_dir / "result.txt").write_text(result_text, encoding="utf-8")
+        from scan_delta import rotate_scan_snapshot
+
+        if rotate_scan_snapshot(out_dir):
+            print("[info] rotated last_result.json -> previous_result.json")
+        (out_dir / "last_result.json").write_text(
+            json.dumps(
+                {
+                    "scan_time": beijing_now_iso(),
+                    "cutoff": cutoff.strftime("%Y-%m-%d"),
+                    "today": today.strftime("%Y-%m-%d"),
+                    "batch_mode": bool(getattr(args, "batch_mode", False)),
+                    "matched": [],
+                    "javdb_summary": {},
+                    "total_posts": total_posts,
+                    "pages_scanned": total_pages_scanned,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         page.screenshot(path=str(screenshot_dir / "last_run.png"))
         print(f"[done] results saved to {out_dir}")
         return
@@ -1827,7 +1949,7 @@ def main():
             "tighter waits, no undownloaded title translation",
         )
     if args.region_filter:
-        print("[info] download filter: JAV 有码/无码 + 国产/ed2k(泄密/流出/熟女/酒店偷拍/情色分享/ed2k; 排除私拍/厕拍/黑人/伪番号/OnlyFans/AI增强/AI短剧/AI真人短剧)")
+        print("[info] download filter: JAV 有码/无码 + 国产/ed2k(泄密/流出/熟女/露脸/真实/大胸/少妇/美女/学生/老师/情色分享/ed2k; 排除私拍/厕拍/黑人/酒店偷拍/主播录制/伪番号/OnlyFans/AI增强/AI短剧/AI真人短剧)")
     if args.javdb_query:
         print("[info] javdb query report: enabled for matched 有码/无码 items")
     scrape(args)
