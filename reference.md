@@ -442,7 +442,7 @@ Verify: `crontab -l | grep forum37` · Dry-run: `./scripts/setup_forum37_cron.sh
 
 ### Linux cron — forum-142 batch (daily 14:00 Asia/Shanghai)
 
-Separate from daily_run and forum-37 batch. Scans the next 10 forum-142 list pages via `scripts/forum142_batch_run.sh` (auto-advances page cursor in `data/forum142_batch_state.json`; first run pages 200–209).
+Separate from daily_run and forum-37 batch. Scans the next 10 forum-142 list pages via `scripts/forum142_batch_run.sh` on **sehuatang.net** (`https://www.sehuatang.net/forum.php?mod=forumdisplay&fid=142&mobile=2`; page 200 adds `&page=200`) — auto-advances page cursor in `data/forum142_batch_state.json`; first run pages 200–209.
 
 ```bash
 ./scripts/setup_forum142_cron.sh
@@ -454,7 +454,8 @@ Separate from daily_run and forum-37 batch. Scans the next 10 forum-142 list pag
 | Crontab line | `0 14 * * * TZ=Asia/Shanghai /path/to/scripts/forum142_batch_run.sh # new-movie-tracker-forum142-batch` |
 | Log | `data/forum142_batch_run.log` |
 | Per-run report | `reports/forum-142_YYYY-MM-DD.md` |
-| Cron VM | `bc-d4fb1f8c` — run after merge: `git pull && ./scripts/setup_forum142_cron.sh` |
+| Forum URL | `https://www.sehuatang.net/forum.php?mod=forumdisplay&fid=142&mobile=2` |
+| Cron VM | `bc-d4fb1f8c` — run after merge: `git pull && ./scripts/setup_forum142_cron.sh` (optional); **reset state** with `./scripts/forum142_batch_run.sh --reset` or set `next_start_page=200` in `data/forum142_batch_state.json` before re-run |
 
 Verify: `crontab -l | grep forum142` · Dry-run: `./scripts/setup_forum142_cron.sh --dry-run` · Remove: `./scripts/setup_forum142_cron.sh --remove`
 

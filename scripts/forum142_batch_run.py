@@ -16,7 +16,9 @@ from pathlib import Path
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = SKILL_DIR / "scripts"
 REPORTS_DIR = SKILL_DIR / "reports"
-DEFAULT_FORUM_URL = "https://www.sehuatang.org/forum-142-1.html"
+DEFAULT_FORUM_URL = (
+    "https://www.sehuatang.net/forum.php?mod=forumdisplay&fid=142&mobile=2"
+)
 DEFAULT_INITIAL_PAGE = 200
 PAGES_PER_RUN = 10
 DEFAULT_FETCH_WORKERS = 5

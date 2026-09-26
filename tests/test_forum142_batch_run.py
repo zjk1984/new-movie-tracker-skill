@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from forum142_batch_run import (  # noqa: E402
+    DEFAULT_FORUM_URL,
     PAGES_PER_RUN,
     build_state_after_run,
     forum142_report_path,
@@ -40,9 +41,15 @@ class Forum142BatchRunTests(unittest.TestCase):
     def test_pages_per_run_default(self):
         self.assertEqual(PAGES_PER_RUN, 10)
 
+    def test_default_forum_url_uses_sehuatang_net_fid142(self):
+        self.assertIn("sehuatang.net", DEFAULT_FORUM_URL)
+        self.assertIn("fid=142", DEFAULT_FORUM_URL)
+        self.assertIn("mobile=2", DEFAULT_FORUM_URL)
+        self.assertNotIn("sehuatang.org", DEFAULT_FORUM_URL)
+
     def test_build_state_after_run_advances_cursor(self):
         out = build_state_after_run(
-            forum_url="https://www.sehuatang.org/forum-142-1.html",
+            forum_url=DEFAULT_FORUM_URL,
             initial_page=200,
             start_page=200,
             max_pages=PAGES_PER_RUN,
@@ -98,7 +105,7 @@ class Forum142BatchRunTests(unittest.TestCase):
                 status=False,
                 reset=False,
                 output_dir=tmp,
-                forum_url="https://www.sehuatang.org/forum-142-1.html",
+                forum_url=DEFAULT_FORUM_URL,
                 initial_page=200,
                 max_pages=PAGES_PER_RUN,
                 set_page=None,

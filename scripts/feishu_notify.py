@@ -126,8 +126,14 @@ def send_interactive_card(card: dict[str, Any], **kwargs: Any) -> dict[str, Any]
 
 
 def _forum_key(forum_url: str) -> str:
-    match = re.search(r"forum-(\d+)", forum_url or "")
-    return f"forum-{match.group(1)}" if match else "unknown"
+    url = forum_url or ""
+    match = re.search(r"forum-(\d+)", url)
+    if match:
+        return f"forum-{match.group(1)}"
+    match = re.search(r"[?&]fid=(\d+)", url)
+    if match:
+        return f"forum-{match.group(1)}"
+    return "unknown"
 
 
 def _forum_label(forum_url: str) -> str:
