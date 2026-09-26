@@ -131,7 +131,7 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 | 私拍 | 私拍 |
 | 厕拍 | 厕拍 |
 | 黑人 | 黑人 |
-| 情色分享 | 情色分享 |
+| 情色分享 | 情色分享（标题含 ed2k/115Ed2k/115eD2k 时例外保留） |
 | AI增强 | AI增强 / AI 增强 |
 | AI短剧 | AI短剧 / AI真人短剧 |
 | 伪番号 | XJX, JDSY, MDSY, MDSR, JDSC, CNXX, RXAJ, TMW, TMG, YCM + 数字 |

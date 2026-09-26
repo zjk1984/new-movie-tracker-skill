@@ -72,7 +72,12 @@ def is_domestic_excluded(title: str, number: str = "") -> bool:
     text = title or ""
     if title_has_ai_enhanced(text):
         return True
-    if any(kw in text for kw in DOMESTIC_EXCLUDED_KEYWORDS):
+    for kw in DOMESTIC_EXCLUDED_KEYWORDS:
+        if kw not in text:
+            continue
+        # 115ed2k titles bypass 情色分享 only; other exclusions still apply
+        if kw == "情色分享" and title_has_ed2k(text):
+            continue
         return True
     if ONLYFANS_RE.search(text):
         return True
