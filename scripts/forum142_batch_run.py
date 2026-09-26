@@ -12,13 +12,12 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = SKILL_DIR / "scripts"
 REPORTS_DIR = SKILL_DIR / "reports"
-DEFAULT_FORUM_URL = (
-    "https://www.sehuatang.net/forum.php?mod=forumdisplay&fid=142&mobile=2"
-)
+DEFAULT_FORUM_URL = "https://www.sehuatang.net/forum-142-1.html"
 DEFAULT_INITIAL_PAGE = 200
 PAGES_PER_RUN = 10
 DEFAULT_FETCH_WORKERS = 5
@@ -86,6 +85,71 @@ def forum142_report_path(*, reports_dir: Path | None = None, when: datetime | No
     return out / f"forum-142_{date_str}.md"
 
 
+def _parse_result_scan_time(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def load_fresh_batch_result(
+    result_path: Path,
+    *,
+    not_before: datetime | None = None,
+) -> dict | None:
+    """Return last_result.json only when it was written during this batch run."""
+    if not result_path.exists():
+        return None
+    try:
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if not_before is not None:
+        scan_time = _parse_result_scan_time(data.get("scan_time"))
+        if scan_time is None:
+            return None
+        nb = not_before
+        if scan_time.tzinfo is not None and nb.tzinfo is None:
+            nb = nb.replace(tzinfo=scan_time.tzinfo)
+        elif scan_time.tzinfo is None and nb.tzinfo is not None:
+            scan_time = scan_time.replace(tzinfo=nb.tzinfo)
+        if scan_time < nb:
+            return None
+    return data
+
+
+def load_fresh_download_report(
+    download_report_path: Path,
+    *,
+    not_before: datetime | None = None,
+    matched_total: int = 0,
+) -> dict[str, Any]:
+    from feishu_notify import load_download_report
+
+    empty = {"succeeded": [], "failed": [], "ok": 0, "failed_count": 0, "total": 0}
+    if matched_total <= 0:
+        return empty
+    if not download_report_path.exists():
+        return empty
+    report = load_download_report(download_report_path)
+    if not_before is not None:
+        generated_at = _parse_result_scan_time(report.get("generated_at"))
+        if generated_at is None:
+            return empty
+        nb = not_before
+        if generated_at.tzinfo is not None and nb.tzinfo is None:
+            nb = nb.replace(tzinfo=generated_at.tzinfo)
+        elif generated_at.tzinfo is None and nb.tzinfo is not None:
+            generated_at = generated_at.replace(tzinfo=nb.tzinfo)
+        if generated_at < nb:
+            return empty
+    return report
+
+
 def write_forum142_daily_report(
     output_dir: Path,
     *,
@@ -94,6 +158,7 @@ def write_forum142_daily_report(
     batch_state: dict,
     exit_code: int = 0,
     reports_dir: Path | None = None,
+    batch_started_at: datetime | None = None,
 ) -> Path:
     """Write per-run markdown record under reports/forum-142_YYYY-MM-DD.md."""
     out_dir = reports_dir or REPORTS_DIR
@@ -110,14 +175,20 @@ def write_forum142_daily_report(
         f"- **退出码**: {exit_code}\n\n"
     )
 
-    if result_path.exists():
+    result_data = load_fresh_batch_result(
+        result_path,
+        not_before=batch_started_at,
+    )
+    if result_data is not None:
         try:
-            from feishu_notify import analyze_scan, load_download_report
+            from feishu_notify import analyze_scan
             from run_report import write_run_report
 
             scan_stats = analyze_scan([result_path], enrich_javdb=False)
-            download_report = load_download_report(
-                download_report_path if download_report_path.exists() else None,
+            download_report = load_fresh_download_report(
+                download_report_path,
+                not_before=batch_started_at,
+                matched_total=int(scan_stats.get("matched_total") or 0),
             )
             staging_label = f"forum-142-staging-{datetime.now().strftime('%Y%m%d%H%M%S')}"
             staging = write_run_report(
@@ -218,7 +289,8 @@ def run_batch(args: argparse.Namespace) -> int:
     max_pages = args.max_pages
     end_page = start_page + max_pages - 1
 
-    print(f"[info] forum142_batch_run started at {datetime.now().isoformat(timespec='seconds')}")
+    batch_started_at = datetime.now()
+    print(f"[info] forum142_batch_run started at {batch_started_at.isoformat(timespec='seconds')}")
     print(f"[info] forum-142 pages {start_page}~{end_page} ({max_pages} page(s))")
 
     cmd = [
@@ -262,6 +334,7 @@ def run_batch(args: argparse.Namespace) -> int:
         end_page=end_page,
         batch_state=new_state,
         exit_code=rc,
+        batch_started_at=batch_started_at,
     )
     maybe_feishu_forum142_summary(
         output_dir,

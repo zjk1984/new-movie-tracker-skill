@@ -16,6 +16,8 @@ from forum142_batch_run import (  # noqa: E402
     PAGES_PER_RUN,
     build_state_after_run,
     forum142_report_path,
+    load_fresh_batch_result,
+    load_fresh_download_report,
     resolve_next_start_page,
     save_state,
     state_path,
@@ -42,9 +44,10 @@ class Forum142BatchRunTests(unittest.TestCase):
         self.assertEqual(PAGES_PER_RUN, 10)
 
     def test_default_forum_url_uses_sehuatang_net_fid142(self):
-        self.assertIn("sehuatang.net", DEFAULT_FORUM_URL)
-        self.assertIn("fid=142", DEFAULT_FORUM_URL)
-        self.assertIn("mobile=2", DEFAULT_FORUM_URL)
+        self.assertEqual(
+            DEFAULT_FORUM_URL,
+            "https://www.sehuatang.net/forum-142-1.html",
+        )
         self.assertNotIn("sehuatang.org", DEFAULT_FORUM_URL)
 
     def test_build_state_after_run_advances_cursor(self):
@@ -89,6 +92,85 @@ class Forum142BatchRunTests(unittest.TestCase):
             self.assertIn("Forum-142 批量扫描记录", text)
             self.assertIn("200~209", text)
             self.assertIn("210", text)
+
+    def test_load_fresh_batch_result_rejects_stale_scan_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result_path = Path(tmp) / "last_result.json"
+            result_path.write_text(
+                '{"scan_time":"2026-09-26T10:00:00","matched":[{"title":"old"}],"total_posts":300}',
+                encoding="utf-8",
+            )
+            fresh = load_fresh_batch_result(
+                result_path,
+                not_before=datetime(2026, 9, 26, 15, 0, 0),
+            )
+            self.assertIsNone(fresh)
+
+    def test_write_forum142_daily_report_ignores_stale_last_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            reports_dir = out / "reports"
+            (out / "last_result.json").write_text(
+                '{"scan_time":"2026-09-26T10:00:00","matched":[{"title":"old","href":"thread-1-1-1.html","forum":"x","actors":[],"matched_names":[],"keywords":[],"date":"2026-09-26","date_raw":"2026-09-26","content_region":"jp"}],"total_posts":300,"pages_scanned":10,"batch_mode":true}',
+                encoding="utf-8",
+            )
+            (out / "download_report.json").write_text(
+                '{"generated_at":"2026-09-26T10:05:00","ok":45,"failed_count":0,"total":45,"succeeded":[{"name":"old"}],"failed":[]}',
+                encoding="utf-8",
+            )
+            path = write_forum142_daily_report(
+                out,
+                start_page=200,
+                end_page=209,
+                batch_state={"next_start_page": 210, "runs_completed": 1},
+                reports_dir=reports_dir,
+                batch_started_at=datetime(2026, 9, 26, 15, 0, 0),
+            )
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("无扫描结果文件 last_result.json", text)
+            self.assertNotIn("300", text)
+            self.assertNotIn("PikPak 成功", text)
+
+    def test_write_forum142_daily_report_empty_current_scan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            reports_dir = out / "reports"
+            batch_started = datetime(2026, 9, 26, 15, 0, 0)
+            (out / "last_result.json").write_text(
+                '{"scan_time":"2026-09-26T15:30:00","matched":[],"total_posts":0,"pages_scanned":10,"batch_mode":true}',
+                encoding="utf-8",
+            )
+            (out / "download_report.json").write_text(
+                '{"generated_at":"2026-09-26T10:05:00","ok":45,"failed_count":0,"total":45,"succeeded":[{"name":"old"}],"failed":[]}',
+                encoding="utf-8",
+            )
+            path = write_forum142_daily_report(
+                out,
+                start_page=200,
+                end_page=209,
+                batch_state={"next_start_page": 210, "runs_completed": 1},
+                reports_dir=reports_dir,
+                batch_started_at=batch_started,
+            )
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("匹配帖 | 0", text)
+            self.assertIn("PikPak 成功 | 0", text)
+            self.assertNotIn("45", text)
+
+    def test_load_fresh_download_report_empty_when_no_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "download_report.json"
+            report_path.write_text(
+                '{"generated_at":"2026-09-26T15:30:00","ok":45,"failed_count":0,"total":45,"succeeded":[],"failed":[]}',
+                encoding="utf-8",
+            )
+            empty = load_fresh_download_report(
+                report_path,
+                not_before=datetime(2026, 9, 26, 15, 0, 0),
+                matched_total=0,
+            )
+            self.assertEqual(empty["ok"], 0)
+            self.assertEqual(empty["total"], 0)
 
     @patch.dict("os.environ", {"FEISHU_RECEIVE_ID": "oc_test"}, clear=False)
     @patch("forum142_batch_run.maybe_feishu_forum142_summary")
@@ -145,7 +227,7 @@ class Forum142BatchRunTests(unittest.TestCase):
                 status=False,
                 reset=False,
                 output_dir=tmp,
-                forum_url="https://www.sehuatang.org/forum-142-1.html",
+                forum_url=DEFAULT_FORUM_URL,
                 initial_page=200,
                 max_pages=PAGES_PER_RUN,
                 set_page=None,

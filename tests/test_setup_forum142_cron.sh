@@ -33,7 +33,7 @@ grep -Fq 'new-movie-tracker-forum142-batch' "$SCRIPT"
 grep -Fq 'forum142_batch_run.sh' "$SCRIPT"
 grep -Fq 'FORUM142_CRON_WEEKDAYS' "$SCRIPT"
 
-grep -Fq 'sehuatang.net/forum.php?mod=forumdisplay&fid=142&mobile=2' \
+grep -Fq 'sehuatang.net/forum-142-1.html' \
   "$ROOT/scripts/forum142_batch_run.py"
 
 echo "[ok] setup_forum142_cron validation passed"

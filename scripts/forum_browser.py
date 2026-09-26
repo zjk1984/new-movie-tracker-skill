@@ -38,6 +38,8 @@ def canonical_thread_href(href: str) -> str:
         tid = (qs.get("tid") or [None])[0]
         if tid:
             kind = (qs.get("extra") or ["1"])[0]
+            if not re.fullmatch(r"\d+", str(kind)):
+                kind = "1"
             return f"thread-{tid}-{kind}-1.html"
     return href
 
