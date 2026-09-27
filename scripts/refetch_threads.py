@@ -141,7 +141,7 @@ def main() -> int:
             from pikpak_auth import resolve_folder
             from pikpak_download import save_download_report, submit_downloads
 
-            ok, total, succeeded, failed = submit_downloads(
+            ok, total, succeeded, failed, pending, submit_skip_reason = submit_downloads(
                 eligible,
                 folder=resolve_folder(args.folder),
             )
@@ -152,6 +152,8 @@ def main() -> int:
                 failed=failed,
                 folder=resolve_folder(args.folder),
                 source=str(out_path),
+                pending_submit=pending or None,
+                submit_skip_reason=submit_skip_reason,
             )
             summary["submitted_ok"] = ok
             summary["submitted_total"] = total

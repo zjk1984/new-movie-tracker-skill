@@ -81,3 +81,61 @@ def resolve_folder(explicit: str | None = None, default: str = "My Pack") -> str
         return env
     saved = load_saved_folder(default)
     return saved or default
+
+
+_AUTH_ERROR_MARKERS = (
+    "no pikpak token",
+    "invalid token",
+    "token invalid",
+    "token expired",
+    "unauthorized",
+    "unauthenticated",
+    "authentication",
+    "access_token",
+    "invalid_grant",
+    "http 401",
+    "http 403",
+    "invalid jwt",
+    "does not look like a valid jwt",
+)
+
+_QUOTA_ERROR_MARKERS = (
+    "file_space_not_enough",
+    "storage space is not enough",
+    "not enough storage",
+    "task_daily_create_limit",
+    "daily create limit",
+    "daily download limit",
+    "free usage today",
+    "free transfers has been used up",
+    "quota",
+    "space not enough",
+    "insufficient space",
+    "insufficient quota",
+)
+
+
+def classify_submit_error(error: str) -> str | None:
+    """Return ``auth``, ``quota``, or None for a PikPak submit error message."""
+    text = (error or "").strip().lower()
+    if not text:
+        return None
+    for marker in _AUTH_ERROR_MARKERS:
+        if marker in text:
+            return "auth"
+    for marker in _QUOTA_ERROR_MARKERS:
+        if marker in text:
+            return "quota"
+    return None
+
+
+def is_auth_or_quota_error(error: str) -> bool:
+    return classify_submit_error(error) is not None
+
+
+def format_submit_skip_reason(kind: str, detail: str = "") -> str:
+    """Build a stable ``submit_skip_reason`` value for download reports."""
+    detail = (detail or "").strip().lower().replace(" ", "_")
+    if detail:
+        return f"{kind}:{detail}"
+    return kind

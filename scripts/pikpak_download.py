@@ -476,6 +476,49 @@ def load_today_magnets(result_path: Path) -> list[dict]:
     return load_downloads_from_result(result_path, today_only=True)
 
 
+def item_submit_uri(item: dict) -> str:
+    return (item.get("uri") or item.get("url") or item.get("magnet") or "").strip()
+
+
+def _dedupe_items_by_uri(items: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    out: list[dict] = []
+    for item in items:
+        uri = item_submit_uri(item)
+        key = uri or f"{item.get('name')}:{item.get('href')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def extract_pending_submit_uris(report: dict) -> list[str]:
+    """Collect magnet/ed2k/bt URIs blocked by auth/quota for one-click copy."""
+    from pikpak_auth import classify_submit_error
+
+    uris: list[str] = []
+    seen: set[str] = set()
+
+    def add_uri(uri: str) -> None:
+        text = (uri or "").strip()
+        if not text or text in seen:
+            return
+        seen.add(text)
+        uris.append(text)
+
+    skip_reason = (report.get("submit_skip_reason") or "").strip()
+    if skip_reason.startswith(("auth", "quota")):
+        for item in report.get("pending_submit") or []:
+            add_uri(item_submit_uri(item))
+
+    for item in report.get("failed") or []:
+        if classify_submit_error(item.get("error") or "") in {"auth", "quota"}:
+            add_uri(item_submit_uri(item))
+
+    return uris
+
+
 def submit_one_download(
     session: requests.Session,
     token: str,
@@ -513,8 +556,13 @@ def submit_downloads(
     *,
     folder: str = DEFAULT_FOLDER,
     access_token: str | None = None,
-) -> tuple[int, int, list[dict]]:
-    from pikpak_auth import resolve_folder, resolve_token
+) -> tuple[int, int, list[dict], list[dict], list[dict], str]:
+    from pikpak_auth import (
+        classify_submit_error,
+        format_submit_skip_reason,
+        resolve_folder,
+        resolve_token,
+    )
 
     token = resolve_token(access_token)
     if not token:
@@ -524,11 +572,22 @@ def submit_downloads(
         )
     folder = resolve_folder(folder, DEFAULT_FOLDER)
 
-    payload = decode_jwt_payload(token)
+    try:
+        payload = decode_jwt_payload(token)
+    except Exception as exc:
+        raise RuntimeError(f"invalid token: {exc}") from exc
     user_id = payload.get("sub", "")
     device_id = hashlib.md5(user_id.encode()).hexdigest()
     session = requests.Session()
-    parent_id = find_folder_id(session, token, device_id, user_id, folder)
+    try:
+        parent_id = find_folder_id(session, token, device_id, user_id, folder)
+    except Exception as exc:
+        err = str(exc)
+        if classify_submit_error(err) == "auth":
+            pending = [dict(item) for item in items]
+            print(f"[err] pikpak auth failed before submit: {err}", file=sys.stderr)
+            return 0, len(items), [], [], pending, format_submit_skip_reason("auth", "invalid")
+        raise
     if parent_id:
         print(f"[info] download folder: {folder} ({parent_id})")
     else:
@@ -537,7 +596,9 @@ def submit_downloads(
     ok = 0
     succeeded: list[dict] = []
     failed: list[dict] = []
-    for item in items:
+    pending: list[dict] = []
+    submit_skip_reason = ""
+    for index, item in enumerate(items):
         kind = "sha" if item.get("type") == "sha" else "url"
         try:
             result = submit_one_download(
@@ -562,7 +623,14 @@ def submit_downloads(
             record = dict(item)
             record.update({"status": "failed", "error": err})
             failed.append(record)
-    return ok, len(items), succeeded, failed
+            error_kind = classify_submit_error(err)
+            if error_kind == "auth":
+                submit_skip_reason = format_submit_skip_reason("auth", "invalid")
+                pending.extend(dict(row) for row in items[index + 1 :])
+                print("[warn] pikpak auth failed; remaining downloads skipped", file=sys.stderr)
+                break
+    pending = _dedupe_items_by_uri(pending)
+    return ok, len(items), succeeded, failed, pending, submit_skip_reason
 
 
 def save_download_report(
@@ -572,9 +640,12 @@ def save_download_report(
     failed: list[dict],
     folder: str = DEFAULT_FOLDER,
     source: str = "",
+    pending_submit: list[dict] | None = None,
+    submit_skip_reason: str = "",
 ) -> dict:
     from datetime import datetime
 
+    pending = _dedupe_items_by_uri(list(pending_submit or []))
     report = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "folder": folder,
@@ -584,6 +655,8 @@ def save_download_report(
         "total": len(succeeded) + len(failed),
         "succeeded": succeeded,
         "failed": failed,
+        "pending_submit": pending,
+        "submit_skip_reason": submit_skip_reason or "",
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -613,6 +686,10 @@ def submit_from_result(
         save_state,
         touch_run,
     )
+    from pikpak_auth import format_submit_skip_reason, resolve_folder, resolve_token
+
+    folder = resolve_folder(folder, DEFAULT_FOLDER)
+    report_path = result_path.parent / "download_report.json"
 
     items = load_downloads_from_result(
         result_path,
@@ -637,7 +714,6 @@ def submit_from_result(
         print(f"[info] new-only: {len(items)}/{before} download(s) since last run")
     if not items:
         print("[info] no downloads to submit")
-        report_path = result_path.parent / "download_report.json"
         save_download_report(
             report_path,
             succeeded=[],
@@ -649,17 +725,65 @@ def submit_from_result(
             touch_run(state)
             save_state(state_path, state)
         return 0, 0
+
+    token = resolve_token(access_token)
+    if not token:
+        reason = format_submit_skip_reason("auth", "no_token")
+        print(f"[err] {reason}: run `python scripts/pikpak_login.py login` or set PIKPAK_TOKEN")
+        save_download_report(
+            report_path,
+            succeeded=[],
+            failed=[],
+            folder=folder,
+            source=str(result_path),
+            pending_submit=items,
+            submit_skip_reason=reason,
+        )
+        print(f"[info] download report: {report_path}")
+        if new_only and state is not None:
+            touch_run(state)
+            save_state(state_path, state)
+        return 0, len(items)
+
     print(f"[info] submitting {len(items)} cloud download task(s)...")
-    ok, total, succeeded, failed = submit_downloads(
-        items, folder=folder, access_token=access_token,
-    )
-    report_path = result_path.parent / "download_report.json"
+    try:
+        ok, total, succeeded, failed, pending, submit_skip_reason = submit_downloads(
+            items, folder=folder, access_token=access_token,
+        )
+    except RuntimeError as exc:
+        err = str(exc)
+        from pikpak_auth import classify_submit_error
+
+        if classify_submit_error(err) == "auth":
+            reason = format_submit_skip_reason("auth", "invalid")
+            print(f"[err] pikpak auth failed: {err}", file=sys.stderr)
+            save_download_report(
+                report_path,
+                succeeded=[],
+                failed=[],
+                folder=folder,
+                source=str(result_path),
+                pending_submit=items,
+                submit_skip_reason=reason,
+            )
+            print(f"[info] download report: {report_path}")
+            if new_only and state is not None:
+                touch_run(state)
+                save_state(state_path, state)
+            return 0, len(items)
+        raise
+
+    if not submit_skip_reason and pending:
+        submit_skip_reason = format_submit_skip_reason("auth", "invalid")
+
     save_download_report(
         report_path,
         succeeded=succeeded,
         failed=failed,
         folder=folder,
         source=str(result_path),
+        pending_submit=pending or None,
+        submit_skip_reason=submit_skip_reason,
     )
     print(f"[info] download report: {report_path}")
     if new_only and state is not None:
@@ -749,7 +873,7 @@ def main() -> int:
             if not items:
                 print("[err] no feature codes provided", file=sys.stderr)
                 return 1
-            ok, total, _, _ = submit_downloads(items, folder=folder)
+            ok, total, _, _, _, _ = submit_downloads(items, folder=folder)
         except (RuntimeError, ValueError) as exc:
             print(f"[err] {exc}", file=sys.stderr)
             return 1

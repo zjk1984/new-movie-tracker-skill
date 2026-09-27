@@ -66,7 +66,7 @@ def main() -> int:
         print("[info] nothing to submit")
         return 0
 
-    ok, total, succeeded, failed = submit_downloads(
+    ok, total, succeeded, failed, pending, submit_skip_reason = submit_downloads(
         eligible,
         folder=resolve_folder(args.folder),
     )
@@ -78,6 +78,8 @@ def main() -> int:
         failed=failed,
         folder=resolve_folder(args.folder),
         source=str(Path(args.input)),
+        pending_submit=pending or None,
+        submit_skip_reason=submit_skip_reason,
     )
     print(f"[done] submitted {ok}/{total}; report={report_path}")
     return 0 if ok == total else 1
