@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any
+
+_FORUM_KEY_RE = re.compile(r"forum-(\d+)|[?&]fid=(\d+)")
 
 from download_state import extract_btih
 
@@ -18,15 +22,139 @@ def last_result_path(output_dir: Path | str) -> Path:
     return Path(output_dir) / "last_result.json"
 
 
+def last_result_backup_path(output_dir: Path | str) -> Path:
+    return Path(output_dir) / "last_result.json.bak"
+
+
+def write_json_atomic(path: Path, data: Any, *, indent: int = 2) -> None:
+    """Write JSON via temp file + rename so readers never see a partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(data, ensure_ascii=False, indent=indent)
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _parse_scan_result_text(text: str, *, source: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        print(f"[warn] corrupt scan result {source.name}: {exc}")
+        return None
+    if not isinstance(data, dict):
+        print(f"[warn] scan result {source.name}: expected object, got {type(data).__name__}")
+        return None
+    matched = data.get("matched")
+    if matched is not None and not isinstance(matched, list):
+        print(f"[warn] scan result {source.name}: matched is not a list")
+        return None
+    return data
+
+
+def _forum_key_from_url(forum_url: str) -> str:
+    match = _FORUM_KEY_RE.search(forum_url or "")
+    if not match:
+        return "unknown"
+    fid = match.group(1) or match.group(2)
+    return f"forum-{fid}"
+
+
+def _item_forum_urls(item: dict[str, Any]) -> list[str]:
+    forums = item.get("forums")
+    if isinstance(forums, list) and forums:
+        return [str(f).strip() for f in forums if str(f).strip()]
+    forum = (item.get("forum") or "").strip()
+    return [forum] if forum else []
+
+
+def validate_scan_result_completeness(
+    data: dict[str, Any],
+    matched: list[dict[str, Any]],
+) -> list[str]:
+    """Heuristic warnings when a multi-forum daily result looks truncated."""
+    if data.get("batch_mode"):
+        return []
+    scanned = data.get("scanned_forum_urls") or []
+    if len(scanned) < 2 or not matched:
+        return []
+
+    from collections import Counter
+
+    forum_counts: Counter[str] = Counter()
+    for item in matched:
+        urls = _item_forum_urls(item)
+        if not urls:
+            forum_counts["unknown"] += 1
+        else:
+            for url in urls:
+                forum_counts[_forum_key_from_url(url)] += 1
+
+    if len(forum_counts) <= 1 and len(matched) < 100:
+        return [
+            "scan result looks incomplete for a multi-forum daily run "
+            f"({len(matched)} matched across {len(forum_counts)} forum bucket(s); "
+            f"expected up to {len(scanned)} forums)",
+        ]
+    return []
+
+
+def load_scan_result(
+    path: Path | str,
+    *,
+    allow_backup: bool = True,
+    recovered_from: list[str] | None = None,
+) -> dict[str, Any]:
+    """Load scan result JSON; recover from .bak / previous_result on corrupt primary."""
+    primary = Path(path)
+    candidates: list[Path] = [primary]
+    if allow_backup and primary.name == "last_result.json":
+        candidates.extend([
+            last_result_backup_path(primary.parent),
+            previous_result_path(primary.parent),
+        ])
+
+    last_error: str | None = None
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            text = candidate.read_text(encoding="utf-8")
+        except OSError as exc:
+            last_error = str(exc)
+            continue
+        data = _parse_scan_result_text(text, source=candidate)
+        if data is None:
+            continue
+        if candidate != primary:
+            print(f"[warn] recovered scan result from {candidate.name} (primary unreadable)")
+            if recovered_from is not None:
+                recovered_from.append(candidate.name)
+        return data
+
+    detail = last_error or "file missing or invalid JSON"
+    raise ValueError(f"no valid scan result at {primary.parent}: {detail}")
+
+
+def load_scan_result_matched(path: Path | str, *, allow_backup: bool = True) -> list[dict[str, Any]]:
+    data = load_scan_result(path, allow_backup=allow_backup)
+    matched = data.get("matched") or []
+    return matched if isinstance(matched, list) else []
+
+
 def rotate_scan_snapshot(output_dir: Path | str) -> bool:
-    """Copy last_result.json -> previous_result.json before a new scan."""
+    """Copy last_result.json -> previous_result.json (+ .bak) before a new scan."""
     out = Path(output_dir)
     last_path = last_result_path(out)
     prev_path = previous_result_path(out)
+    bak_path = last_result_backup_path(out)
     if not last_path.exists():
         return False
-    prev_path.parent.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(last_path, prev_path)
+    shutil.copy2(last_path, bak_path)
     return True
 
 
@@ -35,8 +163,8 @@ def load_previous_matched(output_dir: Path | str) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data = load_scan_result(path, allow_backup=False)
+    except ValueError:
         return []
     matched = data.get("matched") or []
     return matched if isinstance(matched, list) else []

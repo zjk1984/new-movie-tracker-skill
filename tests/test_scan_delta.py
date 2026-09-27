@@ -15,7 +15,10 @@ from scan_delta import (  # noqa: E402
     filter_new_download_items,
     filter_new_matched,
     item_dedup_keys,
+    load_scan_result,
     rotate_scan_snapshot,
+    validate_scan_result_completeness,
+    write_json_atomic,
 )
 
 
@@ -136,6 +139,54 @@ class ScanDeltaTests(unittest.TestCase):
             self.assertEqual(stats["matched_total"], 0)
             self.assertEqual(report["ok"], 0)
             self.assertEqual(report["succeeded"], [])
+
+
+    def test_write_json_atomic_and_load_recovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            payload = {
+                "scan_time": "2026-09-27T20:00:00+08:00",
+                "matched": [{"href": "t1", "title": "ok"}],
+            }
+            last = out / "last_result.json"
+            write_json_atomic(last, payload)
+            self.assertEqual(load_scan_result(last)["matched"][0]["href"], "t1")
+
+            last.write_text("{not-json", encoding="utf-8")
+            bak = out / "last_result.json.bak"
+            write_json_atomic(bak, payload)
+            recovered: list[str] = []
+            data = load_scan_result(last, recovered_from=recovered)
+            self.assertEqual(recovered, ["last_result.json.bak"])
+            self.assertEqual(data["matched"][0]["href"], "t1")
+
+    def test_rotate_scan_snapshot_keeps_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            last = out / "last_result.json"
+            write_json_atomic(last, {"matched": [{"href": "t1"}]})
+            self.assertTrue(rotate_scan_snapshot(out))
+            self.assertTrue((out / "previous_result.json").exists())
+            self.assertTrue((out / "last_result.json.bak").exists())
+
+    def test_validate_scan_result_completeness_warns_single_forum(self):
+        data = {
+            "batch_mode": False,
+            "scanned_forum_urls": [
+                "https://www.sehuatang.org/forum-2-1.html",
+                "https://www.sehuatang.org/forum-95-1.html",
+            ],
+        }
+        matched = [
+            {
+                "href": "thread-1.html",
+                "title": "[国产] only forum-95",
+                "forum": "https://www.sehuatang.org/forum-95-1.html",
+            },
+        ]
+        warnings = validate_scan_result_completeness(data, matched)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("incomplete", warnings[0])
 
 
 if __name__ == "__main__":

@@ -1383,26 +1383,23 @@ def save_scan_results(
         result_text = "\n".join(lines)
         print("\n" + result_text)
         (out_dir / "result.txt").write_text(result_text, encoding="utf-8")
-        from scan_delta import rotate_scan_snapshot
+        from scan_delta import rotate_scan_snapshot, write_json_atomic
 
         if rotate_scan_snapshot(out_dir):
             print("[info] rotated last_result.json -> previous_result.json")
-        (out_dir / "last_result.json").write_text(
-            json.dumps(
-                {
-                    "scan_time": beijing_now_iso(),
-                    "cutoff": cutoff.strftime("%Y-%m-%d"),
-                    "today": today.strftime("%Y-%m-%d"),
-                    "batch_mode": bool(getattr(args, "batch_mode", False)),
-                    "matched": [],
-                    "javdb_summary": {},
-                    "total_posts": total_posts,
-                    "pages_scanned": total_pages_scanned,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        write_json_atomic(
+            out_dir / "last_result.json",
+            {
+                "scan_time": beijing_now_iso(),
+                "cutoff": cutoff.strftime("%Y-%m-%d"),
+                "today": today.strftime("%Y-%m-%d"),
+                "batch_mode": bool(getattr(args, "batch_mode", False)),
+                "scanned_forum_urls": list(getattr(args, "urls", []) or []),
+                "matched": [],
+                "javdb_summary": {},
+                "total_posts": total_posts,
+                "pages_scanned": total_pages_scanned,
+            },
         )
         page.screenshot(path=str(screenshot_dir / "last_run.png"))
         print(f"[done] results saved to {out_dir}")
@@ -1509,26 +1506,23 @@ def save_scan_results(
 
     result_text = "\n".join(lines)
     (out_dir / "result.txt").write_text(result_text, encoding="utf-8")
-    from scan_delta import rotate_scan_snapshot
+    from scan_delta import rotate_scan_snapshot, write_json_atomic
 
     if rotate_scan_snapshot(out_dir):
         print("[info] rotated last_result.json -> previous_result.json")
-    (out_dir / "last_result.json").write_text(
-        json.dumps(
-            {
-                "scan_time": beijing_now_iso(),
-                "cutoff": cutoff.strftime("%Y-%m-%d"),
-                "today": today.strftime("%Y-%m-%d"),
-                "batch_mode": bool(getattr(args, "batch_mode", False)),
-                "matched": all_matched,
-                "javdb_summary": javdb_summary,
-                "total_posts": total_posts,
-                "pages_scanned": total_pages_scanned,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    write_json_atomic(
+        out_dir / "last_result.json",
+        {
+            "scan_time": beijing_now_iso(),
+            "cutoff": cutoff.strftime("%Y-%m-%d"),
+            "today": today.strftime("%Y-%m-%d"),
+            "batch_mode": bool(getattr(args, "batch_mode", False)),
+            "scanned_forum_urls": list(getattr(args, "urls", []) or []),
+            "matched": all_matched,
+            "javdb_summary": javdb_summary,
+            "total_posts": total_posts,
+            "pages_scanned": total_pages_scanned,
+        },
     )
     page.screenshot(path=str(screenshot_dir / "last_run.png"))
     print(f"[done] results saved to {out_dir}")
