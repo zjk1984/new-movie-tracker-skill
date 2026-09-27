@@ -1474,6 +1474,15 @@ def write_run_report(
         if matched_repeat
         else ""
     )
+    integrity_lines: list[str] = []
+    recovered = scan_stats.get("result_recovered_from")
+    if recovered:
+        integrity_lines.append(
+            f"- **结果恢复**: 主文件损坏，已从 `{recovered}` 加载扫描数据\n",
+        )
+    for warning in scan_stats.get("completeness_warnings") or []:
+        integrity_lines.append(f"- **完整性警告**: {warning}\n")
+    integrity_block = "".join(integrity_lines)
 
     body = f"""# 论坛扫描报告
 
@@ -1482,7 +1491,7 @@ def write_run_report(
 
 ## 扫描总结
 
-{previous_line}{duplicate_line}
+{previous_line}{duplicate_line}{integrity_block}
 ### 扫描板块
 
 {forum_lines or "（无）"}

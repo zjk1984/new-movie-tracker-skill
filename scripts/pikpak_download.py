@@ -419,7 +419,9 @@ def load_downloads_from_result(
 
     from content_filter import apply_region_filter
 
-    data = json.loads(result_path.read_text(encoding="utf-8"))
+    from scan_delta import load_scan_result
+
+    data = load_scan_result(result_path)
     today = data.get("today") or data.get("scan_time", "")[:10]
     javdb_client = JavDBClient() if javdb_score_gate else None
     items = []

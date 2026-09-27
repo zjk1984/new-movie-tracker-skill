@@ -16,12 +16,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/lib/daily_run_slots.sh"
 # shellcheck source=lib/daily_run_supervisor_idle.sh
 source "$ROOT/scripts/lib/daily_run_supervisor_idle.sh"
+# shellcheck source=lib/daily_run_lock.sh
+source "$ROOT/scripts/lib/daily_run_lock.sh"
 
 ENSURE="$ROOT/scripts/ensure_cron_running.sh"
 DAILY_RUN="$ROOT/scripts/daily_run.sh"
 RUN_LOG="$ROOT/data/daily_run.log"
 SUP_LOG="$ROOT/data/supervisor.log"
 LOCK_DIR="$ROOT/data/supervisor.lock"
+DAILY_RUN_LOCK="$(daily_run_lock_path "$ROOT")"
 POLL_SEC="${DAILY_RUN_SUPERVISOR_POLL_SEC:-300}"
 TZ_NAME="${DAILY_RUN_TZ:-Asia/Shanghai}"
 
@@ -29,10 +32,6 @@ mkdir -p "$ROOT/data"
 
 supervisor_log() {
   printf '%s %s\n' "$(TZ="$TZ_NAME" date -Is)" "$*" | tee -a "$SUP_LOG"
-}
-
-daily_run_in_progress() {
-  pgrep -f '[/ ]scripts/daily_run\.(sh|py)' >/dev/null 2>&1
 }
 
 wait_for_daily_run() {
@@ -51,7 +50,7 @@ run_ensure_cron() {
 
 trigger_slot() {
   local slot="$1"
-  if daily_run_in_progress; then
+  if daily_run_in_progress || daily_run_lock_held "$DAILY_RUN_LOCK"; then
     supervisor_log "[info] slot $slot: daily_run already running; skip"
     return 0
   fi

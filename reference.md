@@ -397,6 +397,10 @@ Repo ships `environment.json`:
 
 Supervisor one-shot check (no loop): `./scripts/daily_run_supervisor.sh --once`
 
+**Concurrent run protection:** `daily_run.sh` holds an exclusive `flock` on `data/daily_run.lock` for the full scan/download. If cron, supervisor catch-up, and VM wake restart overlap (e.g. two starts 17s apart), the second trigger exits 0 with `daily_run.sh skip (lock held)` in `data/daily_run.log` instead of racing on `last_result.json`. `save_scan_results` writes JSON atomically (temp + rename); `last_result.json.bak` is kept on rotate for recovery if a legacy corrupt file is detected.
+
+**Cron VM deploy after merge:** `git pull` on the cron VM, then `./scripts/restart_daily_supervisor.sh` (or rely on the environment start hook). No crontab change. Verify: `grep 'daily_run.lock' data/daily_run.log` should show skip lines on overlap; `ls data/last_result.json.bak` after the next daily run.
+
 **Root vs install-user crontab (2026-09-18):** Daily jobs live in the **install user's** crontab (`ubuntu` on Cloud Agent VMs), not root's. The health watchdog must run `ensure_cron_running.sh` **as that user** (or read `data/cron_install_user` and check with `crontab -u`). Running as root caused false "tracker crontab missing" warnings and warn-only behavior missed repairs before 13:00.
 
 **Why not user `@reboot` + sudo?** Cron jobs run without a TTY and minimal `PATH`; `sudo service cron restart` often fails silently (`use_pty`, missing `/usr/sbin`).

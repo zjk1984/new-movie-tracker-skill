@@ -184,12 +184,18 @@ def _count_links(item: dict[str, Any]) -> dict[str, int]:
 
 
 def _load_matched_paths(paths: list[Path]) -> list[dict[str, Any]]:
+    from scan_delta import load_scan_result
+
     matched: list[dict[str, Any]] = []
     seen_href: set[str] = set()
     for path in paths:
         if not path.exists():
             continue
-        data = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            data = load_scan_result(path)
+        except ValueError as exc:
+            print(f"[warn] skip unreadable scan result {path.name}: {exc}")
+            continue
         items = data.get("matched") or data.get("threads") or []
         for item in items:
             href = item.get("href") or ""
@@ -213,13 +219,22 @@ def analyze_scan(
     matched = _load_matched_paths(result_paths)
     scan_times: list[str] = []
     batch_mode = False
+    completeness_warnings: list[str] = []
+    recovered_sources: list[str] = []
+    from scan_delta import load_scan_result, validate_scan_result_completeness
+
     for path in result_paths:
-        if path.exists():
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if data.get("scan_time"):
-                scan_times.append(data["scan_time"])
-            if data.get("batch_mode"):
-                batch_mode = True
+        if not path.exists():
+            continue
+        try:
+            data = load_scan_result(path, recovered_from=recovered_sources)
+        except ValueError:
+            continue
+        if data.get("scan_time"):
+            scan_times.append(data["scan_time"])
+        if data.get("batch_mode"):
+            batch_mode = True
+        completeness_warnings.extend(validate_scan_result_completeness(data, matched))
 
     # Merge ed2k from refetch by href
     ed2k_by_href: dict[str, list[str]] = {}
@@ -288,6 +303,9 @@ def analyze_scan(
     if javdb_summary:
         javdb_summary["skipped_low_score"] = skipped_jav_score
 
+    for warning in completeness_warnings:
+        print(f"[warn] {warning}")
+
     return {
         "scan_time": max(scan_times) if scan_times else beijing_now_iso(),
         "forums": dict(forums),
@@ -303,6 +321,8 @@ def analyze_scan(
         "javdb_summary": javdb_summary,
         "skipped_jav_score": skipped_jav_score,
         "batch_mode": batch_mode,
+        "completeness_warnings": completeness_warnings,
+        "result_recovered_from": recovered_sources[0] if recovered_sources else None,
     }
 
 
