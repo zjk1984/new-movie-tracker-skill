@@ -309,6 +309,21 @@ Between Beijing slot starts it **sleeps** (no 24/7 polling). From each slot time
 
 **Forum-142 batch (daily 14:00 Beijing):** `./scripts/setup_forum142_cron.sh` installs `./scripts/forum142_batch_run.sh` (10-page batch scan from page 200 on `https://www.sehuatang.net/forum-142-1.html`, log `data/forum142_batch_run.log`, per-run report `reports/forum-142_YYYY-MM-DD.md`). Cron-only; deploy on cron VM after merge — reset state (`--reset`) or set `next_start_page=200` before re-run; smoke-test page 1 after URL/parser changes.
 
+### 铁律 (Timer wake subscriptions — mandatory)
+
+Agents **must** keep these Cursor `subscribe_timer` wakes on this Project. Full schedule: [docs/daily-run-external-schedule.md](docs/daily-run-external-schedule.md).
+
+| Beijing wake | Slot | UTC cron | Timer name |
+|--------------|------|----------|------------|
+| 06:55 | 07:00 daily | `55 22 * * *` | `daily-wake-0655-bj` |
+| 12:55 | 13:00 daily | `55 4 * * *` | `daily-wake-1255-bj` |
+| 19:55 | 20:00 daily | `55 11 * * *` | `daily-wake-1955-bj` |
+| 17:55 | 18:00 forum-37 | `55 9 * * *` | `forum37-wake-1755-bj` |
+
+**On each fire:** message cron VM **`bc-d4fb1f8c`** → `./scripts/restart_daily_supervisor.sh` (includes `ensure_cron_running.sh`). After forum-37 wake, confirm `crontab -l | grep forum37`.
+
+**Deletion rule:** **Never** `unsubscribe` or remove any timer wake without **explicit user confirmation in chat**. Before any unsubscribe, run `list_subscriptions` and show the user what would be removed.
+
 **One-time setup**
 1. Save PikPak token: `python scripts/pikpak_login.py login` (stored in `pikpak_auth.json`).
 2. Pass Cloudflare once: `python scripts/daily_run.py --no-headless` (uses `data/chrome_profile/`).

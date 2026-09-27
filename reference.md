@@ -393,7 +393,9 @@ Repo ships `environment.json`:
 }
 ```
 
-`restart_daily_supervisor.sh` runs `ensure_cron_running.sh`, kills stale `daily-supervisor` tmux (frozen after checkpoint restore), and starts a fresh `daily_run_supervisor.sh` so `catch_up_missed_slots_on_start` re-evaluates missed Beijing slots. Apply this `environment.json` to the cron VM Cloud Agent environment. Optional **Cursor `subscribe_timer`** wake at 07:00/13:00/20:00 — see project doc `daily-run-external-schedule.md`.
+`restart_daily_supervisor.sh` runs `ensure_cron_running.sh`, kills stale `daily-supervisor` tmux (frozen after checkpoint restore), and starts a fresh `daily_run_supervisor.sh` so `catch_up_missed_slots_on_start` re-evaluates missed Beijing slots. Apply this `environment.json` to the cron VM Cloud Agent environment.
+
+**铁律 (mandatory timer wakes):** Project must keep four `subscribe_timer` subscriptions — `daily-wake-0655-bj` (`55 22 * * *`), `daily-wake-1255-bj` (`55 4 * * *`), `daily-wake-1955-bj` (`55 11 * * *`), `forum37-wake-1755-bj` (`55 9 * * *` UTC; 17:55 Beijing). Each fire → cron VM `bc-d4fb1f8c` → `./scripts/restart_daily_supervisor.sh`. **Never unsubscribe without explicit user confirmation**; run `list_subscriptions` before any removal. Details: [docs/daily-run-external-schedule.md](docs/daily-run-external-schedule.md) and [SKILL.md §10 铁律](SKILL.md).
 
 Supervisor one-shot check (no loop): `./scripts/daily_run_supervisor.sh --once`
 
@@ -436,7 +438,7 @@ Separate from daily_run slots. Scans the next 20 forum-37 list pages via `script
 | Log | `data/forum37_batch_run.log` |
 | Cron VM | `bc-d4fb1f8c` — run after merge: `git pull && ./scripts/setup_forum37_cron.sh` |
 
-Does not modify daily_run crontab lines. Optional **Cursor `subscribe_timer`** wake at **17:55 Beijing** daily (`55 9 * * *` UTC) so the cron VM is unfrozen before the 18:00 slot — see project doc `daily-run-external-schedule.md`.
+Does not modify daily_run crontab lines. **Mandatory** timer wake `forum37-wake-1755-bj` at **17:55 Beijing** daily (`55 9 * * *` UTC) — see [docs/daily-run-external-schedule.md](docs/daily-run-external-schedule.md) 铁律 (never unsubscribe without user confirmation).
 
 Verify: `crontab -l | grep forum37` · Dry-run: `./scripts/setup_forum37_cron.sh --dry-run` · Remove: `./scripts/setup_forum37_cron.sh --remove`
 

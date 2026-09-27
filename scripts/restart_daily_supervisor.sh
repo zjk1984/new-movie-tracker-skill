@@ -4,6 +4,8 @@
 # restore (the frozen supervisor process cannot recover on its own).
 #
 # Intended for Cloud Agent environment.json "start" (alongside setup_cron.sh in install).
+# Also invoked on each Project subscribe_timer wake (see docs/daily-run-external-schedule.md 铁律).
+# Agents: run list_subscriptions before any unsubscribe; never remove timer wakes without user confirmation.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
