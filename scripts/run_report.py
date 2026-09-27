@@ -431,6 +431,56 @@ def _collect_fail_uris(failed: list[dict[str, Any]]) -> list[str]:
     return uris
 
 
+def _pending_submit_reason_label(download_report: dict[str, Any]) -> str:
+    reason = (download_report.get("submit_skip_reason") or "").strip()
+    if not reason:
+        return ""
+    if reason.startswith("auth:"):
+        detail = reason.split(":", 1)[-1]
+        labels = {
+            "no_token": "PikPak 未登录（无 token）",
+            "invalid": "PikPak token 失效",
+        }
+        return labels.get(detail, "PikPak 认证失败")
+    if reason.startswith("quota:"):
+        detail = reason.split(":", 1)[-1]
+        labels = {
+            "daily_limit": "PikPak 今日配额已用尽",
+            "space": "PikPak 空间不足",
+        }
+        return labels.get(detail, "PikPak 配额不足")
+    if reason == "auth":
+        return "PikPak 认证失败"
+    if reason == "quota":
+        return "PikPak 配额不足"
+    return reason
+
+
+def _md_pending_submit_links(download_report: dict[str, Any]) -> str:
+    """One-click copy block when auth/quota blocked PikPak submission."""
+    from pikpak_download import extract_pending_submit_uris
+
+    uris = extract_pending_submit_uris(download_report)
+    if not uris:
+        return ""
+
+    reason = _pending_submit_reason_label(download_report)
+    ok = int(download_report.get("ok") or 0)
+    lines = ["## 待提交链接（一键复制）\n"]
+    if reason:
+        lines.append(f"> {reason}；以下 **{len(uris)}** 条链接未提交 PikPak，选中代码块复制后手动添加。\n")
+    else:
+        lines.append(
+            f"> 部分链接因 PikPak 认证/配额问题未提交；以下 **{len(uris)}** 条可一键复制。\n",
+        )
+    if ok:
+        lines.append(f"> 本次已成功提交 **{ok}** 条，其余见下方。\n")
+    lines.append("<pre><code>")
+    lines.extend(html.escape(uri) for uri in uris)
+    lines.append("</code></pre>\n")
+    return "\n".join(lines)
+
+
 JAV_REGIONS = frozenset({"jav_censored", "uncensored", "fc2"})
 FORUM_SITE_BASE = "https://www.sehuatang.org/"
 
@@ -1037,9 +1087,12 @@ def merge_download_reports(*reports: dict[str, Any]) -> dict[str, Any]:
     """Merge multiple PikPak download_report payloads, dedupe by URI."""
     succeeded: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
+    pending_submit: list[dict[str, Any]] = []
     seen_ok: set[str] = set()
     seen_fail: set[str] = set()
+    seen_pending: set[str] = set()
     sources: list[str] = []
+    submit_skip_reasons: list[str] = []
 
     for report in reports:
         if not report:
@@ -1047,6 +1100,9 @@ def merge_download_reports(*reports: dict[str, Any]) -> dict[str, Any]:
         src = report.get("source")
         if src:
             sources.append(str(src))
+        skip_reason = (report.get("submit_skip_reason") or "").strip()
+        if skip_reason:
+            submit_skip_reasons.append(skip_reason)
         for item in report.get("succeeded") or []:
             uri = _item_uri(item)
             if not uri or uri in seen_ok:
@@ -1060,6 +1116,13 @@ def merge_download_reports(*reports: dict[str, Any]) -> dict[str, Any]:
                 continue
             seen_fail.add(key)
             failed.append(item)
+        for item in report.get("pending_submit") or []:
+            uri = _item_uri(item)
+            key = uri or f"{item.get('name')}:{item.get('href')}"
+            if key in seen_pending or (uri and uri in seen_ok):
+                continue
+            seen_pending.add(key)
+            pending_submit.append(item)
 
     merged: dict[str, Any] = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -1068,6 +1131,8 @@ def merge_download_reports(*reports: dict[str, Any]) -> dict[str, Any]:
         "total": len(succeeded) + len(failed),
         "succeeded": succeeded,
         "failed": failed,
+        "pending_submit": pending_submit,
+        "submit_skip_reason": submit_skip_reasons[0] if submit_skip_reasons else "",
     }
     if sources:
         merged["source"] = "; ".join(sources)
@@ -1387,6 +1452,7 @@ def write_run_report(
     forum_lines = "\n".join(f"- {name}: {count} 帖" for name, count in sorted(forums.items()))
 
     failed_items = list(download_report.get("failed") or [])
+    pending_section = _md_pending_submit_links(download_report)
 
     success_section = _md_success_sections(
         list(download_report.get("succeeded") or []),
@@ -1426,6 +1492,7 @@ def write_run_report(
 {stats_table}
 > {funnel_note}
 
+{pending_section}
 ## 下载失败
 
 {_md_fail_links(failed_items)}

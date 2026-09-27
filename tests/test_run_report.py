@@ -15,6 +15,7 @@ from run_report import (  # noqa: E402
     ALREADY_SUBMITTED_SKIP_LABEL,
     _build_undownloaded_entries,
     _match_reason_label,
+    _md_pending_submit_links,
     _md_success_sections,
     _md_table_cell_link,
     _md_undownloaded_posts,
@@ -859,6 +860,79 @@ class AlreadySubmittedSkipLabelTests(unittest.TestCase):
             with patch("run_report._ensure_item_skip_reason"):
                 jav_entries, _ = _build_undownloaded_entries(matched, download_report)
         self.assertEqual(jav_entries[0]["reason"], "未成功下载")
+
+
+class PendingSubmitLinksTests(unittest.TestCase):
+    def test_md_section_for_auth_skip(self):
+        report = {
+            "submit_skip_reason": "auth:no_token",
+            "pending_submit": [
+                {"uri": "magnet:?xt=urn:btih:aaa"},
+                {"uri": "ed2k://file|bbb|/"},
+            ],
+            "failed": [],
+            "ok": 0,
+        }
+        section = _md_pending_submit_links(report)
+        self.assertIn("## 待提交链接（一键复制）", section)
+        self.assertIn("PikPak 未登录（无 token）", section)
+        self.assertIn("magnet:?xt=urn:btih:aaa", section)
+        self.assertIn("ed2k://file|bbb|/", section)
+
+    def test_md_section_for_partial_quota_failure(self):
+        report = {
+            "submit_skip_reason": "",
+            "pending_submit": [],
+            "failed": [
+                {"uri": "magnet:?xt=urn:btih:fail1", "error": "task_daily_create_limit"},
+            ],
+            "ok": 2,
+        }
+        section = _md_pending_submit_links(report)
+        self.assertIn("## 待提交链接（一键复制）", section)
+        self.assertIn("已成功提交 **2** 条", section)
+        self.assertIn("magnet:?xt=urn:btih:fail1", section)
+
+    def test_md_section_empty_when_no_auth_quota_pending(self):
+        report = {
+            "submit_skip_reason": "",
+            "pending_submit": [],
+            "failed": [
+                {"uri": "magnet:?xt=urn:btih:x", "error": "task_url_resolve_error"},
+            ],
+            "ok": 0,
+        }
+        self.assertEqual(_md_pending_submit_links(report), "")
+
+    def test_write_run_report_includes_pending_section(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp)
+            scan_stats = {
+                "scan_time": "2026-09-27T12:00:00",
+                "forums": {"forum-2": 1},
+                "link_totals": {"magnet": 1, "ed2k": 0, "bt": 0},
+                "posts_with": {"magnet": 1, "ed2k": 0, "bt": 0},
+                "matched": [],
+            }
+            download_report = {
+                "ok": 0,
+                "failed_count": 0,
+                "total": 0,
+                "succeeded": [],
+                "failed": [],
+                "submit_skip_reason": "auth:no_token",
+                "pending_submit": [{"uri": "magnet:?xt=urn:btih:copyme"}],
+            }
+            result = write_run_report(
+                scan_stats,
+                download_report,
+                reports_dir=reports_dir,
+                run_label="daily",
+            )
+            body = result.path.read_text(encoding="utf-8")
+            self.assertIn("## 待提交链接（一键复制）", body)
+            self.assertIn("magnet:?xt=urn:btih:copyme", body)
+            self.assertLess(body.index("待提交链接"), body.index("## 下载失败"))
 
 
 class MdTableCellLinkTests(unittest.TestCase):

@@ -65,8 +65,10 @@ def run_scan(
 
 def run_download(args: argparse.Namespace, output_dir: Path) -> tuple[int, int | None, int | None]:
     sys.path.insert(0, str(SCRIPTS_DIR))
+    import json
+
     from pikpak_auth import resolve_folder
-    from pikpak_download import submit_from_result
+    from pikpak_download import extract_pending_submit_uris, submit_from_result
 
     result_path = output_dir / "last_result.json"
     if not result_path.exists():
@@ -83,6 +85,19 @@ def run_download(args: argparse.Namespace, output_dir: Path) -> tuple[int, int |
     except RuntimeError as exc:
         print(f"[err] pikpak: {exc}", file=sys.stderr)
         return 1, None, None
+    report_path = output_dir / "download_report.json"
+    if report_path.exists():
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            pending = extract_pending_submit_uris(report)
+            if pending:
+                reason = report.get("submit_skip_reason") or "auth/quota"
+                print(
+                    f"[warn] pikpak {reason}: {len(pending)} link(s) saved for manual copy "
+                    f"in run report",
+                )
+        except (OSError, json.JSONDecodeError):
+            pass
     print(f"[done] pikpak new-only: {ok}/{total} submitted")
     if ok == total:
         rc = 0
