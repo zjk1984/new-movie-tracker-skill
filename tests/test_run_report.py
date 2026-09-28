@@ -14,6 +14,7 @@ from download_state import empty_state, mark_submitted, save_state  # noqa: E402
 from run_report import (  # noqa: E402
     ALREADY_SUBMITTED_SKIP_LABEL,
     _build_undownloaded_entries,
+    _jav_gate_skip_needs_magnets,
     _match_reason_label,
     _md_pending_submit_links,
     _md_success_sections,
@@ -1002,6 +1003,24 @@ class UndownloadedSortingTests(unittest.TestCase):
         self.assertEqual(_undownloaded_reason_priority("javdb_score_low_4.0"), 4)
         self.assertEqual(_undownloaded_reason_priority("already_submitted"), 4)
         self.assertEqual(_undownloaded_reason_priority("no_magnets"), 4)
+
+    def test_jav_gate_skip_needs_magnets(self):
+        self.assertTrue(_jav_gate_skip_needs_magnets("javdb_reviews_low_3"))
+        self.assertTrue(_jav_gate_skip_needs_magnets("javdb_watched_low_10"))
+        self.assertTrue(_jav_gate_skip_needs_magnets("javdb_score_low_3.5"))
+        self.assertFalse(_jav_gate_skip_needs_magnets("javdb_tag_excluded_潮吹"))
+
+    @patch("javdb_client.attach_skipped_javdb_magnets")
+    def test_ensure_skip_reason_fetches_magnets_at_report_time(self, mock_attach):
+        from run_report import _ensure_item_skip_reason
+
+        item = {
+            "content_region": "jav_censored",
+            "av_number": "ABC-123",
+            "skip_reason": "javdb_watched_low_10",
+        }
+        _ensure_item_skip_reason(item)
+        mock_attach.assert_called_once_with(item, query_if_missing=True)
 
     def test_build_undownloaded_entries_sorted_by_priority(self):
         skipped = [

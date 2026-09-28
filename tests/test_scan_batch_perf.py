@@ -154,6 +154,32 @@ class GateBeforeFetchTests(unittest.TestCase):
         self.assertEqual(out["magnets"], [])
         self.assertEqual(out.get("skip_reason"), "javdb_watched_low_12")
 
+    @patch("scan.extract_thread_links")
+    @patch("javdb_client.ensure_javdb_score_gate", return_value=False)
+    @patch("javdb_client.attach_javdb_query")
+    def test_enrich_preserves_javdb_magnets_on_gate_fail(
+        self,
+        mock_attach,
+        mock_gate,
+        mock_extract,
+    ):
+        item = {
+            "title": "[无码] STARS-999 测试标题",
+            "href": "thread-3.html",
+            "forum": "https://example.org/forum-37-1.html",
+            "javdb_magnets": ["magnet:?xt=urn:btih:cnsub&dn=STARS-999-C"],
+        }
+        mock_gate.side_effect = lambda it, _client: (
+            it.update({"skip_reason": "javdb_watched_low_12"}) or False
+        )
+        args = self._args(fetch_magnets=True, cnsub_priority=True)
+        out = enrich_matched_post(MagicMock(), item, args, MagicMock())
+        mock_extract.assert_not_called()
+        self.assertEqual(
+            out["magnets"],
+            ["magnet:?xt=urn:btih:cnsub&dn=STARS-999-C"],
+        )
+
 
 class AttachJavdbGateLookupTests(unittest.TestCase):
     @patch("javdb_client.JavDBClient.lookup")

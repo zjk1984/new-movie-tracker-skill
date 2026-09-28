@@ -758,6 +758,17 @@ def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
     return "未成功下载"
 
 
+def _jav_gate_skip_needs_magnets(skip_reason: str) -> bool:
+    """True when a JavDB gate skip should still expose magnets in the report."""
+    if not skip_reason.startswith("javdb_"):
+        return False
+    if skip_reason.startswith(
+        ("javdb_reviews_low_", "javdb_watched_low_", "javdb_score_low_"),
+    ):
+        return True
+    return skip_reason in ("javdb_no_reviews_count", "javdb_no_watched_count")
+
+
 def _ensure_item_skip_reason(item: dict[str, Any]) -> None:
     """Populate skip_reason on Japanese items when gate was not run during scan."""
     region = item.get("content_region") or ""
@@ -769,13 +780,13 @@ def _ensure_item_skip_reason(item: dict[str, Any]) -> None:
     if item.get("skip_reason"):
         skip_reason = str(item.get("skip_reason") or "")
         if (
-            skip_reason.startswith("javdb_reviews_low_")
-            or skip_reason.startswith("javdb_watched_low_")
-            or skip_reason in ("javdb_no_reviews_count", "javdb_no_watched_count")
-        ) and not item.get("magnets") and not item.get("javdb_magnets"):
+            _jav_gate_skip_needs_magnets(skip_reason)
+            and not item.get("magnets")
+            and not item.get("javdb_magnets")
+        ):
             from javdb_client import attach_skipped_javdb_magnets
 
-            attach_skipped_javdb_magnets(item, query_if_missing=False)
+            attach_skipped_javdb_magnets(item, query_if_missing=True)
         return
     from javdb_client import is_submit_eligible, needs_javdb_query
 
@@ -925,11 +936,13 @@ def _undownloaded_reason_priority(reason: str) -> int:
     return 4
 
 
-def _undownloaded_sort_key(entry: dict[str, Any], date_field: str = "release_date") -> tuple[int, int, str]:
+def _undownloaded_sort_key(
+    entry: dict[str, Any],
+    date_field: str = "release_date",
+) -> tuple[int, int, str]:
     priority = _undownloaded_reason_priority(entry.get("reason", ""))
-    date_val = str(entry.get(date_field) or "").strip()
-    has_date = 1 if date_val else 0
-    return (priority, -has_date, date_val)
+    date_key = _release_date_desc_sort_key(str(entry.get(date_field) or ""))
+    return (priority, date_key[0], date_key[1])
 
 
 def _build_undownloaded_entries(

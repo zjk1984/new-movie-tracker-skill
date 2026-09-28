@@ -141,5 +141,30 @@ class ScrapeTwoPhaseRoutingTests(unittest.TestCase):
         self.assertEqual(mock_save.call_args[1]["total_pages_scanned"], 2)
 
 
+class EnrichWorkerGateFailTests(unittest.TestCase):
+    @patch("scan.apply_item_filters")
+    @patch("scan.try_gate_before_thread_fetch", return_value=False)
+    def test_gate_fail_preserves_javdb_magnets(self, _mock_gate, _mock_filters):
+        from scan_phases import _enrich_worker
+
+        item = {
+            "title": "[有码] ABC-123 test",
+            "href": "thread-1.html",
+            "skip_reason": "javdb_watched_low_12",
+            "javdb_magnets": ["magnet:?xt=urn:btih:cnsub&dn=ABC-123-C"],
+        }
+        args = MagicMock()
+        args.fetch_magnets = True
+        args.javdb = True
+        args.javdb_magnets = False
+        args.cnsub_priority = True
+        args.javdb_query = True
+        args.javdb_host = None
+
+        out = _enrich_worker(item, args, Path("/tmp/state.json"), "/usr/bin/chromium")
+        self.assertEqual(out["magnets"], ["magnet:?xt=urn:btih:cnsub&dn=ABC-123-C"])
+        self.assertEqual(out["ed2k"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
