@@ -181,7 +181,10 @@ def _enrich_worker(
 
         # Pre-gate check: avoid opening browser page for excluded or unqualified items
         if not try_gate_before_thread_fetch(item, javdb_client, args):
-            item["magnets"] = []
+            # Keep JavDB magnets attached by ensure_javdb_score_gate for report copy.
+            item["magnets"] = list(
+                item.get("javdb_magnets") or item.get("magnets") or [],
+            )
             item["ed2k"] = []
             item["pikpak_sha"] = []
             item["hash_entries"] = []
