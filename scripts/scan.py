@@ -1181,7 +1181,7 @@ def enrich_matched_post(page, item: dict, args, javdb_client) -> dict:
     href = item.get("href") or ""
     if args.fetch_magnets and href:
         if not try_gate_before_thread_fetch(item, javdb_client, args):
-            item["magnets"] = []
+            item["magnets"] = list(item.get("javdb_magnets") or item.get("magnets") or [])
             item["ed2k"] = []
             item["pikpak_sha"] = []
             item["hash_entries"] = []

@@ -562,6 +562,7 @@ def submit_downloads(
     from pikpak_auth import (
         classify_submit_error,
         format_submit_skip_reason,
+        inspect_jwt_token,
         resolve_folder,
         resolve_token,
     )
@@ -574,10 +575,15 @@ def submit_downloads(
         )
     folder = resolve_folder(folder, DEFAULT_FOLDER)
 
-    try:
-        payload = decode_jwt_payload(token)
-    except Exception as exc:
-        raise RuntimeError(f"invalid token: {exc}") from exc
+    jwt_info = inspect_jwt_token(token)
+    if not jwt_info.get("valid_jwt"):
+        raise RuntimeError(f"invalid token: {jwt_info.get('message')}")
+    if jwt_info.get("is_expired"):
+        print(f"[err] pikpak token expired: {jwt_info.get('message')}", file=sys.stderr)
+        pending = [dict(item) for item in items]
+        return 0, len(items), [], [], pending, format_submit_skip_reason("auth", "expired")
+
+    payload = jwt_info.get("payload") or {}
     user_id = payload.get("sub", "")
     device_id = hashlib.md5(user_id.encode()).hexdigest()
     session = requests.Session()
@@ -588,6 +594,11 @@ def submit_downloads(
         if classify_submit_error(err) == "auth":
             pending = [dict(item) for item in items]
             print(f"[err] pikpak auth failed before submit: {err}", file=sys.stderr)
+            print(
+                "[hint] HTTP 401: Token 凭证失效（与网盘容量配额无关）。"
+                "请运行 `python scripts/pikpak_login.py login` 重新输入有效 Token。",
+                file=sys.stderr,
+            )
             return 0, len(items), [], [], pending, format_submit_skip_reason("auth", "invalid")
         raise
     if parent_id:
@@ -757,8 +768,13 @@ def submit_from_result(
         from pikpak_auth import classify_submit_error
 
         if classify_submit_error(err) == "auth":
-            reason = format_submit_skip_reason("auth", "invalid")
+            reason = format_submit_skip_reason("auth", "expired" if "expired" in err.lower() else "invalid")
             print(f"[err] pikpak auth failed: {err}", file=sys.stderr)
+            print(
+                "[hint] HTTP 401: Token 凭证失效（与网盘容量配额无关）。"
+                "请运行 `python scripts/pikpak_login.py login` 重新输入有效 Token。",
+                file=sys.stderr,
+            )
             save_download_report(
                 report_path,
                 succeeded=[],

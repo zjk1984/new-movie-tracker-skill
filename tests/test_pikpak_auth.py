@@ -47,6 +47,40 @@ class ClassifySubmitErrorTests(unittest.TestCase):
     def test_format_submit_skip_reason(self):
         self.assertEqual(format_submit_skip_reason("auth", "no token"), "auth:no_token")
 
+    def test_inspect_jwt_token(self):
+        import base64
+        import json
+        import time
+        from pikpak_auth import inspect_jwt_token
+
+        # Expired token
+        header = base64.urlsafe_b64encode(b'{"alg":"HS256"}').decode().rstrip("=")
+        past_exp = int(time.time()) - 3600
+        payload_expired = base64.urlsafe_b64encode(
+            json.dumps({"sub": "user123", "exp": past_exp}).encode()
+        ).decode().rstrip("=")
+        fake_token_expired = f"{header}.{payload_expired}.sig"
+
+        info_expired = inspect_jwt_token(fake_token_expired)
+        self.assertTrue(info_expired["valid_jwt"])
+        self.assertEqual(info_expired["sub"], "user123")
+        self.assertTrue(info_expired["is_expired"])
+        self.assertEqual(info_expired["status"], "expired")
+        self.assertIn("过期", info_expired["message"])
+
+        # Active token
+        future_exp = int(time.time()) + 7200
+        payload_active = base64.urlsafe_b64encode(
+            json.dumps({"sub": "user456", "exp": future_exp}).encode()
+        ).decode().rstrip("=")
+        fake_token_active = f"{header}.{payload_active}.sig"
+
+        info_active = inspect_jwt_token(fake_token_active)
+        self.assertTrue(info_active["valid_jwt"])
+        self.assertEqual(info_active["sub"], "user456")
+        self.assertFalse(info_active["is_expired"])
+        self.assertEqual(info_active["status"], "active")
+
 
 if __name__ == "__main__":
     unittest.main()

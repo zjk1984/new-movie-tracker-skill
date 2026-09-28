@@ -695,5 +695,107 @@ class JavDBCacheTests(unittest.TestCase):
             self.assertEqual(res["magnet_status"], "not_requested")
 
 
+class JavDBMagnetCnsubSelectionTests(unittest.TestCase):
+    def test_is_cnsub_row(self):
+        from javdb_client import is_cnsub_row
+
+        self.assertTrue(is_cnsub_row({"cnsub": True}))
+        self.assertTrue(is_cnsub_row({"name": "ABC-123-C.mp4"}))
+        self.assertTrue(is_cnsub_row({"name": "ABC-123-UC 1080p"}))
+        self.assertTrue(is_cnsub_row({"title": "ABC-123_C_4k"}))
+        self.assertTrue(is_cnsub_row({"name": "ABC-123 中文字幕"}))
+        self.assertTrue(is_cnsub_row({"name": "ABC-123 [中字]"}))
+        self.assertFalse(is_cnsub_row({"name": "ABC-123.mp4", "size": 1000}))
+
+    def test_magnet_better_prefers_cnsub(self):
+        from javdb_client import magnet_better
+
+        cnsub_mag = {"name": "ABC-123-C", "size": 1000, "hd": 0}
+        plain_hd = {"name": "ABC-123", "size": 5000, "hd": 1}
+        self.assertTrue(magnet_better(cnsub_mag, plain_hd))
+        self.assertFalse(magnet_better(plain_hd, cnsub_mag))
+
+    def test_sort_magnets_cnsub_first(self):
+        from javdb_client import sort_magnets
+
+        m1 = {"name": "ABC-123", "size": 5000, "hd": 1}
+        m2 = {"name": "ABC-123-C", "size": 2000, "hd": 1}
+        m3 = {"name": "ABC-123-UC", "size": 3000, "hd": 1}
+        sorted_m = sort_magnets([m1, m2, m3])
+        # Both m3 and m2 are cnsub; m3 is larger (3000 > 2000), m1 is non-cnsub
+        self.assertEqual(sorted_m[0]["name"], "ABC-123-UC")
+        self.assertEqual(sorted_m[1]["name"], "ABC-123-C")
+        self.assertEqual(sorted_m[2]["name"], "ABC-123")
+
+    def test_ensure_gate_attaches_magnets_on_low_reviews(self):
+        from javdb_client import JavDBClient, ensure_javdb_score_gate
+
+        client = JavDBClient()
+        mock_lookup = {
+            "number": "ABC-123",
+            "score": 4.5,
+            "reviews_count": 5,
+            "watched_count": 2000,
+            "release_date": "2020-01-01",
+            "query_status": "ok",
+            "magnets": ["magnet:?xt=urn:btih:cnsub_mag&dn=ABC-123-C"],
+            "best_magnet": "magnet:?xt=urn:btih:cnsub_mag&dn=ABC-123-C",
+        }
+        item = {
+            "title": "[有码] ABC-123 test",
+            "av_number": "ABC-123",
+            "content_region": "jav_censored",
+            "javdb_query": {
+                "number": "ABC-123",
+                "score": 4.5,
+                "reviews_count": 5,
+                "watched_count": 2000,
+                "release_date": "2020-01-01",
+                "query_status": "ok",
+            },
+        }
+        with patch.object(client, "lookup", return_value=mock_lookup) as mock_fn:
+            result = ensure_javdb_score_gate(item, client)
+            self.assertFalse(result)
+            self.assertEqual(item.get("skip_reason"), "javdb_reviews_low_5")
+            self.assertIn("magnet:?xt=urn:btih:cnsub_mag&dn=ABC-123-C", item.get("magnets", []))
+            self.assertEqual(item.get("best_magnet"), "magnet:?xt=urn:btih:cnsub_mag&dn=ABC-123-C")
+            mock_fn.assert_called_once_with("ABC-123", fetch_magnets=True, best_only=False)
+
+    def test_ensure_gate_attaches_magnets_on_low_watched(self):
+        from javdb_client import JavDBClient, ensure_javdb_score_gate
+
+        client = JavDBClient()
+        mock_lookup = {
+            "number": "ABC-456",
+            "score": 4.5,
+            "reviews_count": 1500,
+            "watched_count": 10,
+            "release_date": "2020-01-01",
+            "query_status": "ok",
+            "magnets": ["magnet:?xt=urn:btih:cnsub_mag2&dn=ABC-456-UC"],
+            "best_magnet": "magnet:?xt=urn:btih:cnsub_mag2&dn=ABC-456-UC",
+        }
+        item = {
+            "title": "[有码] ABC-456 test",
+            "av_number": "ABC-456",
+            "content_region": "jav_censored",
+            "javdb_query": {
+                "number": "ABC-456",
+                "score": 4.5,
+                "reviews_count": 1500,
+                "watched_count": 10,
+                "release_date": "2020-01-01",
+                "query_status": "ok",
+            },
+        }
+        with patch.object(client, "lookup", return_value=mock_lookup) as mock_fn:
+            result = ensure_javdb_score_gate(item, client)
+            self.assertFalse(result)
+            self.assertEqual(item.get("skip_reason"), "javdb_watched_low_10")
+            self.assertIn("magnet:?xt=urn:btih:cnsub_mag2&dn=ABC-456-UC", item.get("magnets", []))
+            self.assertEqual(item.get("best_magnet"), "magnet:?xt=urn:btih:cnsub_mag2&dn=ABC-456-UC")
+
+
 if __name__ == "__main__":
     unittest.main()

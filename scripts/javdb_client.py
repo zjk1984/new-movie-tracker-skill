@@ -7,6 +7,7 @@ Requires curl_cffi for TLS fingerprinting (plain urllib/requests often get HTTP 
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -312,8 +313,53 @@ def magnet_uri(row: dict[str, Any]) -> str:
     return f"magnet:?xt=urn:btih:{h}"
 
 
+CNSUB_KEYWORDS = (
+    "中文字幕",
+    "中字",
+    "字幕",
+    "中文",
+    "國語",
+    "国语",
+    "简体",
+    "繁体",
+    "双语",
+    "字幕组",
+    "cnsub",
+    "chs",
+    "chinese",
+    "subtitle",
+)
+
+CNSUB_PATTERN = re.compile(
+    r"(?:[-_.]u?c(?:\b|[-_.]|\s|$)|中文字幕|中字|字幕|cnsub|chs|chinese|subtitle)",
+    re.IGNORECASE,
+)
+
+
+def is_cnsub_text(text: str) -> bool:
+    if not text:
+        return False
+    lowered = text.lower()
+    for kw in CNSUB_KEYWORDS:
+        if kw in lowered:
+            return True
+    return bool(CNSUB_PATTERN.search(text))
+
+
+def is_cnsub_row(row: dict[str, Any]) -> bool:
+    if _truthy(row.get("cnsub")):
+        return True
+    name = _any_str(row.get("name") or row.get("title"))
+    if is_cnsub_text(name):
+        return True
+    uri = magnet_uri(row)
+    if is_cnsub_text(uri):
+        return True
+    return False
+
+
 def magnet_better(a: dict[str, Any], b: dict[str, Any]) -> bool:
-    ac, bc = int(_truthy(a.get("cnsub"))), int(_truthy(b.get("cnsub")))
+    ac, bc = int(is_cnsub_row(a)), int(is_cnsub_row(b))
     if ac != bc:
         return ac > bc
     ah, bh = int(_truthy(a.get("hd"))), int(_truthy(b.get("hd")))
@@ -334,7 +380,7 @@ def filter_magnets(
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in magnets:
-        if cnsub and not _truthy(row.get("cnsub")):
+        if cnsub and not is_cnsub_row(row):
             continue
         if hd and not _truthy(row.get("hd")):
             continue
@@ -342,6 +388,17 @@ def filter_magnets(
             continue
         out.append(row)
     return out
+
+
+def sort_magnets(magnets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _cmp(a: dict[str, Any], b: dict[str, Any]) -> int:
+        if magnet_better(a, b):
+            return -1
+        if magnet_better(b, a):
+            return 1
+        return 0
+
+    return sorted(magnets, key=functools.cmp_to_key(_cmp))
 
 
 def pick_best_magnet(magnets: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -709,10 +766,11 @@ class JavDBClient:
             all_rows = self.movie_magnets(movie_id)
             result["magnet_total"] = len(all_rows)
             result["cnsub_magnet_count"] = sum(
-                1 for row in all_rows if _truthy(row.get("cnsub"))
+                1 for row in all_rows if is_cnsub_row(row)
             )
             magnets = filter_magnets(all_rows, cnsub=cnsub, hd=hd)
             result["magnet_filtered"] = len(magnets)
+            magnets = sort_magnets(magnets)
             if best_only:
                 best = pick_best_magnet(magnets)
                 magnets = [best] if best else []
@@ -1156,6 +1214,57 @@ def needs_javdb_query(item: dict[str, Any]) -> bool:
     return q_number != number
 
 
+def attach_skipped_javdb_magnets(
+    item: dict[str, Any],
+    client: JavDBClient | None = None,
+    *,
+    query_if_missing: bool = True,
+) -> None:
+    """Fetch and attach JavDB magnets (preferring cnsub) for items skipped by gate."""
+    q = item.get("javdb_query") or {}
+    q_best = q.get("best_magnet")
+    q_mags = q.get("magnets") or []
+    if q_best or q_mags:
+        combined = ([q_best] if q_best else []) + list(q_mags)
+        item["javdb_magnets"] = list(dict.fromkeys(combined))
+        item["magnets"] = list(dict.fromkeys(item["javdb_magnets"] + (item.get("magnets") or [])))
+        if q_best and not item.get("best_magnet"):
+            item["best_magnet"] = q_best
+
+    if item.get("javdb_magnets"):
+        return
+
+    number = item.get("av_number") or extract_av_number(
+        item.get("title") or item.get("name") or "",
+    )
+    if not number:
+        return
+    if client is None and not query_if_missing:
+        return
+
+    try:
+        if client is None:
+            client = JavDBClient()
+        info = client.lookup(number, fetch_magnets=True, best_only=False)
+        mags = info.get("magnets") or []
+        if mags:
+            item["javdb_magnets"] = mags
+            existing = item.get("magnets") or []
+            item["magnets"] = list(dict.fromkeys(mags + existing))
+        best = info.get("best_magnet") or (mags[0] if mags else "")
+        if best:
+            item["best_magnet"] = best
+        if "javdb_query" in item and isinstance(item["javdb_query"], dict):
+            item["javdb_query"]["best_magnet"] = best
+            item["javdb_query"]["magnets"] = mags
+            item["javdb_query"]["magnet_status"] = info.get("magnet_status") or (
+                "available" if mags else "empty"
+            )
+            item["javdb_query"]["cnsub_magnet_count"] = info.get("cnsub_magnet_count", 0)
+    except Exception as exc:
+        item["javdb_magnet_error"] = str(exc)
+
+
 def ensure_javdb_score_gate(
     item: dict[str, Any],
     client: JavDBClient | None = None,
@@ -1202,12 +1311,14 @@ def ensure_javdb_score_gate(
     if reviews_ok is False:
         item["skip_reason"] = javdb_reviews_skip_reason(item)
         _clear_download_selection(item)
+        attach_skipped_javdb_magnets(item, client, query_if_missing=query_if_missing)
         return False
 
     watched_ok = javdb_watched_ok(item)
     if watched_ok is False:
         item["skip_reason"] = javdb_watched_skip_reason(item)
         _clear_download_selection(item)
+        attach_skipped_javdb_magnets(item, client, query_if_missing=query_if_missing)
         return False
 
     ok = javdb_score_ok(item, min_score=min_score)
@@ -1223,6 +1334,7 @@ def ensure_javdb_score_gate(
         else:
             item["skip_reason"] = f"javdb_score_low_{score:.2f}"
         _clear_download_selection(item)
+        attach_skipped_javdb_magnets(item, client, query_if_missing=query_if_missing)
         return False
     return True
 
