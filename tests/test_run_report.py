@@ -23,6 +23,7 @@ from run_report import (  # noqa: E402
     _skip_reason_label,
     _success_full_title,
     _success_name_cell,
+    _undownloaded_reason_priority,
     archive_reports_to_backup,
     scan_funnel_stats_rows,
     write_run_report,
@@ -392,9 +393,10 @@ class UndownloadedPostsTests(unittest.TestCase):
                 "title": "[有码] AAA-111 old",
                 "content_region": "jav_censored",
                 "av_number": "AAA-111",
+                "skip_reason": "javdb_score_low_3.5",
                 "javdb_query": {
                     "query_status": "ok",
-                    "score": 4.5,
+                    "score": 3.5,
                     "release_date": "2024-06-01",
                 },
                 "magnets": ["magnet:?xt=urn:btih:aaa"],
@@ -404,6 +406,7 @@ class UndownloadedPostsTests(unittest.TestCase):
                 "title": "[有码] BBB-222 new",
                 "content_region": "jav_censored",
                 "av_number": "BBB-222",
+                "skip_reason": "javdb_score_low_3.5",
                 "release_date": "2026-03-15",
                 "magnets": ["magnet:?xt=urn:btih:bbb"],
             },
@@ -412,7 +415,8 @@ class UndownloadedPostsTests(unittest.TestCase):
                 "title": "[有码] CCC-333 nodate",
                 "content_region": "jav_censored",
                 "av_number": "CCC-333",
-                "javdb_query": {"query_status": "ok", "score": 4.5},
+                "skip_reason": "javdb_score_low_3.5",
+                "javdb_query": {"query_status": "ok", "score": 3.5},
                 "magnets": ["magnet:?xt=urn:btih:ccc"],
             },
         ]
@@ -977,6 +981,74 @@ class ForumSummaryTests(unittest.TestCase):
             self.assertIn("- forum-103 有码: 0 帖", body)
             self.assertIn("- forum-37 无码: 0 帖", body)
 
+
+
+class UndownloadedSortingTests(unittest.TestCase):
+    def test_undownloaded_reason_priority(self):
+        # 1. 评分人数不足
+        self.assertEqual(_undownloaded_reason_priority("javdb_reviews_low_10"), 1)
+        self.assertEqual(_undownloaded_reason_priority("javdb_reviews_missing"), 1)
+        self.assertEqual(_undownloaded_reason_priority("javdb_ratings_low_5"), 1)
+
+        # 2. 看过人数不足
+        self.assertEqual(_undownloaded_reason_priority("javdb_watched_low_50"), 2)
+        self.assertEqual(_undownloaded_reason_priority("javdb_watched_missing"), 2)
+
+        # 3. 标签排除
+        self.assertEqual(_undownloaded_reason_priority("javdb_tag_excluded_拘束"), 3)
+        self.assertEqual(_undownloaded_reason_priority("javdb_tag_excluded_潮吹"), 3)
+
+        # 4. 其他原因
+        self.assertEqual(_undownloaded_reason_priority("javdb_score_low_4.0"), 4)
+        self.assertEqual(_undownloaded_reason_priority("already_submitted"), 4)
+        self.assertEqual(_undownloaded_reason_priority("no_magnets"), 4)
+
+    def test_build_undownloaded_entries_sorted_by_priority(self):
+        skipped = [
+            {
+                "href": "t4.html",
+                "title": "Item 4 Other",
+                "name": "TEST-004",
+                "av_number": "TEST-004",
+                "content_region": "jav_censored",
+                "skip_reason": "javdb_score_low_3.5",
+                "publish_time": "2026-09-20",
+                "magnets": ["magnet:?xt=urn:btih:4444444444444444444444444444444444444444"],
+            },
+            {
+                "href": "t3.html",
+                "title": "Item 3 Tag Excluded",
+                "name": "TEST-003",
+                "av_number": "TEST-003",
+                "content_region": "jav_censored",
+                "skip_reason": "javdb_tag_excluded_拘束",
+                "publish_time": "2026-09-21",
+                "magnets": ["magnet:?xt=urn:btih:3333333333333333333333333333333333333333"],
+            },
+            {
+                "href": "t2.html",
+                "title": "Item 2 Watched Low",
+                "name": "TEST-002",
+                "av_number": "TEST-002",
+                "content_region": "jav_censored",
+                "skip_reason": "javdb_watched_low_10",
+                "publish_time": "2026-09-22",
+                "magnets": ["magnet:?xt=urn:btih:2222222222222222222222222222222222222222"],
+            },
+            {
+                "href": "t1.html",
+                "title": "Item 1 Reviews Low",
+                "name": "TEST-001",
+                "av_number": "TEST-001",
+                "content_region": "jav_censored",
+                "skip_reason": "javdb_reviews_low_3",
+                "publish_time": "2026-09-23",
+                "magnets": ["magnet:?xt=urn:btih:1111111111111111111111111111111111111111"],
+            },
+        ]
+        jav_entries, _ = _build_undownloaded_entries(skipped, {"succeeded": [], "failed": []})
+        labels = [e["label"] for e in jav_entries]
+        self.assertEqual(labels, ["TEST-001", "TEST-002", "TEST-003", "TEST-004"])
 
 
 if __name__ == "__main__":

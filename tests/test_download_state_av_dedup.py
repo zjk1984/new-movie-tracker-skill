@@ -137,6 +137,23 @@ class AvNumberDedupTests(unittest.TestCase):
         self.assertEqual(dupe_bt.get("skip_reason"), "repeat_btih")
         self.assertEqual(dupe_hash.get("skip_reason"), "repeat_hash")
 
+    def test_mark_manual_download(self):
+        from download_state import is_already_submitted, mark_manual_download
+
+        state = empty_state()
+        mark_manual_download(state, "SSIS-888", title="SSIS-888 手工测试")
+        self.assertIn("SSIS-888", state["av_numbers"])
+        record = state["av_numbers"]["SSIS-888"]
+        self.assertEqual(record["download_method"], "manual")
+        self.assertEqual(record["status"], "manual_download")
+        self.assertTrue(is_already_submitted({"av_number": "SSIS-888"}, state))
+
+        # Test marking magnet URI
+        mag = "magnet:?xt=urn:btih:1111222233334444555566667777888899990000&dn=TEST-001"
+        mark_manual_download(state, mag)
+        self.assertTrue(is_already_submitted({"uri": mag}, state))
+        self.assertIn("TEST-001", state["av_numbers"])
+
 
 if __name__ == "__main__":
     unittest.main()

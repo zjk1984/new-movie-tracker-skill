@@ -71,12 +71,21 @@ def cmd_status(args: argparse.Namespace) -> int:
         print("[err] no token available", file=sys.stderr)
         return 1
 
+    from pikpak_auth import inspect_jwt_token
+
     payload: dict = {}
-    try:
-        payload = decode_jwt_payload(token)
-        print(f"user id: {payload.get('sub', '(unknown)')}")
-    except Exception as exc:
-        print(f"[warn] could not decode token: {exc}")
+    jwt_info = inspect_jwt_token(token)
+    if jwt_info.get("valid_jwt"):
+        payload = jwt_info.get("payload") or {}
+        print(f"user id: {jwt_info.get('sub', '(unknown)')}")
+        if jwt_info.get("exp_iso"):
+            print(f"token exp: {jwt_info['exp_iso']}")
+        if jwt_info.get("is_expired"):
+            print(f"[warn] {jwt_info['message']}")
+        else:
+            print(f"[info] {jwt_info['message']}")
+    else:
+        print(f"[warn] could not decode token: {jwt_info.get('message')}")
 
     if args.check:
         import hashlib
@@ -86,6 +95,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         if not payload:
             print("[err] cannot verify token without valid JWT payload", file=sys.stderr)
             return 1
+        if jwt_info.get("is_expired"):
+            print(
+                f"[err] token is expired (expired at {jwt_info.get('exp_iso')}). "
+                "API requests will return HTTP 401 Unauthorized even if quota is sufficient.",
+                file=sys.stderr,
+            )
+            return 1
         user_id = payload.get("sub", "")
         device_id = hashlib.md5(user_id.encode()).hexdigest()
         session = requests.Session()
@@ -93,7 +109,15 @@ def cmd_status(args: argparse.Namespace) -> int:
             files = list_files(session, token, device_id, user_id, limit=1)
             print(f"[ok] token valid ({len(files)} file(s) visible at root)")
         except Exception as exc:
-            print(f"[err] token check failed: {exc}", file=sys.stderr)
+            err_msg = str(exc)
+            print(f"[err] token check failed: {err_msg}", file=sys.stderr)
+            if "401" in err_msg or "unauthorized" in err_msg.lower():
+                print(
+                    "[hint] HTTP 401 提示: PikPak Token 属于临时访问凭证(JWT Access Token)。"
+                    "即使账户空间或下载配额充足，Token 过期/失效也会导致 401 认证失败。"
+                    "请重新登录获取最新 Token 并执行 login 保存。",
+                    file=sys.stderr,
+                )
             return 1
     return 0
 

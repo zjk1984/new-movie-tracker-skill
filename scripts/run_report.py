@@ -439,7 +439,8 @@ def _pending_submit_reason_label(download_report: dict[str, Any]) -> str:
         detail = reason.split(":", 1)[-1]
         labels = {
             "no_token": "PikPak 未登录（无 token）",
-            "invalid": "PikPak token 失效",
+            "invalid": "PikPak token 失效 (401)",
+            "expired": "PikPak token 已过期 (401)",
         }
         return labels.get(detail, "PikPak 认证失败")
     if reason.startswith("quota:"):
@@ -612,13 +613,16 @@ def _success_item_label(
     return _truncate(_success_full_title(item, matched_by_href), 40)
 
 
-def _format_phase_status(phase: str) -> str:
+def _format_phase_status(phase: str, download_method: str = "") -> str:
+    if download_method == "manual" or phase in ("manual_download", "manual"):
+        return "用户手工下载"
     labels = {
         "PHASE_TYPE_RUNNING": "下载中",
         "PHASE_TYPE_PENDING": "排队中",
         "PHASE_TYPE_COMPLETE": "已完成",
         "ok": "已提交",
         "submitted": "已提交",
+        "manual_download": "用户手工下载",
     }
     text = (phase or "ok").strip()
     return labels.get(text, text)
@@ -633,7 +637,8 @@ def _md_success_item_block(
 ) -> str:
     label = _success_item_label(item, matched_by_href)
     link_type = _format_success_type(item)
-    phase = _format_phase_status(item.get("phase") or item.get("status") or "ok")
+    method = item.get("download_method") or item.get("source") or ""
+    phase = _format_phase_status(item.get("phase") or item.get("status") or "ok", download_method=method)
     title, thread_url = _success_display_title(item, matched_by_href, is_jav=is_jav)
 
     match_reason = _match_reason_label(
@@ -762,6 +767,15 @@ def _ensure_item_skip_reason(item: dict[str, Any]) -> None:
     if number and item.get("skip_reason") == "javdb_no_number":
         item.pop("skip_reason", None)
     if item.get("skip_reason"):
+        skip_reason = str(item.get("skip_reason") or "")
+        if (
+            skip_reason.startswith("javdb_reviews_low_")
+            or skip_reason.startswith("javdb_watched_low_")
+            or skip_reason in ("javdb_no_reviews_count", "javdb_no_watched_count")
+        ) and not item.get("magnets") and not item.get("javdb_magnets"):
+            from javdb_client import attach_skipped_javdb_magnets
+
+            attach_skipped_javdb_magnets(item, query_if_missing=False)
         return
     from javdb_client import is_submit_eligible, needs_javdb_query
 
@@ -832,18 +846,31 @@ def _collect_post_uris(item: dict[str, Any]) -> list[tuple[str, str]]:
     except Exception:
         pass
 
-    if out:
-        return out
+    for magnet in item.get("javdb_magnets") or []:
+        add(magnet, "magnet")
+    for magnet in item.get("magnets") or []:
+        add(magnet, "magnet")
+    best = (item.get("javdb_query") or {}).get("best_magnet")
+    if best:
+        add(best, "magnet")
+    for magnet in (item.get("javdb_query") or {}).get("magnets") or []:
+        add(magnet, "magnet")
 
     for ed2k in item.get("ed2k") or []:
         uri = normalize_ed2k_uri(ed2k) or ed2k
         add(uri, "ed2k")
-    for magnet in item.get("magnets") or []:
-        add(magnet, "magnet")
     selected = item.get("selected_download") or item.get("selected_magnet") or ""
     if selected:
         kind = "ed2k" if selected.lower().startswith("ed2k:") else "magnet"
         add(selected, kind)
+
+    from magnet_select import magnet_has_cnsub
+
+    out.sort(
+        key=lambda x: (
+            0 if x[0] == "magnet" and magnet_has_cnsub(x[1]) else (1 if x[0] == "magnet" else 2)
+        ),
+    )
     return out
 
 
@@ -859,6 +886,50 @@ def _index_failed(failed: list[dict[str, Any]]) -> tuple[dict[str, str], dict[st
         if href and href not in by_href:
             by_href[href] = err
     return by_uri, by_href
+
+
+def _undownloaded_reason_priority(reason: str) -> int:
+    """Return priority for undownloaded entries.
+
+    Priority order:
+    1: 评分人数不足
+    2: 看过人数不足
+    3: 标签排除
+    4: 其他原因
+    """
+    text = (reason or "").lower()
+    if (
+        "评分人数不足" in reason
+        or "无评分人数" in reason
+        or "reviews_low" in text
+        or "no_reviews" in text
+        or "reviews_missing" in text
+        or "ratings_low" in text
+        or "reviews" in text
+    ):
+        return 1
+    if (
+        "看过人数不足" in reason
+        or "无看过人数" in reason
+        or "watched_low" in text
+        or "no_watched" in text
+        or "watched_missing" in text
+        or "watched" in text
+    ):
+        return 2
+    if (
+        "标签排除" in reason
+        or "tag_excluded" in text
+    ):
+        return 3
+    return 4
+
+
+def _undownloaded_sort_key(entry: dict[str, Any], date_field: str = "release_date") -> tuple[int, int, str]:
+    priority = _undownloaded_reason_priority(entry.get("reason", ""))
+    date_val = str(entry.get(date_field) or "").strip()
+    has_date = 1 if date_val else 0
+    return (priority, -has_date, date_val)
 
 
 def _build_undownloaded_entries(
@@ -983,9 +1054,15 @@ def _build_undownloaded_entries(
         key=lambda x: _release_date_desc_sort_key(x.get("release_date", "")),
         reverse=True,
     )
+    jav_entries.sort(
+        key=lambda x: _undownloaded_reason_priority(x.get("reason", "")),
+    )
     domestic_entries.sort(
         key=lambda x: _release_date_desc_sort_key(x.get("post_date", "")),
         reverse=True,
+    )
+    domestic_entries.sort(
+        key=lambda x: _undownloaded_reason_priority(x.get("reason", "")),
     )
     return jav_entries, domestic_entries
 
