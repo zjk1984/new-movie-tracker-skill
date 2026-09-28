@@ -1448,7 +1448,12 @@ def write_run_report(
     path = out_dir / f"{run_label}_{ts}.md"
     previous_line = _previous_report_line(previous_report, reports_dir=out_dir)
 
-    forums = scan_stats.get("forums") or {}
+    forums = scan_stats.get("forums")
+    if not forums and not scan_stats.get("batch_mode"):
+        from feishu_notify import FORUM_LABELS
+        forums = {label: 0 for label in FORUM_LABELS.values()}
+    else:
+        forums = forums or {}
     forum_lines = "\n".join(f"- {name}: {count} 帖" for name, count in sorted(forums.items()))
 
     failed_items = list(download_report.get("failed") or [])

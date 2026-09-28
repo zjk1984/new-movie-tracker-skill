@@ -139,6 +139,12 @@ class ScanDeltaTests(unittest.TestCase):
             self.assertEqual(stats["matched_total"], 0)
             self.assertEqual(report["ok"], 0)
             self.assertEqual(report["succeeded"], [])
+            # All 5 forums preserved with 0 count
+            self.assertIn("forums", stats)
+            self.assertEqual(stats["forums"].get("forum-2 综合"), 0)
+            self.assertEqual(stats["forums"].get("forum-37 无码"), 0)
+            self.assertEqual(len(stats["forums"]), 5)
+
 
 
     def test_write_json_atomic_and_load_recovery(self):

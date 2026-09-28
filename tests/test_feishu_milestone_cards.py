@@ -112,7 +112,35 @@ class FeishuMilestoneCardTests(unittest.TestCase):
         )
         body = card["elements"][0]["text"]["content"]
         self.assertNotIn("**JavDB 标签**", body)
+        self.assertIn("forum-2 综合: **0** 帖", body)
+        self.assertIn("forum-95 国产: **0** 帖", body)
+        self.assertIn("forum-142 有码: **0** 帖", body)
+        self.assertIn("forum-103 有码: **0** 帖", body)
+        self.assertIn("forum-37 无码: **0** 帖", body)
+
+    def test_build_scan_summary_card_lists_all_5_forums_when_empty_or_partial(self):
+        card = build_scan_summary_card(
+            {
+                "scan_time": "2026-09-15T12:00:00+08:00",
+                "forums": {
+                    "forum-95 国产": 10,
+                    "forum-142 有码": 5,
+                    "forum-103 有码": 3,
+                    "forum-2 综合": 0,
+                    "forum-37 无码": 0,
+                },
+                "matched_total": 18,
+            },
+            {"ok": 0, "failed_count": 0, "total": 0},
+        )
+        body = card["elements"][0]["text"]["content"]
+        self.assertIn("• forum-2 综合: **0** 帖", body)
+        self.assertIn("• forum-95 国产: **10** 帖", body)
+        self.assertIn("• forum-142 有码: **5** 帖", body)
+        self.assertIn("• forum-103 有码: **3** 帖", body)
+        self.assertIn("• forum-37 无码: **0** 帖", body)
 
 
 if __name__ == "__main__":
     unittest.main()
+

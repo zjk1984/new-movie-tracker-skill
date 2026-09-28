@@ -945,5 +945,31 @@ class MdTableCellLinkTests(unittest.TestCase):
         self.assertIn("https://example.com/?q=1", cell)
 
 
+class ForumSummaryTests(unittest.TestCase):
+    def test_write_run_report_lists_all_5_forums_when_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp)
+            scan_stats = {
+                "scan_time": "2026-09-28T07:00:00",
+                "forums": {},
+                "matched": [],
+            }
+            download_report = {"ok": 0, "failed_count": 0, "total": 0, "succeeded": [], "failed": []}
+            result = write_run_report(
+                scan_stats,
+                download_report,
+                reports_dir=reports_dir,
+                run_label="daily",
+            )
+            body = result.path.read_text(encoding="utf-8")
+            self.assertIn("### 扫描板块", body)
+            self.assertIn("- forum-2 综合: 0 帖", body)
+            self.assertIn("- forum-95 国产: 0 帖", body)
+            self.assertIn("- forum-142 有码: 0 帖", body)
+            self.assertIn("- forum-103 有码: 0 帖", body)
+            self.assertIn("- forum-37 无码: 0 帖", body)
+
+
+
 if __name__ == "__main__":
     unittest.main()

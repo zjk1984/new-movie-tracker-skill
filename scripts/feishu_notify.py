@@ -221,6 +221,7 @@ def analyze_scan(
     batch_mode = False
     completeness_warnings: list[str] = []
     recovered_sources: list[str] = []
+    scanned_urls: list[str] = []
     from scan_delta import load_scan_result, validate_scan_result_completeness
 
     for path in result_paths:
@@ -234,6 +235,9 @@ def analyze_scan(
             scan_times.append(data["scan_time"])
         if data.get("batch_mode"):
             batch_mode = True
+        for u in data.get("scanned_forum_urls") or []:
+            if u not in scanned_urls:
+                scanned_urls.append(u)
         completeness_warnings.extend(validate_scan_result_completeness(data, matched))
 
     # Merge ed2k from refetch by href
@@ -252,6 +256,12 @@ def analyze_scan(
             item["ed2k"] = ed2k_by_href[href]
 
     forums: Counter[str] = Counter()
+    if scanned_urls:
+        for forum_url in scanned_urls:
+            forums[_forum_label(forum_url)] = 0
+    elif not batch_mode:
+        for label in FORUM_LABELS.values():
+            forums[label] = 0
     region_counts: Counter[str] = Counter()
     subtype_counts: Counter[str] = Counter()
     link_totals = {"magnet": 0, "ed2k": 0, "bt": 0}
@@ -390,7 +400,11 @@ def build_scan_summary_card(
     *,
     report_url: str | None = None,
 ) -> dict[str, Any]:
-    forums = scan_stats.get("forums") or {}
+    forums = scan_stats.get("forums")
+    if not forums and not scan_stats.get("batch_mode"):
+        forums = {label: 0 for label in FORUM_LABELS.values()}
+    else:
+        forums = forums or {}
     forum_lines = "\n".join(f"• {name}: **{count}** 帖" for name, count in sorted(forums.items()))
     lt = scan_stats.get("link_totals") or {}
     pw = scan_stats.get("posts_with") or {}
@@ -698,7 +712,11 @@ def build_scan_done_card(
     *,
     run_label: str = "scan",
 ) -> dict[str, Any]:
-    forums = scan_stats.get("forums") or {}
+    forums = scan_stats.get("forums")
+    if not forums and not scan_stats.get("batch_mode") and run_label not in ("forum-142", "forum-37"):
+        forums = {label: 0 for label in FORUM_LABELS.values()}
+    else:
+        forums = forums or {}
     forum_lines = "\n".join(
         f"• {name}: **{count}** 帖" for name, count in sorted(forums.items())
     ) or "• （无）"

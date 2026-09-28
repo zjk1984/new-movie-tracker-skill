@@ -659,10 +659,10 @@ class DomesticJavDBGateTests(unittest.TestCase):
         self.assertNotIn("selected_magnet", item)
 
     def test_domestic_with_javdb_ok_fails_excluded_tag(self):
-        item = self._domestic_item(tags=["多P", "巨乳"], score=4.8)
+        item = self._domestic_item(tags=["捆绑", "巨乳"], score=4.8)
         with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):
             self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
-        self.assertEqual(item["skip_reason"], "javdb_tag_excluded_多P")
+        self.assertEqual(item["skip_reason"], "javdb_tag_excluded_捆绑")
 
     def test_domestic_candidate_needs_javdb_query(self):
         item = {

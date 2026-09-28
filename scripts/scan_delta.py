@@ -323,6 +323,17 @@ def recompute_scan_summary(
     from pikpak_download import pick_item_download
 
     forums: Counter[str] = Counter()
+    # Preserve all scanned forums with at least 0 count
+    for forum_name in (scan_stats.get("forums") or {}).keys():
+        forums[forum_name] = 0
+    scanned_urls = scan_stats.get("scanned_forum_urls") or []
+    for forum_url in scanned_urls:
+        forums[_forum_label(forum_url)] = 0
+    if not forums:
+        from feishu_notify import FORUM_LABELS
+        for label in FORUM_LABELS.values():
+            forums[label] = 0
+
     region_counts: Counter[str] = Counter()
     subtype_counts: Counter[str] = Counter()
     link_totals = {"magnet": 0, "ed2k": 0, "bt": 0}
