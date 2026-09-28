@@ -112,6 +112,31 @@ class AvNumberDedupTests(unittest.TestCase):
         self.assertIn("HMN-900", state["av_numbers"])
         self.assertEqual(state["av_numbers"]["HMN-900"]["name"], "HMN-900")
 
+    def test_repeat_btih_and_hash_skip_reasons(self):
+        state = empty_state()
+        bt_item = {
+            "name": "something_without_av_1",
+            "uri": "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+        }
+        hash_item = {
+            "name": "something_without_av_2",
+            "hash": "FEDCBA0987654321FEDCBA0987654321FEDCBA09",
+        }
+        mark_submitted(state, [bt_item, hash_item])
+
+        dupe_bt = {
+            "name": "something_without_av_1_new",
+            "uri": "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+        }
+        dupe_hash = {
+            "name": "something_without_av_2_new",
+            "hash": "FEDCBA0987654321FEDCBA0987654321FEDCBA09",
+        }
+        kept = filter_new_items([dupe_bt, dupe_hash], state)
+        self.assertEqual(kept, [])
+        self.assertEqual(dupe_bt.get("skip_reason"), "repeat_btih")
+        self.assertEqual(dupe_hash.get("skip_reason"), "repeat_hash")
+
 
 if __name__ == "__main__":
     unittest.main()

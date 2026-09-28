@@ -1524,7 +1524,11 @@ def save_scan_results(
             "pages_scanned": total_pages_scanned,
         },
     )
-    page.screenshot(path=str(screenshot_dir / "last_run.png"))
+    if page is not None:
+        try:
+            page.screenshot(path=str(screenshot_dir / "last_run.png"))
+        except Exception:
+            pass
     print(f"[done] results saved to {out_dir}")
     try:
         print("\n" + result_text)
@@ -1918,7 +1922,14 @@ def main():
     parser.add_argument(
         "--gate-before-fetch",
         action="store_true",
+        default=False,
         help="Run JavDB gate from title before opening forum threads",
+    )
+    parser.add_argument(
+        "--no-gate-before-fetch",
+        dest="gate_before_fetch",
+        action="store_false",
+        help="Disable pre-gating before opening forum threads",
     )
     args = parser.parse_args()
     from env_utils import load_env_local

@@ -528,6 +528,14 @@ class FilterReasonLabelTests(unittest.TestCase):
         item = {"content_region": "jav_censored"}
         self.assertEqual(_skip_reason_label(item), "未成功下载")
 
+    def test_skip_reason_already_submitted_labels(self):
+        self.assertEqual(_skip_reason_label({"skip_reason": "repeat_av_number"}), ALREADY_SUBMITTED_SKIP_LABEL)
+        self.assertEqual(_skip_reason_label({"skip_reason": "repeat_btih"}), ALREADY_SUBMITTED_SKIP_LABEL)
+        self.assertEqual(_skip_reason_label({"skip_reason": "repeat_hash"}), ALREADY_SUBMITTED_SKIP_LABEL)
+        self.assertEqual(_skip_reason_label({"skip_reason": "repeat_thread"}), ALREADY_SUBMITTED_SKIP_LABEL)
+        self.assertEqual(_skip_reason_label({"skip_reason": "already_submitted"}), ALREADY_SUBMITTED_SKIP_LABEL)
+        self.assertEqual(_skip_reason_label({"skip_reason": "duplicate_av_number"}), "同批次重复番号（已选更优版）")
+
     def test_match_reason_jav_shows_score(self):
         matched = {
             "thread-1.html": {

@@ -150,8 +150,17 @@ def filter_new_items(items: list[dict[str, Any]], state: dict[str, Any]) -> list
     for item in items:
         av = item_av_number(item)
         if is_already_submitted(item, state):
+            key = item_download_key(item)
             if av and av in av_bucket:
                 item["skip_reason"] = "repeat_av_number"
+            elif key and key.startswith("hash:"):
+                item["skip_reason"] = "repeat_hash"
+            elif key and key.startswith("btih:"):
+                item["skip_reason"] = "repeat_btih"
+            elif item_thread_key(item) and item_thread_key(item) in (state.get("threads") or {}):
+                item["skip_reason"] = "repeat_thread"
+            else:
+                item["skip_reason"] = "already_submitted"
             continue
 
         if av:

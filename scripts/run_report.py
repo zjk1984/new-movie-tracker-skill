@@ -678,18 +678,27 @@ def _entry_in_download_state(
     group_links: list[tuple[str, str]],
     href: str,
     state: dict[str, Any] | None,
+    item: dict[str, Any] | None = None,
 ) -> bool:
     if not state:
         return False
     from download_state import is_already_submitted
 
+    probe_av = (item or {}).get("av_number") or ""
+    probe_title = (item or {}).get("title") or ""
     if group_links:
         return all(
-            is_already_submitted({"uri": uri, "href": href}, state)
+            is_already_submitted(
+                {"uri": uri, "href": href, "av_number": probe_av, "title": probe_title},
+                state,
+            )
             for _kind, uri in group_links
         )
-    if href:
-        return is_already_submitted({"href": href}, state)
+    if href or probe_av:
+        return is_already_submitted(
+            {"href": href, "av_number": probe_av, "title": probe_title},
+            state,
+        )
     return False
 
 
@@ -708,6 +717,13 @@ def _skip_reason_label(item: dict[str, Any], *, failed_error: str = "") -> str:
         count = reason.replace("javdb_watched_low_", "")
         return f"JavDB 看过人数不足 ({count})"
     labels = {
+        "repeat_av_number": ALREADY_SUBMITTED_SKIP_LABEL,
+        "duplicate_av_number": "同批次重复番号（已选更优版）",
+        "repeat_btih": ALREADY_SUBMITTED_SKIP_LABEL,
+        "repeat_magnet": ALREADY_SUBMITTED_SKIP_LABEL,
+        "repeat_hash": ALREADY_SUBMITTED_SKIP_LABEL,
+        "repeat_thread": ALREADY_SUBMITTED_SKIP_LABEL,
+        "already_submitted": ALREADY_SUBMITTED_SKIP_LABEL,
         "javdb_no_score": "JavDB 无均分",
         "javdb_not_queried": "JavDB 未查询",
         "javdb_query_error": "JavDB 查询失败",
@@ -925,7 +941,7 @@ def _build_undownloaded_entries(
                 reason = "链接未抓取"
             elif (
                 reason == "未成功下载"
-                and _entry_in_download_state(group_links, href, download_state)
+                and _entry_in_download_state(group_links, href, download_state, item=probe)
             ):
                 reason = ALREADY_SUBMITTED_SKIP_LABEL
 

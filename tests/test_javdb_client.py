@@ -13,6 +13,7 @@ from javdb_client import (  # noqa: E402
     JAVDB_RECENT_MIN_REVIEWS,
     JAVDB_RECENT_RELEASE_DAYS,
     JAVDB_ZERO_REVIEWS_DAYS,
+    JavDBClient,
     build_query_report,
     current_beijing_year,
     days_since_release,
@@ -659,10 +660,10 @@ class DomesticJavDBGateTests(unittest.TestCase):
         self.assertNotIn("selected_magnet", item)
 
     def test_domestic_with_javdb_ok_fails_excluded_tag(self):
-        item = self._domestic_item(tags=["多P", "巨乳"], score=4.8)
+        item = self._domestic_item(tags=["拘束", "巨乳"], score=4.8)
         with patch("javdb_client.current_beijing_year", return_value=self.MOCK_YEAR):
             self.assertFalse(ensure_javdb_score_gate(item, query_if_missing=False))
-        self.assertEqual(item["skip_reason"], "javdb_tag_excluded_多P")
+        self.assertEqual(item["skip_reason"], "javdb_tag_excluded_拘束")
 
     def test_domestic_candidate_needs_javdb_query(self):
         item = {
@@ -671,6 +672,27 @@ class DomesticJavDBGateTests(unittest.TestCase):
             "av_number": "HMN-900",
         }
         self.assertTrue(needs_javdb_query(item))
+
+
+class JavDBCacheTests(unittest.TestCase):
+    @patch("javdb_client._load_javdb_cache")
+    @patch("javdb_client._save_javdb_cache")
+    def test_lookup_metadata_reuses_existing_cached_entry(self, mock_save, mock_load):
+        client = JavDBClient()
+        cached_entry = {
+            "number": "TEST-101",
+            "javdb_id": "mov123",
+            "title": "Cached Title",
+            "score": 4.5,
+            "query_status": "ok",
+        }
+        mock_load.return_value = {"TEST-101|m=1|b=1": cached_entry}
+        with patch.object(client, "resolve_movie_id") as mock_resolve:
+            res = client.lookup("TEST-101", fetch_magnets=False)
+            mock_resolve.assert_not_called()
+            self.assertEqual(res["number"], "TEST-101")
+            self.assertEqual(res["score"], 4.5)
+            self.assertEqual(res["magnet_status"], "not_requested")
 
 
 if __name__ == "__main__":

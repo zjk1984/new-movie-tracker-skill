@@ -57,6 +57,8 @@ def run_scan(
             cmd.extend(["--list-workers", str(list_workers)])
         if fetch_workers is not None:
             cmd.extend(["--fetch-workers", str(fetch_workers)])
+    if getattr(args, "gate_before_fetch", True):
+        cmd.append("--gate-before-fetch")
     if getattr(args, "batch_mode", False):
         cmd.append("--batch-mode")
     print("[info] running scan:", " ".join(cmd))
@@ -266,6 +268,24 @@ def main() -> int:
         type=int,
         default=int(os.environ.get("SCAN_FETCH_WORKERS", "4")),
         help="Parallel thread-fetch workers (default: 4)",
+    )
+    parser.add_argument(
+        "--gate-before-fetch",
+        action="store_true",
+        default=True,
+        help="Run JavDB gate from title before opening forum threads (default: True)",
+    )
+    parser.add_argument(
+        "--no-gate-before-fetch",
+        dest="gate_before_fetch",
+        action="store_false",
+        help="Disable pre-gating before opening threads",
+    )
+    parser.add_argument(
+        "--batch-mode",
+        action="store_true",
+        default=False,
+        help="Enable batch-mode optimizations in scan",
     )
     args = parser.parse_args()
     if args.no_headless:
