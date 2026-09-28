@@ -152,7 +152,6 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 |--------------------|------|
 | **泄密** | 含「泄密」或「泄露」 |
 | **流出** | 含「流出」（**不含**「未流出」） |
-| **AI增强** | 含「AI增强」或「AI 增强」 |
 | **熟女自拍** | 含「熟女」 |
 | **露脸** | 含「露脸」 |
 | **真实** | 含「真实」 |
@@ -167,7 +166,7 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 
 #### 排除（`content_region: domestic_other`）
 
-以下**一律排除**，即使同时带有 AI增强 / 泄密 等标签：
+以下**一律排除**，即使同时带有 泄密 / 真实 / 露脸 等标签：
 
 | 排除原因 | 匹配 |
 |----------|------|
@@ -197,7 +196,7 @@ Implemented in `scripts/content_filter.py`. Applied by default; disable with `--
 
 ```
 国产无码 filter (forum-2 today):
-  kept: 8  (AI增强 6, 泄密 2)
+  kept: 8  (泄密 6, 流出 2)
   excluded_domestic_other: 19  (私拍 1, 伪番号 4, OnlyFans 1, 探花/推特/剧情 13)
 ```
 
@@ -334,7 +333,7 @@ Agents **must** keep these Cursor `subscribe_timer` wakes on this Project. Full 
 python scripts/daily_run.py --headless
 ```
 
-Defaults: scan **forum-2 + forum-95 + forum-142 + forum-103 + forum-37**, `--all-posts`, `--cnsub-priority`, last **2 days**, content filter (日本有码/无码 + 国产泄密/流出/AI增强), PikPak **My Pack**, **new-only** dedup.
+Defaults: scan **forum-2 + forum-95 + forum-142 + forum-103 + forum-37**, `--all-posts`, `--cnsub-priority`, last **2 days**, content filter (日本有码/无码 + 国产/ed2k 保留类), PikPak **My Pack**, **new-only** dedup.
 
 Explain results to the user:
 - **本次新增** — magnets submitted this run (not in previous `download_state.json`)

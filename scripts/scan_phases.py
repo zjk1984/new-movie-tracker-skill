@@ -136,6 +136,26 @@ def _init_enrich_worker(storage_state: Path, chrome: str, headless: bool) -> Non
     _enrich_worker_tls.context = context
 
 
+def _cleanup_enrich_worker() -> None:
+    try:
+        ctx = getattr(_enrich_worker_tls, "context", None)
+        if ctx:
+            ctx.close()
+        b = getattr(_enrich_worker_tls, "browser", None)
+        if b:
+            b.close()
+        pw = getattr(_enrich_worker_tls, "playwright", None)
+        if pw:
+            pw.stop()
+    except Exception:
+        pass
+    finally:
+        _enrich_worker_tls.context = None
+        _enrich_worker_tls.browser = None
+        _enrich_worker_tls.playwright = None
+        _enrich_worker_tls.javdb_client = None
+
+
 def _enrich_worker(
     item: dict,
     args,
@@ -143,30 +163,46 @@ def _enrich_worker(
     chrome: str,
 ):
     item = copy.deepcopy(item)
-    context = _enrich_worker_tls.context
-    page = context.new_page()
-    try:
-        javdb_client = None
-        if (
-            getattr(args, "javdb", False)
-            or getattr(args, "javdb_magnets", False)
-            or getattr(args, "cnsub_priority", False)
-            or getattr(args, "javdb_query", True)
-        ):
-            from javdb_client import JavDBClient
+    context = getattr(_enrich_worker_tls, "context", None)
+    javdb_client = getattr(_enrich_worker_tls, "javdb_client", None)
+    if javdb_client is None and (
+        getattr(args, "javdb", False)
+        or getattr(args, "javdb_magnets", False)
+        or getattr(args, "cnsub_priority", False)
+        or getattr(args, "javdb_query", True)
+    ):
+        from javdb_client import JavDBClient
 
-            javdb_client = JavDBClient(host=getattr(args, "javdb_host", None))
-        if args.fetch_magnets and item.get("href"):
-            enrich_matched_post(page, item, args, javdb_client)
-        elif javdb_client:
-            from scan import apply_item_filters, enrich_with_javdb
+        javdb_client = JavDBClient(host=getattr(args, "javdb_host", None))
+        _enrich_worker_tls.javdb_client = javdb_client
 
-            scan_log(f"[info] javdb lookup: {item['title'][:40]}...")
-            enrich_with_javdb(item, javdb_client, args)
+    if args.fetch_magnets and item.get("href"):
+        from scan import apply_item_filters, enrich_matched_post, try_gate_before_thread_fetch
+
+        # Pre-gate check: avoid opening browser page for excluded or unqualified items
+        if not try_gate_before_thread_fetch(item, javdb_client, args):
+            item["magnets"] = []
+            item["ed2k"] = []
+            item["pikpak_sha"] = []
+            item["hash_entries"] = []
             apply_item_filters(item, javdb_client, args)
-        return item
-    finally:
-        page.close()
+            return item
+
+        if context is not None:
+            page = context.new_page()
+            try:
+                enrich_matched_post(page, item, args, javdb_client)
+            finally:
+                page.close()
+        else:
+            enrich_matched_post(None, item, args, javdb_client)
+    elif javdb_client:
+        from scan import apply_item_filters, enrich_with_javdb
+
+        scan_log(f"[info] javdb lookup: {item['title'][:40]}...")
+        enrich_with_javdb(item, javdb_client, args)
+        apply_item_filters(item, javdb_client, args)
+    return item
 
 
 def _send_feishu_start(args) -> None:
@@ -354,6 +390,15 @@ def scrape_two_phase(args) -> None:
                 enriched_by_key[item.get("title", "")] = _enrich_worker(
                     item, args, storage_state, chrome,
                 )
+            cleanup_futs = [
+                pool.submit(_cleanup_enrich_worker)
+                for _ in range(fetch_workers * 2)
+            ]
+            for cf in cleanup_futs:
+                try:
+                    cf.result(timeout=3)
+                except Exception:
+                    pass
         for item in candidates:
             key = (item.get("href") or "").strip() or item.get("title", "")
             all_matched.append(enriched_by_key.get(key, item))

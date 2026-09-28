@@ -119,7 +119,6 @@ Aliases are bidirectional: if the tracked actor is `三上悠亜`, titles contai
 |--------------------|------|
 | 泄密 | 泄密 / 泄露 |
 | 流出 | 流出（不含「未流出」） |
-| AI增强 | AI增强 / AI 增强 |
 | 熟女自拍 | 熟女 |
 | 露脸 | 露脸 |
 | 真实 | 真实 |

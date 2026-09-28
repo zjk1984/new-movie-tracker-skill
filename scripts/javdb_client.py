@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from datetime import date, datetime
@@ -52,24 +53,42 @@ JAVDB_CACHE_ENABLED = os.environ.get("JAVDB_CACHE", "1").strip().lower() not in 
 }
 
 
+_JAVDB_CACHE_LOCK = threading.Lock()
+_JAVDB_MEMORY_CACHE: dict[str, Any] | None = None
+
+
 def _load_javdb_cache() -> dict[str, Any]:
-    if not JAVDB_CACHE_ENABLED or not JAVDB_CACHE_FILE.exists():
+    global _JAVDB_MEMORY_CACHE
+    if not JAVDB_CACHE_ENABLED:
         return {}
-    try:
-        data = json.loads(JAVDB_CACHE_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    with _JAVDB_CACHE_LOCK:
+        if _JAVDB_MEMORY_CACHE is not None:
+            return dict(_JAVDB_MEMORY_CACHE)
+        if not JAVDB_CACHE_FILE.exists():
+            _JAVDB_MEMORY_CACHE = {}
+            return {}
+        try:
+            data = json.loads(JAVDB_CACHE_FILE.read_text(encoding="utf-8"))
+            _JAVDB_MEMORY_CACHE = data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            _JAVDB_MEMORY_CACHE = {}
+        return dict(_JAVDB_MEMORY_CACHE)
 
 
 def _save_javdb_cache(cache: dict[str, Any]) -> None:
+    global _JAVDB_MEMORY_CACHE
     if not JAVDB_CACHE_ENABLED:
         return
-    JAVDB_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    JAVDB_CACHE_FILE.write_text(
-        json.dumps(cache, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    with _JAVDB_CACHE_LOCK:
+        _JAVDB_MEMORY_CACHE = dict(cache)
+        try:
+            JAVDB_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            JAVDB_CACHE_FILE.write_text(
+                json.dumps(cache, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
 
 def _javdb_cache_key(number: str, *, fetch_magnets: bool, best_only: bool) -> str:
@@ -635,7 +654,31 @@ class JavDBClient:
         if isinstance(cached, dict) and cached.get("query_status") == "ok":
             return dict(cached)
 
-        movie_id = self.resolve_movie_id(number, exact=exact)
+        num_upper = number.upper()
+        if not fetch_magnets:
+            prefix = f"{num_upper}|"
+            for k, v in cache.items():
+                if k.startswith(prefix) and isinstance(v, dict) and v.get("query_status") == "ok":
+                    meta = dict(v)
+                    meta["magnet_status"] = "not_requested"
+                    meta["magnets"] = []
+                    meta["magnet_rows"] = []
+                    meta["best_magnet"] = ""
+                    meta["magnet_total"] = 0
+                    meta["magnet_filtered"] = 0
+                    meta["cnsub_magnet_count"] = 0
+                    meta["summary"] = format_lookup_summary(meta)
+                    return meta
+
+        movie_id = None
+        prefix = f"{num_upper}|"
+        for k, v in cache.items():
+            if k.startswith(prefix) and isinstance(v, dict) and v.get("javdb_id"):
+                movie_id = v["javdb_id"]
+                break
+        if not movie_id:
+            movie_id = self.resolve_movie_id(number, exact=exact)
+
         detail = self.movie_detail(movie_id)
         resolved_number = _any_str(detail.get("number") or number).upper()
         content_type = classify_javdb_content(detail, resolved_number)
@@ -688,6 +731,19 @@ class JavDBClient:
         if JAVDB_CACHE_ENABLED and result.get("query_status") == "ok":
             cache = _load_javdb_cache()
             cache[cache_key] = result
+            if fetch_magnets:
+                no_mag_key = _javdb_cache_key(number, fetch_magnets=False, best_only=False)
+                if no_mag_key not in cache:
+                    meta = dict(result)
+                    meta["magnet_status"] = "not_requested"
+                    meta["magnets"] = []
+                    meta["magnet_rows"] = []
+                    meta["best_magnet"] = ""
+                    meta["magnet_total"] = 0
+                    meta["magnet_filtered"] = 0
+                    meta["cnsub_magnet_count"] = 0
+                    meta["summary"] = format_lookup_summary(meta)
+                    cache[no_mag_key] = meta
             _save_javdb_cache(cache)
         return result
 
