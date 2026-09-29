@@ -815,7 +815,7 @@ def enrich_with_javdb(item: dict, client, args) -> None:
             fetch_magnets=True,
             cnsub=bool(getattr(args, "javdb_cnsub", False)),
             hd=bool(getattr(args, "javdb_hd", False)),
-            best_only=bool(getattr(args, "javdb_best", False)),
+            best_only=True,
         )
     except Exception as exc:
         item["javdb_error"] = str(exc)
@@ -834,12 +834,14 @@ def enrich_with_javdb(item: dict, client, args) -> None:
     if info.get("release_date") and not item.get("release_date"):
         item["release_date"] = info["release_date"]
 
-    javdb_magnets = info.get("magnets") or []
-    if javdb_magnets:
-        item["javdb_magnets"] = javdb_magnets
-        if getattr(args, "javdb_magnets", False):
-            merged = list(dict.fromkeys((item.get("magnets") or []) + javdb_magnets))
-            item["magnets"] = merged
+    from javdb_client import set_item_javdb_best_magnet
+
+    if info.get("magnets") or info.get("best_magnet"):
+        set_item_javdb_best_magnet(
+            item,
+            info,
+            merge_into_magnets=bool(getattr(args, "javdb_magnets", False)),
+        )
 
 
 def match_post(
