@@ -411,6 +411,62 @@ def pick_best_magnet(magnets: list[dict[str, Any]]) -> dict[str, Any] | None:
     return best
 
 
+def resolve_best_javdb_magnet_uri(
+    *,
+    best_magnet: str | None = None,
+    magnets: list[str] | None = None,
+) -> str:
+    """Return a single best JavDB magnet URI, preferring explicit best_magnet."""
+    best = _any_str(best_magnet).strip()
+    if best:
+        return best
+    for uri in magnets or []:
+        text = _any_str(uri).strip()
+        if text:
+            return text
+    return ""
+
+
+def best_javdb_magnet_list(info: dict[str, Any]) -> list[str]:
+    """Return at most one best JavDB magnet URI from lookup info."""
+    uri = resolve_best_javdb_magnet_uri(
+        best_magnet=info.get("best_magnet"),
+        magnets=info.get("magnets"),
+    )
+    return [uri] if uri else []
+
+
+def item_javdb_best_magnet(item: dict[str, Any]) -> str:
+    """Best JavDB magnet URI for an item (javdb_magnets / javdb_query / best_magnet)."""
+    q = item.get("javdb_query") or {}
+    return resolve_best_javdb_magnet_uri(
+        best_magnet=item.get("best_magnet") or q.get("best_magnet"),
+        magnets=item.get("javdb_magnets") or q.get("magnets"),
+    )
+
+
+def set_item_javdb_best_magnet(
+    item: dict[str, Any],
+    info: dict[str, Any],
+    *,
+    merge_into_magnets: bool = False,
+) -> str:
+    """Attach a single best JavDB magnet to item; return the URI or ''."""
+    best_list = best_javdb_magnet_list(info)
+    best = best_list[0] if best_list else ""
+    if best:
+        item["javdb_magnets"] = best_list
+        item["best_magnet"] = best
+        if isinstance(item.get("javdb_query"), dict):
+            item["javdb_query"]["best_magnet"] = best
+            item["javdb_query"]["magnets"] = best_list
+    elif "javdb_magnets" in item:
+        item["javdb_magnets"] = []
+    if merge_into_magnets and best:
+        item["magnets"] = list(dict.fromkeys(best_list + (item.get("magnets") or [])))
+    return best
+
+
 def resolve_number(movies: list[dict[str, Any]], number: str) -> str:
     want = number.strip().upper()
     if not want:
@@ -859,6 +915,10 @@ def build_query_report(info: dict[str, Any]) -> dict[str, Any]:
     tag_labels = info.get("tag_labels")
     if tag_labels is None and tags:
         tag_labels = ", ".join(tags)
+    best_magnet = resolve_best_javdb_magnet_uri(
+        best_magnet=info.get("best_magnet"),
+        magnets=info.get("magnets"),
+    )
     report: dict[str, Any] = {
         "query_status": info.get("query_status", "ok"),
         "number": info.get("number"),
@@ -875,11 +935,13 @@ def build_query_report(info: dict[str, Any]) -> dict[str, Any]:
         "magnet_status": info.get("magnet_status"),
         "magnet_total": info.get("magnet_total", 0),
         "magnet_filtered": info.get("magnet_filtered", 0),
-        "best_magnet": info.get("best_magnet") or ((info.get("magnets") or [""])[0]),
+        "best_magnet": best_magnet,
         "summary": info.get("summary") or format_lookup_summary(info),
         "tags": tags,
         "tag_labels": tag_labels or "",
     }
+    if best_magnet:
+        report["magnets"] = [best_magnet]
     if info.get("maker_name"):
         report["maker_name"] = info["maker_name"]
     if info.get("series_name"):
@@ -1220,16 +1282,17 @@ def attach_skipped_javdb_magnets(
     *,
     query_if_missing: bool = True,
 ) -> None:
-    """Fetch and attach JavDB magnets (preferring cnsub) for items skipped by gate."""
+    """Fetch and attach the single best JavDB magnet for items skipped by gate."""
     q = item.get("javdb_query") or {}
-    q_best = q.get("best_magnet")
-    q_mags = q.get("magnets") or []
-    if q_best or q_mags:
-        combined = ([q_best] if q_best else []) + list(q_mags)
-        item["javdb_magnets"] = list(dict.fromkeys(combined))
-        item["magnets"] = list(dict.fromkeys(item["javdb_magnets"] + (item.get("magnets") or [])))
-        if q_best and not item.get("best_magnet"):
-            item["best_magnet"] = q_best
+    q_best = resolve_best_javdb_magnet_uri(
+        best_magnet=q.get("best_magnet"),
+        magnets=q.get("magnets"),
+    )
+    if q_best:
+        set_item_javdb_best_magnet(item, {"best_magnet": q_best, "magnets": [q_best]})
+        item["magnets"] = list(
+            dict.fromkeys((item.get("javdb_magnets") or []) + (item.get("magnets") or [])),
+        )
 
     if item.get("javdb_magnets"):
         return
@@ -1245,20 +1308,11 @@ def attach_skipped_javdb_magnets(
     try:
         if client is None:
             client = JavDBClient()
-        info = client.lookup(number, fetch_magnets=True, best_only=False)
-        mags = info.get("magnets") or []
-        if mags:
-            item["javdb_magnets"] = mags
-            existing = item.get("magnets") or []
-            item["magnets"] = list(dict.fromkeys(mags + existing))
-        best = info.get("best_magnet") or (mags[0] if mags else "")
-        if best:
-            item["best_magnet"] = best
+        info = client.lookup(number, fetch_magnets=True, best_only=True)
+        best = set_item_javdb_best_magnet(item, info, merge_into_magnets=True)
         if "javdb_query" in item and isinstance(item["javdb_query"], dict):
-            item["javdb_query"]["best_magnet"] = best
-            item["javdb_query"]["magnets"] = mags
             item["javdb_query"]["magnet_status"] = info.get("magnet_status") or (
-                "available" if mags else "empty"
+                "available" if best else "empty"
             )
             item["javdb_query"]["cnsub_magnet_count"] = info.get("cnsub_magnet_count", 0)
     except Exception as exc:

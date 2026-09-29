@@ -857,14 +857,12 @@ def _collect_post_uris(item: dict[str, Any]) -> list[tuple[str, str]]:
     except Exception:
         pass
 
-    for magnet in item.get("javdb_magnets") or []:
-        add(magnet, "magnet")
+    from javdb_client import item_javdb_best_magnet
+
+    javdb_best = item_javdb_best_magnet(item)
+    if javdb_best:
+        add(javdb_best, "magnet")
     for magnet in item.get("magnets") or []:
-        add(magnet, "magnet")
-    best = (item.get("javdb_query") or {}).get("best_magnet")
-    if best:
-        add(best, "magnet")
-    for magnet in (item.get("javdb_query") or {}).get("magnets") or []:
         add(magnet, "magnet")
 
     for ed2k in item.get("ed2k") or []:

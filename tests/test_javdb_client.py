@@ -760,7 +760,7 @@ class JavDBMagnetCnsubSelectionTests(unittest.TestCase):
             self.assertEqual(item.get("skip_reason"), "javdb_reviews_low_5")
             self.assertIn("magnet:?xt=urn:btih:cnsub_mag&dn=ABC-123-C", item.get("magnets", []))
             self.assertEqual(item.get("best_magnet"), "magnet:?xt=urn:btih:cnsub_mag&dn=ABC-123-C")
-            mock_fn.assert_called_once_with("ABC-123", fetch_magnets=True, best_only=False)
+            mock_fn.assert_called_once_with("ABC-123", fetch_magnets=True, best_only=True)
 
     def test_ensure_gate_attaches_magnets_on_low_watched(self):
         from javdb_client import JavDBClient, ensure_javdb_score_gate
@@ -795,6 +795,59 @@ class JavDBMagnetCnsubSelectionTests(unittest.TestCase):
             self.assertEqual(item.get("skip_reason"), "javdb_watched_low_10")
             self.assertIn("magnet:?xt=urn:btih:cnsub_mag2&dn=ABC-456-UC", item.get("magnets", []))
             self.assertEqual(item.get("best_magnet"), "magnet:?xt=urn:btih:cnsub_mag2&dn=ABC-456-UC")
+            mock_fn.assert_called_once_with("ABC-456", fetch_magnets=True, best_only=True)
+
+    def test_attach_skipped_keeps_single_best_from_query(self):
+        from javdb_client import attach_skipped_javdb_magnets
+
+        item = {
+            "av_number": "ABC-123",
+            "javdb_query": {
+                "best_magnet": "magnet:?xt=urn:btih:best&dn=ABC-123-C",
+                "magnets": [
+                    "magnet:?xt=urn:btih:best&dn=ABC-123-C",
+                    "magnet:?xt=urn:btih:other&dn=ABC-123",
+                ],
+            },
+        }
+        attach_skipped_javdb_magnets(item, query_if_missing=False)
+        self.assertEqual(
+            item.get("javdb_magnets"),
+            ["magnet:?xt=urn:btih:best&dn=ABC-123-C"],
+        )
+        self.assertEqual(item["javdb_query"]["magnets"], item["javdb_magnets"])
+
+    def test_set_item_javdb_best_magnet_prefers_best_magnet_field(self):
+        from javdb_client import set_item_javdb_best_magnet
+
+        item: dict = {"javdb_query": {}}
+        info = {
+            "best_magnet": "magnet:?xt=urn:btih:cnsub&dn=ABC-123-C",
+            "magnets": [
+                "magnet:?xt=urn:btih:plain&dn=ABC-123",
+                "magnet:?xt=urn:btih:cnsub&dn=ABC-123-C",
+            ],
+        }
+        uri = set_item_javdb_best_magnet(item, info)
+        self.assertEqual(uri, "magnet:?xt=urn:btih:cnsub&dn=ABC-123-C")
+        self.assertEqual(len(item["javdb_magnets"]), 1)
+
+    def test_build_query_report_includes_single_magnet(self):
+        info = {
+            "query_status": "ok",
+            "number": "ABC-123",
+            "content_type": "jav_censored",
+            "content_type_label": "有码",
+            "best_magnet": "magnet:?xt=urn:btih:best&dn=ABC-123-C",
+            "magnets": [
+                "magnet:?xt=urn:btih:best&dn=ABC-123-C",
+                "magnet:?xt=urn:btih:other&dn=ABC-123",
+            ],
+            "magnet_status": "available",
+        }
+        report = build_query_report(info)
+        self.assertEqual(report["best_magnet"], "magnet:?xt=urn:btih:best&dn=ABC-123-C")
+        self.assertEqual(report["magnets"], ["magnet:?xt=urn:btih:best&dn=ABC-123-C"])
 
 
 if __name__ == "__main__":

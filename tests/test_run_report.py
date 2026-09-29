@@ -14,6 +14,7 @@ from download_state import empty_state, mark_submitted, save_state  # noqa: E402
 from run_report import (  # noqa: E402
     ALREADY_SUBMITTED_SKIP_LABEL,
     _build_undownloaded_entries,
+    _collect_post_uris,
     _jav_gate_skip_needs_magnets,
     _match_reason_label,
     _md_pending_submit_links,
@@ -1021,6 +1022,30 @@ class UndownloadedSortingTests(unittest.TestCase):
         }
         _ensure_item_skip_reason(item)
         mock_attach.assert_called_once_with(item, query_if_missing=True)
+
+    def test_collect_post_uris_single_javdb_magnet(self):
+        item = {
+            "javdb_magnets": [
+                "magnet:?xt=urn:btih:best&dn=ABC-123-C",
+                "magnet:?xt=urn:btih:other&dn=ABC-123",
+            ],
+            "javdb_query": {
+                "best_magnet": "magnet:?xt=urn:btih:best&dn=ABC-123-C",
+                "magnets": [
+                    "magnet:?xt=urn:btih:best&dn=ABC-123-C",
+                    "magnet:?xt=urn:btih:other&dn=ABC-123",
+                ],
+            },
+            "magnets": ["magnet:?xt=urn:btih:forum&dn=ABC-123-forum"],
+        }
+        magnet_uris = [uri for kind, uri in _collect_post_uris(item) if kind == "magnet"]
+        self.assertEqual(
+            magnet_uris,
+            [
+                "magnet:?xt=urn:btih:best&dn=ABC-123-C",
+                "magnet:?xt=urn:btih:forum&dn=ABC-123-forum",
+            ],
+        )
 
     def test_build_undownloaded_entries_sorted_by_priority(self):
         skipped = [

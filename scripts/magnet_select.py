@@ -431,10 +431,10 @@ def maybe_javdb_magnet_fallback(item: dict[str, Any], javdb_client=None) -> bool
     if info.get("release_date") and not item.get("release_date"):
         item["release_date"] = info["release_date"]
 
-    magnets = info.get("magnets") or []
-    if not magnets:
+    from javdb_client import set_item_javdb_best_magnet
+
+    if not (info.get("magnets") or info.get("best_magnet")):
         return False
 
-    item["javdb_magnets"] = magnets
-    item["magnets"] = list(dict.fromkeys((item.get("magnets") or []) + magnets))
+    set_item_javdb_best_magnet(item, info, merge_into_magnets=True)
     return apply_selection(item, javdb_client)
