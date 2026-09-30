@@ -318,8 +318,17 @@ Agents **must** keep these Cursor `subscribe_timer` wakes on this Project. Full 
 | 12:55 | 13:00 daily | `55 4 * * *` | `daily-wake-1255-bj` |
 | 19:55 | 20:00 daily | `55 11 * * *` | `daily-wake-1955-bj` |
 | 17:55 | 18:00 forum-37 | `55 9 * * *` | `forum37-wake-1755-bj` |
+| Non-slot :55 (20 h/day) | checkpoint wake | `55 0,1,2,3,5,6,7,8,10,12,13,14,15,16,17,18,19,20,21,23 * * *` | `hourly-wake-non-slot-bj` |
 
-**On each fire:** message cron VM **`bc-d4fb1f8c`** → `./scripts/restart_daily_supervisor.sh` (includes `ensure_cron_running.sh`). After forum-37 wake, confirm `crontab -l | grep forum37`.
+**On each fire:** message cron VM **`bc-d4fb1f8c`**:
+
+| Timer | Action |
+|-------|--------|
+| `daily-wake-*` (07/13/20 slots) | `./scripts/restart_daily_supervisor.sh` |
+| `forum37-wake-1755-bj` | `./scripts/ensure_cron_running.sh`; confirm `crontab -l \| grep forum37` |
+| `hourly-wake-non-slot-bj` | `./scripts/hourly_wake_heartbeat.sh` (cron health only; no supervisor restart) |
+
+Together: **24 Beijing :55 wakes/day**, **5 active subscriptions**.
 
 **Deletion rule:** **Never** `unsubscribe` or remove any timer wake without **explicit user confirmation in chat**. Before any unsubscribe, run `list_subscriptions` and show the user what would be removed.
 

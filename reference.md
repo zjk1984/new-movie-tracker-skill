@@ -394,7 +394,7 @@ Repo ships `environment.json`:
 
 `restart_daily_supervisor.sh` runs `ensure_cron_running.sh`, kills stale `daily-supervisor` tmux (frozen after checkpoint restore), and starts a fresh `daily_run_supervisor.sh` so `catch_up_missed_slots_on_start` re-evaluates missed Beijing slots. Apply this `environment.json` to the cron VM Cloud Agent environment.
 
-**铁律 (mandatory timer wakes):** Project must keep four `subscribe_timer` subscriptions — `daily-wake-0655-bj` (`55 22 * * *`), `daily-wake-1255-bj` (`55 4 * * *`), `daily-wake-1955-bj` (`55 11 * * *`), `forum37-wake-1755-bj` (`55 9 * * *` UTC; 17:55 Beijing). Each fire → cron VM `bc-d4fb1f8c` → `./scripts/restart_daily_supervisor.sh`. **Never unsubscribe without explicit user confirmation**; run `list_subscriptions` before any removal. Details: [docs/daily-run-external-schedule.md](docs/daily-run-external-schedule.md) and [SKILL.md §10 铁律](SKILL.md).
+**铁律 (mandatory timer wakes):** Project must keep five `subscribe_timer` subscriptions — four slot timers (`daily-wake-0655-bj` `55 22 * * *`, `daily-wake-1255-bj` `55 4 * * *`, `daily-wake-1955-bj` `55 11 * * *`, `forum37-wake-1755-bj` `55 9 * * *` UTC) plus consolidated non-slot hourly wake `hourly-wake-non-slot-bj` (`55 0,1,2,3,5,6,7,8,10,12,13,14,15,16,17,18,19,20,21,23 * * *`). Slot timers → `./scripts/restart_daily_supervisor.sh` or `ensure_cron_running.sh` (forum-37); non-slot → `./scripts/hourly_wake_heartbeat.sh`. **Never unsubscribe without explicit user confirmation**; run `list_subscriptions` before any removal. Details: [docs/daily-run-external-schedule.md](docs/daily-run-external-schedule.md) and [SKILL.md §10 铁律](SKILL.md).
 
 Supervisor one-shot check (no loop): `./scripts/daily_run_supervisor.sh --once`
 
