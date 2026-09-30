@@ -9,7 +9,7 @@
 | D | **Disable VM auto-sleep** (dashboard) | No |
 | B | `daily_run_supervisor.sh` in tmux (repo) | No |
 | C | `environment.json` `"start"` hook | No |
-| A | Cursor `subscribe_timer` wake **5 min before** each slot | No |
+| A | Cursor `subscribe_timer` wake at **:55 every hour** (Beijing) | No |
 
 Cron + `ensure_cron_running.sh` remain **best-effort backup** once cron is up.
 
@@ -30,19 +30,42 @@ Agents **must** keep these Cursor `subscribe_timer` wakes active on this Project
 
 Wake times are **Asia/Shanghai (北京时间)**. Cron expressions above are **UTC** (Beijing = UTC+8).
 
+### Hourly :55 checkpoint wake (all Beijing hours)
+
+**Added 2026-09-30** — prevents checkpoint freeze from causing missed cron/supervisor slots between daily windows.
+
+Because `subscribe_timer` dedupes by cron expression (not name), non-slot hours use **one consolidated timer** instead of 20 separate subscriptions:
+
+| Beijing hours covered | UTC cron | Timer name | Wake action on `bc-d4fb1f8c` |
+|-----------------------|----------|------------|------------------------------|
+| 00–05, 07–16, 18, 20–23 (20 hours) | `55 0,1,2,3,5,6,7,8,10,12,13,14,15,16,17,18,19,20,21,23 * * *` | `hourly-wake-non-slot-bj` | `./scripts/hourly_wake_heartbeat.sh` |
+
+**Excluded from consolidated timer** (dedicated slot timers below — no double-fire):
+
+| Beijing | Dedicated timer |
+|---------|-----------------|
+| 06:55 | `daily-wake-0655-bj` |
+| 12:55 | `daily-wake-1255-bj` |
+| 17:55 | `forum37-wake-1755-bj` |
+| 19:55 | `daily-wake-1955-bj` |
+
+Together: **24 Beijing :55 wakes/day**, **5 active subscriptions**.
+
+`hourly_wake_heartbeat.sh` runs `ensure_cron_running.sh` only (no supervisor restart). Log: `data/hourly_wake.log`.
+
 ### On each timer fire
 
-Project agent messages cron VM **`bc-d4fb1f8c`** (repo `/workspace`) to run:
+Project agent messages cron VM **`bc-d4fb1f8c`** (repo `/workspace`):
 
-```bash
-./scripts/restart_daily_supervisor.sh
-```
-
-This script already runs `./scripts/ensure_cron_running.sh` first, then restarts the `daily-supervisor` tmux session. After forum-37 wake, also verify `crontab -l | grep forum37`.
+| Timer | Action |
+|-------|--------|
+| `daily-wake-0655-bj`, `daily-wake-1255-bj`, `daily-wake-1955-bj` | `./scripts/restart_daily_supervisor.sh` → verify `tmux ls` shows `daily-supervisor`, check `data/supervisor.log` |
+| `forum37-wake-1755-bj` | `./scripts/ensure_cron_running.sh` → verify `crontab -l \| grep forum37` |
+| `hourly-wake-non-slot-bj` | `./scripts/hourly_wake_heartbeat.sh` → verify `data/hourly_wake.log` and `data/cron_health.log` |
 
 ### Deletion rule (mandatory)
 
-**Never** call `unsubscribe` or remove any of the four timer wakes above without **explicit user confirmation in chat**. Do not delete, replace, or “clean up” subscriptions on your own initiative.
+**Never** call `unsubscribe` or remove any of the five timer wakes above without **explicit user confirmation in chat**. Do not delete, replace, or “clean up” subscriptions on your own initiative.
 
 Before any `unsubscribe`, always run `list_subscriptions` (cursor-subscriptions MCP) and show the user what would be removed.
 
@@ -83,9 +106,17 @@ tail -f /workspace/data/supervisor.log
 
 ## Option A — Cursor subscribe_timer
 
-See **铁律** above for required timer names and cron. Wakes the **Project conversation** 5 minutes before each slot so the cron VM is unfrozen before the poll window.
+See **铁律** above. Wakes the **Project conversation** at Beijing **:55 every hour** so the cron VM is unfrozen before slots and between them.
 
-List subscriptions: `list_subscriptions` (cursor-subscriptions MCP).
+**Active timer names (5):**
+
+1. `daily-wake-0655-bj`
+2. `daily-wake-1255-bj`
+3. `daily-wake-1955-bj`
+4. `forum37-wake-1755-bj`
+5. `hourly-wake-non-slot-bj`
+
+List subscriptions: `list_subscriptions` (cursor-subscriptions MCP). Re-subscribe before `expiresAt` (~7 days).
 
 ---
 
@@ -112,8 +143,10 @@ Forum-37 is **cron-only** (not driven by `daily_run_supervisor.sh`). The 17:55 t
 
 ## Verification checklist
 
-- [ ] Four timer subscriptions present (`list_subscriptions`)
+- [ ] Five timer subscriptions present (`list_subscriptions`)
 - [ ] Environment dashboard: auto-sleep disabled when possible (Option D)
 - [ ] Start hook saved (Option C)
-- [ ] `tmux ls` shows `daily-supervisor`
+- [ ] On cron VM `bc-d4fb1f8c`: `tmux ls` shows `daily-supervisor`
+- [ ] On cron VM: `crontab -l` unchanged (daily + forum37 lines intact)
+- [ ] After non-slot hourly wake: new line in `data/hourly_wake.log` and `data/cron_health.log`
 - [ ] After each slot, `data/daily_run.log` has a new start entry in the correct hour window
