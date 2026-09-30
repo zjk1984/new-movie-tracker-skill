@@ -35,7 +35,7 @@ class Forum37BatchRunTests(unittest.TestCase):
         )
 
     def test_pages_per_run_default(self):
-        self.assertEqual(PAGES_PER_RUN, 20)
+        self.assertEqual(PAGES_PER_RUN, 10)
 
     def test_build_state_after_run_advances_cursor(self):
         out = build_state_after_run(
@@ -46,9 +46,9 @@ class Forum37BatchRunTests(unittest.TestCase):
             previous={"runs_completed": 2},
         )
         self.assertEqual(out["last_start_page"], 960)
-        self.assertEqual(out["last_end_page"], 979)
-        self.assertEqual(out["next_start_page"], 980)
-        self.assertEqual(out["pages_per_run"], 20)
+        self.assertEqual(out["last_end_page"], 969)
+        self.assertEqual(out["next_start_page"], 970)
+        self.assertEqual(out["pages_per_run"], 10)
         self.assertEqual(out["runs_completed"], 3)
 
     def test_save_and_load_state_roundtrip(self):
