@@ -142,6 +142,31 @@ def _thread_dedup_enabled() -> bool:
         }
 
 
+def dedupe_download_items_by_av_number(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse duplicate submit rows that share an AV number or btih (prefer cnsub)."""
+    kept: list[dict[str, Any]] = []
+    seen_av: dict[str, int] = {}
+    seen_btih: set[str] = set()
+
+    for item in items:
+        btih = extract_btih(_item_magnet_text(item))
+        if btih:
+            if btih in seen_btih:
+                continue
+            seen_btih.add(btih)
+        av = item_av_number(item)
+        if not av:
+            kept.append(item)
+            continue
+        if av in seen_av:
+            idx = seen_av[av]
+            kept[idx] = _prefer_cnsub_download(kept[idx], item)
+            continue
+        seen_av[av] = len(kept)
+        kept.append(item)
+    return kept
+
+
 def filter_new_items(items: list[dict[str, Any]], state: dict[str, Any]) -> list[dict[str, Any]]:
     kept: list[dict[str, Any]] = []
     seen_av: dict[str, int] = {}

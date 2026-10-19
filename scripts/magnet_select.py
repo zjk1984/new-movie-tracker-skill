@@ -133,6 +133,63 @@ def _prefer_cnsub_magnet(existing: dict[str, Any], candidate: dict[str, Any]) ->
     return existing
 
 
+def _magnet_av_number(uri: str, item: dict[str, Any] | None) -> str | None:
+    num = number_from_magnet(uri)
+    if num:
+        return num.upper()
+    if not item:
+        return None
+    paired = item.get("number_downloads") or []
+    distinct = {
+        str(d.get("av_number")).upper()
+        for d in paired
+        if d.get("av_number")
+    }
+    if len(distinct) >= 2:
+        return None
+    from javdb_client import extract_av_number
+
+    fallback = (item.get("av_number") or extract_av_number(item.get("title") or ""))
+    return fallback.upper() if fallback else None
+
+
+def dedupe_magnet_links_by_av_number(
+    links: list[tuple[str, str]],
+    item: dict[str, Any] | None = None,
+) -> list[tuple[str, str]]:
+    """Keep at most one magnet URI per AV number (prefer cnsub); drop duplicate btih."""
+    from download_state import extract_btih
+
+    out: list[tuple[str, str]] = []
+    seen_av: dict[str, int] = {}
+    seen_btih: set[str] = set()
+
+    for kind, uri in links:
+        if kind != "magnet":
+            out.append((kind, uri))
+            continue
+        btih = extract_btih(uri)
+        if btih:
+            if btih in seen_btih:
+                continue
+            seen_btih.add(btih)
+        num = _magnet_av_number(uri, item)
+        if not num:
+            out.append((kind, uri))
+            continue
+        key = num.upper()
+        if key not in seen_av:
+            seen_av[key] = len(out)
+            out.append((kind, uri))
+            continue
+        idx = seen_av[key]
+        _, old_uri = out[idx]
+        pick = _prefer_cnsub_magnet({"magnet": old_uri}, {"magnet": uri})
+        if pick["magnet"] != old_uri:
+            out[idx] = (kind, pick["magnet"])
+    return out
+
+
 def _upgrade_number_downloads_with_javdb_cnsub(
     paired: list[dict[str, Any]],
     javdb_client,
