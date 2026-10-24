@@ -880,7 +880,9 @@ def _collect_post_uris(item: dict[str, Any]) -> list[tuple[str, str]]:
             0 if x[0] == "magnet" and magnet_has_cnsub(x[1]) else (1 if x[0] == "magnet" else 2)
         ),
     )
-    return out
+    from magnet_select import dedupe_magnet_links_by_av_number
+
+    return dedupe_magnet_links_by_av_number(out, item)
 
 
 def _index_failed(failed: list[dict[str, Any]]) -> tuple[dict[str, str], dict[str, str]]:

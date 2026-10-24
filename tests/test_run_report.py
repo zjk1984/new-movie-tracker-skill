@@ -1039,13 +1039,24 @@ class UndownloadedSortingTests(unittest.TestCase):
             "magnets": ["magnet:?xt=urn:btih:forum&dn=ABC-123-forum"],
         }
         magnet_uris = [uri for kind, uri in _collect_post_uris(item) if kind == "magnet"]
-        self.assertEqual(
-            magnet_uris,
-            [
-                "magnet:?xt=urn:btih:best&dn=ABC-123-C",
-                "magnet:?xt=urn:btih:forum&dn=ABC-123-forum",
+        self.assertEqual(len(magnet_uris), 1)
+        self.assertEqual(magnet_uris[0], "magnet:?xt=urn:btih:best&dn=ABC-123-C")
+
+    def test_collect_post_uris_dedupes_duplicate_av_magnets(self):
+        item = {
+            "content_region": "jav_censored",
+            "av_number": "MIDA-609",
+            "magnets": [
+                "magnet:?xt=urn:btih:445e8b4e000d8e6bd819cd84bd3cc8f0ee45efe1&dn=MIDA-609.mp4",
+                "magnet:?xt=urn:btih:445e8b4e000d8e6bd819cd84bd",
             ],
-        )
+            "selected_magnet": (
+                "magnet:?xt=urn:btih:445e8b4e000d8e6bd819cd84bd3cc8f0ee45efe1&dn=MIDA-609.mp4"
+            ),
+        }
+        magnet_uris = [uri for kind, uri in _collect_post_uris(item) if kind == "magnet"]
+        self.assertEqual(len(magnet_uris), 1)
+        self.assertIn("445e8b4e000d8e6bd819cd84bd3cc8f0ee45efe1", magnet_uris[0].lower())
 
     def test_build_undownloaded_entries_sorted_by_priority(self):
         skipped = [
