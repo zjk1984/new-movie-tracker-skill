@@ -93,6 +93,12 @@ def main() -> int:
         help="PikPak target folder (default: saved or My Pack)",
     )
     parser.add_argument(
+        "--download-provider",
+        default=None,
+        choices=("pikpak", "guangya"),
+        help="Cloud offline download backend (default: env DOWNLOAD_PROVIDER or pikpak)",
+    )
+    parser.add_argument(
         "--feishu",
         action="store_true",
         help="Send scan summary to Feishu when FEISHU_* env is configured",
@@ -150,6 +156,7 @@ def main() -> int:
         max_pages=args.max_pages,
         headless=args.headless,
         pikpak_folder=args.pikpak_folder,
+        download_provider=args.download_provider,
         batch_mode=args.batch_mode,
         fetch_workers=args.fetch_workers,
     )

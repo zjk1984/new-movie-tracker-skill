@@ -65,27 +65,47 @@ def run_scan(
     return subprocess.call(cmd, cwd=str(SKILL_DIR))
 
 
+def resolve_download_provider(explicit: str | None = None) -> str:
+    raw = (explicit or os.environ.get("DOWNLOAD_PROVIDER") or "pikpak").strip().lower()
+    if raw not in {"pikpak", "guangya"}:
+        raise ValueError(f"unsupported DOWNLOAD_PROVIDER: {raw!r} (use pikpak or guangya)")
+    return raw
+
+
 def run_download(args: argparse.Namespace, output_dir: Path) -> tuple[int, int | None, int | None]:
     sys.path.insert(0, str(SCRIPTS_DIR))
     import json
 
-    from pikpak_auth import resolve_folder
-    from pikpak_download import extract_pending_submit_uris, submit_from_result
-
+    provider = resolve_download_provider(getattr(args, "download_provider", None))
     result_path = output_dir / "last_result.json"
     if not result_path.exists():
         print(f"[err] scan result missing: {result_path}", file=sys.stderr)
         return 1, None, None
+
+    if provider == "guangya":
+        from guangya_download import extract_pending_submit_uris, submit_from_result
+    else:
+        from pikpak_auth import resolve_folder
+        from pikpak_download import extract_pending_submit_uris, submit_from_result
+
     try:
-        ok, total = submit_from_result(
-            result_path,
-            folder=resolve_folder(args.pikpak_folder),
-            today_only=False,
-            region_filter=True,
-            new_only=True,
-        )
+        if provider == "guangya":
+            ok, total = submit_from_result(
+                result_path,
+                today_only=False,
+                region_filter=True,
+                new_only=True,
+            )
+        else:
+            ok, total = submit_from_result(
+                result_path,
+                folder=resolve_folder(args.pikpak_folder),
+                today_only=False,
+                region_filter=True,
+                new_only=True,
+            )
     except RuntimeError as exc:
-        print(f"[err] pikpak: {exc}", file=sys.stderr)
+        print(f"[err] {provider}: {exc}", file=sys.stderr)
         return 1, None, None
     report_path = output_dir / "download_report.json"
     if report_path.exists():
@@ -95,12 +115,12 @@ def run_download(args: argparse.Namespace, output_dir: Path) -> tuple[int, int |
             if pending:
                 reason = report.get("submit_skip_reason") or "auth/quota"
                 print(
-                    f"[warn] pikpak {reason}: {len(pending)} link(s) saved for manual copy "
+                    f"[warn] {provider} {reason}: {len(pending)} link(s) saved for manual copy "
                     f"in run report",
                 )
         except (OSError, json.JSONDecodeError):
             pass
-    print(f"[done] pikpak new-only: {ok}/{total} submitted")
+    print(f"[done] {provider} new-only: {ok}/{total} submitted")
     if ok == total:
         rc = 0
     elif ok > 0:
@@ -241,6 +261,12 @@ def main() -> int:
         "--pikpak-folder",
         default=None,
         help="PikPak target folder (default: saved or My Pack)",
+    )
+    parser.add_argument(
+        "--download-provider",
+        default=None,
+        choices=("pikpak", "guangya"),
+        help="Cloud offline download backend (default: env DOWNLOAD_PROVIDER or pikpak)",
     )
     parser.add_argument(
         "--feishu",
