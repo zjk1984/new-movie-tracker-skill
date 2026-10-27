@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from download_state import (  # noqa: E402
+    dedupe_download_items_by_av_number,
     empty_state,
     filter_new_items,
     is_already_submitted,
@@ -17,6 +18,23 @@ from download_state import (  # noqa: E402
 
 
 class AvNumberDedupTests(unittest.TestCase):
+    def test_dedupe_download_items_by_av_number_same_batch(self):
+        rows = [
+            {
+                "av_number": "MIDA-609",
+                "uri": "magnet:?xt=urn:btih:aaa&dn=MIDA-609",
+                "url": "magnet:?xt=urn:btih:aaa&dn=MIDA-609",
+            },
+            {
+                "av_number": "MIDA-609",
+                "uri": "magnet:?xt=urn:btih:bbb&dn=MIDA-609-UC%20cnsub",
+                "url": "magnet:?xt=urn:btih:bbb&dn=MIDA-609-UC%20cnsub",
+            },
+        ]
+        kept = dedupe_download_items_by_av_number(rows)
+        self.assertEqual(len(kept), 1)
+        self.assertIn("bbb", kept[0]["uri"])
+
     def test_same_av_different_btih_second_blocked_in_batch(self):
         """START-638: two forum threads, same av_number, different btih → one submit."""
         state = empty_state()

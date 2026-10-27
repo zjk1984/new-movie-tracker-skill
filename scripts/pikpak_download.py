@@ -471,7 +471,9 @@ def load_downloads_from_result(
             items.append(entry)
     if skipped_score:
         print(f"[info] javdb score gate: skipped {skipped_score} Japanese item(s)")
-    return items
+    from download_state import dedupe_download_items_by_av_number
+
+    return dedupe_download_items_by_av_number(items)
 
 
 def load_today_magnets(result_path: Path) -> list[dict]:

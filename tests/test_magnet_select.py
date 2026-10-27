@@ -12,6 +12,7 @@ from javdb_client import extract_all_av_numbers  # noqa: E402
 from magnet_select import (  # noqa: E402
     apply_selection,
     build_number_downloads,
+    dedupe_magnet_links_by_av_number,
     magnet_has_cnsub,
     maybe_javdb_magnet_fallback,
     number_from_magnet,
@@ -272,6 +273,17 @@ class BuildNumberDownloadsTests(unittest.TestCase):
     def test_number_from_magnet_reads_dn(self):
         mag = "magnet:?xt=urn:btih:abc&dn=EBWH-352%20test"
         self.assertEqual(number_from_magnet(mag), "EBWH-352")
+
+    def test_dedupe_magnet_links_by_av_number_prefers_cnsub(self):
+        links = [
+            ("magnet", "magnet:?xt=urn:btih:plain&dn=ABC-123"),
+            ("magnet", "magnet:?xt=urn:btih:cnsub&dn=ABC-123-UC"),
+            ("ed2k", "ed2k://|file|other|"),
+        ]
+        out = dedupe_magnet_links_by_av_number(links, None)
+        magnets = [u for k, u in out if k == "magnet"]
+        self.assertEqual(magnets, ["magnet:?xt=urn:btih:cnsub&dn=ABC-123-UC"])
+        self.assertEqual(len([x for x in out if x[0] == "ed2k"]), 1)
 
 
 if __name__ == "__main__":
