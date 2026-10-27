@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Daily scan + incremental PikPak download.
+# Daily scan + incremental cloud download (default PikPak; set DOWNLOAD_PROVIDER=guangya for 光鸭).
 # Install cron: scripts/setup_cron.sh  (default 07:00 + 13:00 + 20:00 Asia/Shanghai)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

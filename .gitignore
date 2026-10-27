@@ -23,6 +23,7 @@ scan-*/
 page_debug.html
 javdb_auth.json
 pikpak_auth.json
+guangya_auth.json
 .env
 .env.local
 

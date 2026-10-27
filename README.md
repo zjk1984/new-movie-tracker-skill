@@ -106,6 +106,13 @@ python scripts/scan.py --days 3 --fetch-magnets
 python scripts/pikpak_login.py login
 python scripts/scan.py --days 3 --cnsub-priority --pikpak
 
+# 光鸭云盘离线磁力（小方案 / 替代 PikPak）
+python scripts/guangya_login.py login   # 保存 access_token + refresh_token 到 guangya_auth.json
+python scripts/guangya_login.py status --check
+export DOWNLOAD_PROVIDER=guangya       # 或 daily_run: --download-provider guangya
+python scripts/daily_run.py --download-only --download-provider guangya
+python scripts/guangya_download.py --magnet "magnet:?xt=urn:btih:..."
+
 # 论坛 + JavDB 双源磁力（推荐 BT 种子帖）
 python scripts/scan.py --keyword 流出 --javdb --javdb-magnets --javdb-best --fetch-magnets
 
@@ -141,7 +148,8 @@ new-movie-tracker/
     ├── javdb_lookup.py   # 番号查询 CLI
     ├── javdb_login.py    # JavDB 账号登录
     ├── magnet_select.py  # 中字优先磁力策略
-    └── pikpak_download.py
+    ├── pikpak_download.py
+    ├── guangya_auth.py / guangya_login.py / guangya_download.py  # 光鸭磁力离线下载
 ```
 
 ## 常见问题

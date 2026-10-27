@@ -3,3 +3,4 @@ requests
 curl_cffi
 deep-translator
 trafilatura>=2.1.0
+guangyaclient==0.0.2
