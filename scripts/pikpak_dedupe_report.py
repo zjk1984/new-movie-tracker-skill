@@ -35,42 +35,7 @@ def _md_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_pikpak_dedupe_report_body(
-    *,
-    generated_at: str,
-    folder: str,
-    parent_id: str | None,
-    apply: bool,
-    stats: dict[str, Any],
-    groups: list[dict[str, Any]],
-    previous_line: str = "",
-) -> str:
-    mode = "执行（已移入回收站）" if apply else "预览（dry-run，未删除）"
-    folder_desc = folder
-    if parent_id:
-        folder_desc = f"{folder} (parent_id={parent_id})"
-
-    total_files = int(stats.get("total_files") or 0)
-    av_groups = int(stats.get("av_groups") or 0)
-    duplicate_groups = int(stats.get("duplicate_groups") or 0)
-    skipped_no_av = int(stats.get("skipped_no_av") or 0)
-    trash_candidates = int(stats.get("trash_candidates") or 0)
-    trashed_ok = int(stats.get("trashed_ok") or 0)
-
-    summary_rows = [
-        ["文件夹", folder_desc, "PikPak 去重目标目录"],
-        ["运行模式", mode, "apply 会调用 trash API"],
-        ["文件总数", str(total_files), "目录内 drive#file 且已完成"],
-        ["番号分组", str(av_groups), "可解析番号的文件组"],
-        ["重复番号组", str(duplicate_groups), "同番号 ≥2 个文件"],
-        ["无番号跳过", str(skipped_no_av), "文件名未解析出番号"],
-        [
-            "待删/已删",
-            f"{trash_candidates} / {trashed_ok}" if apply else str(trash_candidates),
-            "重复组内保留 1 个（UC > C > 体积）",
-        ],
-    ]
-
+def _format_jav_groups(apply: bool, groups: list[dict[str, Any]]) -> str:
     group_sections: list[str] = []
     if groups:
         group_sections.append(f"## 重复番号明细（{len(groups)} 组）\n")
@@ -121,6 +86,99 @@ def build_pikpak_dedupe_report_body(
                 group_sections.append("_（无待删文件）_\n")
     else:
         group_sections.append("## 重复番号明细\n\n_（无重复番号组）_\n")
+    return "".join(group_sections)
+
+
+def _format_domestic_groups(apply: bool, groups: list[dict[str, Any]]) -> str:
+    group_sections: list[str] = []
+    if groups:
+        group_sections.append(f"## 无番号 / 国产去重（{len(groups)} 组）\n")
+        for entry in groups:
+            group_key = entry.get("group_key") or "?"
+            keeper = entry.get("keeper") or {}
+            trash_list = list(entry.get("trash") or [])
+            k_name = keeper.get("name") or ""
+            k_size = int(keeper.get("size") or 0)
+            group_sections.append(
+                f"### `{group_key}`\n\n"
+                f"- **保留**: {format_file_size(k_size)} · `{k_name}`\n",
+            )
+            if trash_list:
+                trash_label = "已移入回收站" if apply else "将删除（预览）"
+                rows = []
+                for row in trash_list:
+                    status = ""
+                    if apply:
+                        ok = row.get("trashed_ok")
+                        status = "成功" if ok else "失败"
+                    rows.append([
+                        format_file_size(int(row.get("size") or 0)),
+                        row.get("name") or "",
+                        row.get("id") or "",
+                        status,
+                    ])
+                headers = ["大小", "文件名", "file id", "删除"]
+                if not apply:
+                    headers = headers[:-1]
+                    rows = [r[:-1] for r in rows]
+                group_sections.append(f"**{trash_label}**（{len(trash_list)} 个）\n\n")
+                group_sections.append(_md_table(headers, rows))
+            else:
+                group_sections.append("_（无待删文件）_\n")
+    else:
+        group_sections.append("## 无番号 / 国产去重\n\n_（无国产重复组）_\n")
+    return "".join(group_sections)
+
+
+def build_pikpak_dedupe_report_body(
+    *,
+    generated_at: str,
+    folder: str,
+    parent_id: str | None,
+    apply: bool,
+    stats: dict[str, Any],
+    groups: list[dict[str, Any]],
+    domestic_groups: list[dict[str, Any]] | None = None,
+    previous_line: str = "",
+) -> str:
+    mode = "执行（已移入回收站）" if apply else "预览（dry-run，未删除）"
+    folder_desc = folder
+    if parent_id:
+        folder_desc = f"{folder} (parent_id={parent_id})"
+
+    total_files = int(stats.get("total_files") or 0)
+    av_groups = int(stats.get("av_groups") or 0)
+    duplicate_groups = int(stats.get("duplicate_groups") or 0)
+    skipped_no_av = int(stats.get("skipped_no_av") or 0)
+    trash_candidates = int(stats.get("trash_candidates") or 0)
+    domestic_duplicate_groups = int(stats.get("domestic_duplicate_groups") or 0)
+    domestic_trash_candidates = int(stats.get("domestic_trash_candidates") or 0)
+    domestic_candidates = int(stats.get("domestic_candidates") or 0)
+    trashed_ok = int(stats.get("trashed_ok") or 0)
+
+    summary_rows = [
+        ["文件夹", folder_desc, "PikPak 去重目标目录"],
+        ["运行模式", mode, "apply 会调用 trash API"],
+        ["文件总数", str(total_files), "目录内 drive#file 且已完成"],
+        ["番号分组", str(av_groups), "可解析番号的文件组"],
+        ["重复番号组", str(duplicate_groups), "同番号 ≥2 个文件"],
+        ["无番号跳过", str(skipped_no_av), "文件名未解析出番号（或伪番号走国产）"],
+        [
+            "JAV 待删/已删",
+            f"{trash_candidates} / {trashed_ok}" if apply else str(trash_candidates),
+            "重复组内保留 1 个（UC > C > 体积）",
+        ],
+        ["国产候选", str(domestic_candidates), "无番号 / 伪番号（默认）文件数"],
+        ["国产重复组", str(domestic_duplicate_groups), "btih / hash / 标题归一化 ≥2"],
+        [
+            "国产待删/已删",
+            str(domestic_trash_candidates),
+            "保留体积最大，同名按文件名排序",
+        ],
+    ]
+
+    jav_section = _format_jav_groups(apply, groups)
+    domestic_section = _format_domestic_groups(apply, domestic_groups or [])
 
     return f"""# PikPak downloads 去重报告
 
@@ -132,5 +190,6 @@ def build_pikpak_dedupe_report_body(
 {previous_line}
 {_md_table(["项目", "数值", "说明"], summary_rows)}
 
-{"".join(group_sections)}
+{jav_section}
+{domestic_section}
 """

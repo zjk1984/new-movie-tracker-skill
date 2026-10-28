@@ -1,18 +1,36 @@
 # -*- coding: utf-8 -*-
-"""Pure helpers for PikPak downloads dedupe (UC > C > size)."""
+"""Pure helpers for PikPak downloads dedupe (JAV: UC > C > size; domestic: size > name)."""
 from __future__ import annotations
 
+import os
 import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from content_filter import is_pseudo_jav
+from download_state import extract_btih
 from javdb_client import extract_av_number
 
 DEFAULT_FOLDER = "downloads"
 
+DOMESTIC_MIN_NORMALIZED_LEN = 8
+
 _UC_SUFFIX_RE = re.compile(r"-UC(?:$|[-_.])", re.IGNORECASE)
 _C_SUFFIX_RE = re.compile(r"-C$", re.IGNORECASE)
+
+_SITE_PREFIX_RE = re.compile(
+    r"^(?:[a-z0-9][a-z0-9.-]*\.(?:com|cc|net|org|tv|me|vip|xyz|top|pw|io)@)+",
+    re.IGNORECASE,
+)
+_RESOLUTION_TOKEN_RE = re.compile(
+    r"\b(?:1080[pP]|720[pP]|2160[pP]|4320[pP]|4[kK]|8[kK]|"
+    r"[hH][dD]|[fF][hH][dD]|[uU][hH][dD]|"
+    r"[xX]26[45]|[hH]\.?26[45]|[hH][eE][vV][cC])\b",
+)
+_BRACKET_NOISE_RE = re.compile(r"[\[\]()【】（）{}「」『』]")
+_COPY_SUFFIX_RE = re.compile(r"\(\d+\)(?=\.[^.]+$|$)")
+_DUP_SPACE_RE = re.compile(r"\s+")
 
 
 def _basename_stem(name: str) -> str:
@@ -20,6 +38,69 @@ def _basename_stem(name: str) -> str:
     if "." in base:
         return base.rsplit(".", 1)[0]
     return base
+
+
+def normalize_domestic_filename(name: str) -> str:
+    """Normalize domestic/no-av filenames for fuzzy duplicate grouping."""
+    base = Path(name).name
+    if "." in base:
+        stem, ext = base.rsplit(".", 1)
+        ext_lower = ext.lower()
+    else:
+        stem, ext_lower = base, ""
+
+    text = stem
+    text = _SITE_PREFIX_RE.sub("", text)
+    text = _BRACKET_NOISE_RE.sub(" ", text)
+    text = _RESOLUTION_TOKEN_RE.sub(" ", text)
+    text = _COPY_SUFFIX_RE.sub("", text.strip())
+    text = _DUP_SPACE_RE.sub(" ", text).strip()
+    if ext_lower:
+        return f"{text}.{ext_lower}".lower()
+    return text.lower()
+
+
+def extract_btih_from_filename(name: str) -> str | None:
+    return extract_btih(name)
+
+
+def domestic_group_key(
+    row: dict[str, Any],
+    *,
+    min_normalized_len: int = DOMESTIC_MIN_NORMALIZED_LEN,
+) -> str:
+    """Grouping key for domestic dedupe (first match wins)."""
+    name = str(row.get("name") or "")
+    fid = str(row.get("id") or "unknown")
+
+    btih = extract_btih_from_filename(name)
+    if btih:
+        return f"btih:{btih.upper()}"
+
+    file_hash = str(row.get("hash") or row.get("md5") or "").strip()
+    if file_hash:
+        return f"hash:{file_hash.upper()}"
+
+    norm = normalize_domestic_filename(name)
+    if len(norm) >= min_normalized_len:
+        return f"title:{norm}"
+
+    return f"id:{fid}"
+
+
+def pseudo_as_jav_from_env(value: str | None) -> bool:
+    if value is None:
+        value = os.environ.get("PIKPAK_DEDUPE_PSEUDO_AS_JAV", "")
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def av_number_for_jav_dedupe(name: str, *, pseudo_as_jav: bool) -> str | None:
+    av = extract_av_number(name)
+    if not av:
+        return None
+    if not pseudo_as_jav and is_pseudo_jav(name, av):
+        return None
+    return av
 
 
 def classify_filename_variant(name: str) -> int:
@@ -42,6 +123,13 @@ def dedupe_sort_key(file_row: dict[str, Any]) -> tuple[int, int, str]:
     return (-rank, -size, name)
 
 
+def domestic_dedupe_sort_key(file_row: dict[str, Any]) -> tuple[int, str]:
+    """Domestic keeper: size desc, name asc."""
+    name = str(file_row.get("name") or "")
+    size = int(file_row.get("size") or 0)
+    return (-size, name)
+
+
 def pick_keeper_and_trash(files: list[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if len(files) < 2:
         raise ValueError("pick_keeper_and_trash requires at least two files")
@@ -51,17 +139,61 @@ def pick_keeper_and_trash(files: list[dict[str, Any]]) -> tuple[dict[str, Any], 
     return keeper, trash
 
 
-def group_files_by_av_number(files: list[dict[str, Any]]) -> tuple[dict[str, list[dict]], int]:
-    groups: dict[str, list[dict]] = defaultdict(list)
-    skipped = 0
+def pick_keeper_and_trash_domestic(
+    files: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    if len(files) < 2:
+        raise ValueError("pick_keeper_and_trash_domestic requires at least two files")
+    ordered = sorted(files, key=domestic_dedupe_sort_key)
+    keeper = ordered[0]
+    trash = ordered[1:]
+    return keeper, trash
+
+
+def _complete_file_rows(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
     for row in files:
         if row.get("kind") != "drive#file":
             continue
         if row.get("phase") != "PHASE_TYPE_COMPLETE":
             continue
-        av = extract_av_number(str(row.get("name") or ""))
+        out.append(row)
+    return out
+
+
+def group_files_by_av_number(
+    files: list[dict[str, Any]],
+    *,
+    pseudo_as_jav: bool | None = None,
+) -> tuple[dict[str, list[dict]], int]:
+    pseudo_jav = pseudo_as_jav if pseudo_as_jav is not None else pseudo_as_jav_from_env(None)
+    groups: dict[str, list[dict]] = defaultdict(list)
+    skipped = 0
+    for row in _complete_file_rows(files):
+        name = str(row.get("name") or "")
+        av = av_number_for_jav_dedupe(name, pseudo_as_jav=pseudo_jav)
         if not av:
             skipped += 1
             continue
         groups[av].append(row)
     return dict(groups), skipped
+
+
+def group_files_domestic(
+    files: list[dict[str, Any]],
+    *,
+    pseudo_as_jav: bool | None = None,
+    min_normalized_len: int = DOMESTIC_MIN_NORMALIZED_LEN,
+) -> tuple[dict[str, list[dict]], int]:
+    """Group completed files without a JAV av_number (incl. pseudo when pseudo_as_jav=0)."""
+    pseudo_jav = pseudo_as_jav if pseudo_as_jav is not None else pseudo_as_jav_from_env(None)
+    groups: dict[str, list[dict]] = defaultdict(list)
+    candidates = 0
+    for row in _complete_file_rows(files):
+        name = str(row.get("name") or "")
+        if av_number_for_jav_dedupe(name, pseudo_as_jav=pseudo_jav):
+            continue
+        candidates += 1
+        key = domestic_group_key(row, min_normalized_len=min_normalized_len)
+        groups[key].append(row)
+    return dict(groups), candidates
