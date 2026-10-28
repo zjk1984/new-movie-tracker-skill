@@ -106,25 +106,28 @@ def sha_api_headers(access_token: str, device_id: str, captcha_token: str) -> di
     return headers
 
 
-def list_files(
+def list_files_page(
     session: requests.Session,
     access_token: str,
     device_id: str,
     user_id: str,
     parent_id: str = "",
     limit: int = 200,
-) -> list[dict]:
+    page_token: str = "",
+) -> tuple[list[dict], str]:
     filters = json.dumps(
         {"phase": {"eq": "PHASE_TYPE_COMPLETE"}, "trashed": {"eq": False}},
         separators=(",", ":"),
     )
-    params = {
+    params: dict[str, str] = {
         "parent_id": parent_id,
         "thumbnail_size": "SIZE_MEDIUM",
         "limit": str(limit),
         "with_audit": "true",
         "filters": filters,
     }
+    if page_token:
+        params["page_token"] = page_token
     captcha_token = get_captcha_token(session, device_id, user_id, "GET:/drive/v1/files/")
     resp = session.get(
         f"{DRIVE_HOST}/drive/v1/files",
@@ -134,7 +137,72 @@ def list_files(
     )
     if resp.status_code >= 400:
         raise RuntimeError(f"list files failed: HTTP {resp.status_code} {resp.text[:300]}")
-    return resp.json().get("files") or []
+    data = resp.json()
+    files = data.get("files") or []
+    next_token = (data.get("next_page_token") or "").strip()
+    return files, next_token
+
+
+def list_files(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    parent_id: str = "",
+    limit: int = 200,
+) -> list[dict]:
+    files, _ = list_files_page(
+        session, access_token, device_id, user_id, parent_id=parent_id, limit=limit,
+    )
+    return files
+
+
+def list_all_files(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    parent_id: str = "",
+    limit: int = 200,
+) -> list[dict]:
+    out: list[dict] = []
+    page_token = ""
+    while True:
+        batch, page_token = list_files_page(
+            session,
+            access_token,
+            device_id,
+            user_id,
+            parent_id=parent_id,
+            limit=limit,
+            page_token=page_token,
+        )
+        out.extend(batch)
+        if not page_token:
+            break
+    return out
+
+
+def trash_file(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    file_id: str,
+) -> dict:
+    """Move one file to PikPak trash (soft delete)."""
+    captcha_token = get_captcha_token(
+        session, device_id, user_id, "POST:/drive/v1/files:batchTrash",
+    )
+    resp = session.post(
+        f"{DRIVE_HOST}/drive/v1/files:batchTrash",
+        headers=api_headers(access_token, device_id, captcha_token),
+        json={"ids": [file_id]},
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"trash file failed: HTTP {resp.status_code} {resp.text[:300]}")
+    return resp.json()
 
 
 def find_folder_id(

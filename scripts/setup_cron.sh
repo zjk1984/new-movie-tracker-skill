@@ -11,7 +11,11 @@ REBOOT_SCRIPT="$ROOT/scripts/cron_reboot_reload.sh"
 ENSURE_SCRIPT="$ROOT/scripts/ensure_cron_running.sh"
 MARK="# new-movie-tracker-daily"
 CNBETA_MARK="# new-movie-tracker-cnbeta"
+PIKPAK_DEDUPE_WRAPPER="$ROOT/scripts/pikpak_downloads_dedupe.sh"
+PIKPAK_DEDUPE_MARK="# new-movie-tracker-pikpak-dedupe"
 CNBETA_RSS_CRON="${CNBETA_RSS_CRON:-0}"
+PIKPAK_DEDUPE_CRON="${PIKPAK_DEDUPE_CRON:-0}"
+PIKPAK_DEDUPE_TIME="${PIKPAK_DEDUPE_TIME:-06:45}"
 REBOOT_MARK="# new-movie-tracker-daily-reboot"
 REBOOT_CRON_D="/etc/cron.d/new-movie-tracker-reboot"
 HEALTH_CRON_D="/etc/cron.d/new-movie-tracker-health"
@@ -45,6 +49,7 @@ Install cron job(s) for scripts/daily_run.sh (and optionally scripts/cnbeta_rss.
 
 Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
 CNBeta RSS cron is off by default; set CNBETA_RSS_CRON=1 to install news aggregation slots.
+Optional PikPak downloads dedupe: set PIKPAK_DEDUPE_CRON=1 (default 06:45 Asia/Shanghai; dry-run unless PIKPAK_DEDUPE_APPLY=1).
 CNBeta RSS loads Feishu credentials from .env.local (see docs/feishu-setup.md).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).
@@ -65,6 +70,9 @@ Environment overrides:
   DAILY_RUN_TZ=Asia/Shanghai
   DAILY_RUN_TIMES=07:00,13:00,20:00
   CNBETA_RSS_CRON=1          install CNBeta RSS cron lines (default: off)
+  PIKPAK_DEDUPE_CRON=1       install PikPak downloads dedupe (default: off)
+  PIKPAK_DEDUPE_TIME=06:45   dedupe schedule when PIKPAK_DEDUPE_CRON=1
+  PIKPAK_DEDUPE_APPLY=1      pass --apply to dedupe script on cron (default: dry-run)
 
 Container / Cloud Agent VMs (PID 1 is tini, cron may start late or die):
   Cron is best-effort. Run the external supervisor in tmux (recommended):
@@ -161,10 +169,22 @@ cnbeta_cron_enabled() {
   esac
 }
 
+pikpak_dedupe_cron_enabled() {
+  case "${PIKPAK_DEDUPE_CRON,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+cron_line_for_pikpak_dedupe() {
+  cron_line_for_job "$PIKPAK_DEDUPE_TIME" "$PIKPAK_DEDUPE_WRAPPER" "$PIKPAK_DEDUPE_MARK"
+}
+
 is_tracker_cron_line() {
   local line="$1"
   [[ "$line" == *"$WRAPPER"* ]] || [[ "$line" == *"$MARK"* ]] \
-    || [[ "$line" == *"$CNBETA_WRAPPER"* ]] || [[ "$line" == *"$CNBETA_MARK"* ]] \
+    ||   [[ "$line" == *"$CNBETA_WRAPPER"* ]] || [[ "$line" == *"$CNBETA_MARK"* ]] \
+    || [[ "$line" == *"$PIKPAK_DEDUPE_WRAPPER"* ]] || [[ "$line" == *"$PIKPAK_DEDUPE_MARK"* ]] \
     || [[ "$line" == *"$REBOOT_MARK"* ]] || [[ "$line" == *"@reboot"* && "$line" == *"new-movie-tracker"* ]]
 }
 
@@ -421,9 +441,15 @@ chmod +x "$WRAPPER"
 if cnbeta_cron_enabled; then
   chmod +x "$CNBETA_WRAPPER"
 fi
+if pikpak_dedupe_cron_enabled; then
+  chmod +x "$PIKPAK_DEDUPE_WRAPPER"
+fi
 mkdir -p "$ROOT/data"
 
 lines=()
+if pikpak_dedupe_cron_enabled; then
+  lines+=("$(cron_line_for_pikpak_dedupe)")
+fi
 for time in "${TIMES[@]}"; do
   lines+=("$(cron_line_for_time "$time")")
   if cnbeta_cron_enabled; then
@@ -457,6 +483,9 @@ if [[ "${DRY_RUN:-0}" == 1 ]]; then
   if cnbeta_cron_enabled; then
     echo "  log: $ROOT/data/cnbeta_rss.log"
   fi
+  if pikpak_dedupe_cron_enabled; then
+    echo "  log: $ROOT/data/pikpak_dedupe.log"
+  fi
   install_reboot_cron_d
   install_health_cron_d
   ensure_cron_boot_enabled || true
@@ -477,10 +506,11 @@ echo "     timezone: $TZ_NAME (system TZ should match for correct schedule)"
 echo "     log: $ROOT/data/daily_run.log"
 if cnbeta_cron_enabled; then
   echo "     log: $ROOT/data/cnbeta_rss.log"
-  crontab -l | grep -E 'new-movie-tracker-(daily|cnbeta)' || true
-else
-  crontab -l | grep -E 'new-movie-tracker-daily' || true
 fi
+if pikpak_dedupe_cron_enabled; then
+  echo "     log: $ROOT/data/pikpak_dedupe.log"
+fi
+crontab -l | grep -E 'new-movie-tracker-(daily|cnbeta|pikpak-dedupe)' || true
 
 install_reboot_cron_d || true
 install_health_cron_d || true
