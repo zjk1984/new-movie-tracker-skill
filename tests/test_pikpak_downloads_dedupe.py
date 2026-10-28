@@ -11,14 +11,19 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from pikpak_downloads_dedupe_lib import (  # noqa: E402
     av_number_for_jav_dedupe,
     classify_filename_variant,
+    cross_folder_dup_groups,
     dedupe_sort_key,
     domestic_dedupe_sort_key,
     domestic_group_key,
     group_files_by_av_number,
     group_files_domestic,
+    group_tagged_files_by_av_number,
     normalize_domestic_filename,
+    parse_folder_list,
+    pick_cross_folder_keeper_and_trash,
     pick_keeper_and_trash,
     pick_keeper_and_trash_domestic,
+    tag_row_folder,
 )
 from javdb_client import extract_av_number  # noqa: E402
 
@@ -199,6 +204,56 @@ class PseudoJavRoutingTests(unittest.TestCase):
         name = "MDSY-999 标题.mp4"
         self.assertIsNone(av_number_for_jav_dedupe(name, pseudo_as_jav=False))
         self.assertEqual(av_number_for_jav_dedupe(name, pseudo_as_jav=True), "MDSY-999")
+
+
+class CrossFolderDedupeTests(unittest.TestCase):
+    def test_parse_folder_list(self):
+        self.assertEqual(parse_folder_list(" downloads , JAV "), ["downloads", "JAV"])
+
+    def test_cross_folder_dup_groups_requires_downloads(self):
+        rows = [
+            tag_row_folder(_file("MIDV-671-C.mp4", 100, "jav1"), "JAV"),
+            tag_row_folder(_file("MIDV-671.mp4", 200, "jav2"), "JAV"),
+        ]
+        groups, _ = group_tagged_files_by_av_number(rows, pseudo_as_jav=False)
+        self.assertEqual(cross_folder_dup_groups(groups), {})
+
+    def test_cross_folder_trash_jav_keep_downloads(self):
+        rows = [
+            tag_row_folder(_file("ADN-549-C.mp4", 9_000_000_000, "jav"), "JAV"),
+            tag_row_folder(_file("adn-549.mp4", 5_000_000_000, "dl"), "downloads"),
+        ]
+        groups, _ = group_tagged_files_by_av_number(rows, pseudo_as_jav=False)
+        cross = cross_folder_dup_groups(groups)
+        self.assertIn("ADN-549", cross)
+        keeper, trash = pick_cross_folder_keeper_and_trash(cross["ADN-549"])
+        self.assertEqual(keeper["id"], "dl")
+        self.assertEqual(len(trash), 1)
+        self.assertEqual(trash[0]["id"], "jav")
+
+    def test_cross_folder_uc_in_downloads_over_jav_c(self):
+        rows = [
+            tag_row_folder(_file("MIDV-671-C.mp4", 9_000_000_000, "jav"), "JAV"),
+            tag_row_folder(_file("MIDV-671-UC.mp4", 100, "dl"), "downloads"),
+        ]
+        groups, _ = group_tagged_files_by_av_number(rows, pseudo_as_jav=False)
+        cross = cross_folder_dup_groups(groups)
+        keeper, trash = pick_cross_folder_keeper_and_trash(cross["MIDV-671"])
+        self.assertEqual(keeper["id"], "dl")
+        self.assertEqual(trash[0]["id"], "jav")
+
+    def test_cross_folder_extra_downloads_trashed(self):
+        rows = [
+            tag_row_folder(_file("ABC-123-C.mp4", 500, "jav"), "JAV"),
+            tag_row_folder(_file("ABC-123.mp4", 100, "dl-plain"), "downloads"),
+            tag_row_folder(_file("ABC-123-UC.mp4", 200, "dl-uc"), "downloads"),
+        ]
+        groups, _ = group_tagged_files_by_av_number(rows, pseudo_as_jav=False)
+        cross = cross_folder_dup_groups(groups)
+        keeper, trash = pick_cross_folder_keeper_and_trash(cross["ABC-123"])
+        self.assertEqual(keeper["id"], "dl-uc")
+        trash_ids = {r["id"] for r in trash}
+        self.assertEqual(trash_ids, {"jav", "dl-plain"})
 
 
 class DomesticSortKeyTests(unittest.TestCase):
