@@ -49,7 +49,7 @@ Install cron job(s) for scripts/daily_run.sh (and optionally scripts/cnbeta_rss.
 
 Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
 CNBeta RSS cron is off by default; set CNBETA_RSS_CRON=1 to install news aggregation slots.
-Optional PikPak dedupe (downloads+JAV cross-folder + My Pack 国产过小): set PIKPAK_DEDUPE_CRON=1 (default 06:45 Asia/Shanghai; dry-run unless PIKPAK_DEDUPE_APPLY=1). Wrapper sets PIKPAK_DEDUPE_FOLDERS=downloads,JAV and PIKPAK_DEDUPE_DOMESTIC_FOLDERS=My Pack (same python run).
+Optional PikPak dedupe (downloads+JAV cross-folder): set PIKPAK_DEDUPE_CRON=1 (default 06:45 Asia/Shanghai; dry-run unless PIKPAK_DEDUPE_APPLY=1). Cron sets PIKPAK_DEDUPE_DOMESTIC_SMALL=0 (My Pack purge off); wrapper default PIKPAK_DEDUPE_FOLDERS=downloads,JAV.
 CNBeta RSS loads Feishu credentials from .env.local (see docs/feishu-setup.md).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).
@@ -178,7 +178,19 @@ pikpak_dedupe_cron_enabled() {
 }
 
 cron_line_for_pikpak_dedupe() {
-  cron_line_for_job "$PIKPAK_DEDUPE_TIME" "$PIKPAK_DEDUPE_WRAPPER" "$PIKPAK_DEDUPE_MARK"
+  local time="$PIKPAK_DEDUPE_TIME"
+  if ! [[ "$time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+    echo "[err] invalid PIKPAK_DEDUPE_TIME '$time' (expected HH:MM, 24h)" >&2
+    return 1
+  fi
+  local hour="${time%%:*}"
+  local minute="${time#*:}"
+  hour="${hour#0}"
+  hour="${hour:-0}"
+  minute="${minute#0}"
+  minute="${minute:-0}"
+  # Scheduled run: downloads+JAV only; no My Pack domestic_small / recursive cleanup.
+  echo "$minute $hour * * * TZ=$TZ_NAME PIKPAK_DEDUPE_DOMESTIC_SMALL=0 PIKPAK_DEDUPE_DOMESTIC_FOLDERS= $PIKPAK_DEDUPE_WRAPPER $PIKPAK_DEDUPE_MARK"
 }
 
 is_tracker_cron_line() {
