@@ -12,7 +12,8 @@ mkdir -p data
 export TZ="${TZ:-Asia/Shanghai}"
 
 export PIKPAK_DEDUPE_FOLDERS="${PIKPAK_DEDUPE_FOLDERS:-downloads,JAV}"
-export PIKPAK_DEDUPE_DOMESTIC_FOLDERS="${PIKPAK_DEDUPE_DOMESTIC_FOLDERS:-My Pack}"
+# Default My Pack only when unset; empty env (cron disable) must stay empty — use '-' not ':-'.
+export PIKPAK_DEDUPE_DOMESTIC_FOLDERS="${PIKPAK_DEDUPE_DOMESTIC_FOLDERS-My Pack}"
 
 ARGS=(--folders "$PIKPAK_DEDUPE_FOLDERS")
 if [[ -n "${PIKPAK_DEDUPE_PARENT:-}" ]]; then
