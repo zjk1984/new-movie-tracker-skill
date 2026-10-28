@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Daily scheduled scan + incremental PikPak download (new magnets since last run)."""
+"""Daily scheduled scan + incremental PikPak download (new magnets since last run).
+
+Japanese JAV (有码/无码) go to PikPak folder ``JAV`` (``PIKPAK_FOLDER_JAV``); domestic
+国产/流出 use ``downloads`` (``PIKPAK_FOLDER_DOMESTIC``). ``--pikpak-folder`` / ``PIKPAK_FOLDER``
+apply only when an item has no region tag (fallback).
+"""
 from __future__ import annotations
 
 import argparse
@@ -260,7 +265,10 @@ def main() -> int:
     parser.add_argument(
         "--pikpak-folder",
         default=None,
-        help="PikPak target folder (default: saved or My Pack)",
+        help=(
+            "PikPak fallback folder when item has no region "
+            "(JAV→PIKPAK_FOLDER_JAV, domestic→PIKPAK_FOLDER_DOMESTIC; default: saved or My Pack)"
+        ),
     )
     parser.add_argument(
         "--download-provider",

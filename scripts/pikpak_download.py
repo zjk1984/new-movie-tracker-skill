@@ -527,6 +527,11 @@ def load_downloads_from_result(
                 "av_number": download.get("av_number") or probe.get("av_number", ""),
                 "uri": download.get("uri") or download.get("url") or "",
             }
+            region = probe.get("content_region") or probe.get("region")
+            if region:
+                entry["region"] = region
+            if probe.get("domestic_subtype"):
+                entry["domestic_subtype"] = probe["domestic_subtype"]
             if download["type"] == "sha":
                 entry.update({
                     "size": download["size"],
@@ -631,6 +636,7 @@ def submit_downloads(
 ) -> tuple[int, int, list[dict], list[dict], list[dict], str]:
     from pikpak_auth import (
         classify_submit_error,
+        folder_for_download_item,
         format_submit_skip_reason,
         inspect_jwt_token,
         resolve_folder,
@@ -643,7 +649,7 @@ def submit_downloads(
             "no PikPak token: run `python scripts/pikpak_login.py login` "
             "or set PIKPAK_TOKEN"
         )
-    folder = resolve_folder(folder, DEFAULT_FOLDER)
+    fallback_folder = resolve_folder(folder, DEFAULT_FOLDER)
 
     jwt_info = inspect_jwt_token(token)
     if not jwt_info.get("valid_jwt"):
@@ -657,24 +663,30 @@ def submit_downloads(
     user_id = payload.get("sub", "")
     device_id = hashlib.md5(user_id.encode()).hexdigest()
     session = requests.Session()
-    try:
-        parent_id = find_folder_id(session, token, device_id, user_id, folder)
-    except Exception as exc:
-        err = str(exc)
-        if classify_submit_error(err) == "auth":
-            pending = [dict(item) for item in items]
-            print(f"[err] pikpak auth failed before submit: {err}", file=sys.stderr)
-            print(
-                "[hint] HTTP 401: Token 凭证失效（与网盘容量配额无关）。"
-                "请运行 `python scripts/pikpak_login.py login` 重新输入有效 Token。",
-                file=sys.stderr,
-            )
-            return 0, len(items), [], [], pending, format_submit_skip_reason("auth", "invalid")
-        raise
-    if parent_id:
-        print(f"[info] download folder: {folder} ({parent_id})")
-    else:
-        print(f"[warn] folder '{folder}' not found, using folder_type=DOWNLOAD fallback")
+    folder_parent_ids: dict[str, str | None] = {}
+    logged_folders: set[str] = set()
+
+    def parent_id_for_folder(folder_name: str) -> str | None:
+        if folder_name in folder_parent_ids:
+            return folder_parent_ids[folder_name]
+        try:
+            parent_id = find_folder_id(session, token, device_id, user_id, folder_name)
+        except Exception as exc:
+            err = str(exc)
+            if classify_submit_error(err) == "auth":
+                raise
+            raise
+        folder_parent_ids[folder_name] = parent_id
+        if folder_name not in logged_folders:
+            logged_folders.add(folder_name)
+            if parent_id:
+                print(f"[info] download folder: {folder_name} ({parent_id})")
+            else:
+                print(
+                    f"[warn] folder '{folder_name}' not found, "
+                    "using folder_type=DOWNLOAD fallback",
+                )
+        return parent_id
 
     ok = 0
     succeeded: list[dict] = []
@@ -683,6 +695,28 @@ def submit_downloads(
     submit_skip_reason = ""
     for index, item in enumerate(items):
         kind = "sha" if item.get("type") == "sha" else "url"
+        item_folder = folder_for_download_item(item, fallback=fallback_folder)
+        try:
+            parent_id = parent_id_for_folder(item_folder)
+        except Exception as exc:
+            err = str(exc)
+            if classify_submit_error(err) == "auth":
+                pending = [dict(row) for row in items[index:]]
+                print(f"[err] pikpak auth failed before submit: {err}", file=sys.stderr)
+                print(
+                    "[hint] HTTP 401: Token 凭证失效（与网盘容量配额无关）。"
+                    "请运行 `python scripts/pikpak_login.py login` 重新输入有效 Token。",
+                    file=sys.stderr,
+                )
+                return (
+                    ok,
+                    len(items),
+                    succeeded,
+                    failed,
+                    pending,
+                    format_submit_skip_reason("auth", "invalid"),
+                )
+            raise
         try:
             result = submit_one_download(
                 session, token, device_id, user_id, item, parent_id=parent_id,

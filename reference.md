@@ -288,6 +288,8 @@ python scripts/pikpak_login.py status --check
 
 Stored in `pikpak_auth.json` (gitignored, mode 600). Priority: `PIKPAK_TOKEN` env → saved file.
 
+Region-based PikPak folders: `PIKPAK_FOLDER_JAV` (default `JAV`), `PIKPAK_FOLDER_DOMESTIC` (default `downloads`); legacy `PIKPAK_FOLDER` / `--pikpak-folder` is fallback when an item has no region.
+
 2. First Cloudflare pass (headed browser):
 
 ```bash
@@ -310,7 +312,7 @@ python scripts/pikpak_download.py --new-only --all
 | `--days` | `2` | Recent days to scan (dedup handles overlap) |
 | `--scan-only` | off | Scan without PikPak |
 | `--download-only` | off | PikPak new-only from last scan |
-| `--pikpak-folder` | `My Pack` | Target folder |
+| `--pikpak-folder` | `My Pack` | Fallback folder (JAV/domestic use env above) |
 
 Incremental logic (`download_state.json`):
 - Skip if **btih** hash already submitted
