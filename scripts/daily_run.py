@@ -2,7 +2,7 @@
 """Daily scheduled scan + incremental PikPak download (new magnets since last run).
 
 Japanese JAV (有码/无码) go to PikPak folder ``JAV`` (``PIKPAK_FOLDER_JAV``); domestic
-国产/流出 use ``downloads`` (``PIKPAK_FOLDER_DOMESTIC``). ``--pikpak-folder`` / ``PIKPAK_FOLDER``
+国产/流出 use ``My Pack`` (``PIKPAK_FOLDER_DOMESTIC``). ``--pikpak-folder`` / ``PIKPAK_FOLDER``
 apply only when an item has no region tag (fallback).
 """
 from __future__ import annotations

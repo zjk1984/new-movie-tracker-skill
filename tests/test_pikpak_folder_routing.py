@@ -26,7 +26,7 @@ class FolderResolverTests(unittest.TestCase):
             os.environ.pop("PIKPAK_FOLDER_JAV", None)
             os.environ.pop("PIKPAK_FOLDER_DOMESTIC", None)
             self.assertEqual(resolve_jav_folder(), "JAV")
-            self.assertEqual(resolve_domestic_folder(), "downloads")
+            self.assertEqual(resolve_domestic_folder(), "My Pack")
 
     def test_env_overrides(self):
         with patch.dict(
@@ -48,7 +48,7 @@ class FolderResolverTests(unittest.TestCase):
         )
         self.assertEqual(
             folder_for_download_item({"region": "domestic_leak"}, fallback="My Pack"),
-            "downloads",
+            "My Pack",
         )
         self.assertEqual(
             folder_for_download_item({"content_region": "jav_censored"}, fallback="Legacy"),
@@ -86,7 +86,7 @@ class SubmitDownloadsFolderRoutingTests(unittest.TestCase):
             json.dumps({"sub": "user1", "exp": future_exp}).encode()
         ).decode().rstrip("=")
         token = f"{header}.{payload_b64}.sig"
-        folder_ids = {"JAV": "pid-jav", "downloads": "pid-cn"}
+        folder_ids = {"JAV": "pid-jav", "My Pack": "pid-cn"}
 
         def fake_find_folder(session, access_token, device_id, user_id, folder_name):
             return folder_ids.get(folder_name)

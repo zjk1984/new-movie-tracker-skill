@@ -94,8 +94,10 @@ def resolve_jav_folder() -> str:
 
 
 def resolve_domestic_folder() -> str:
+    from pikpak_download import DEFAULT_FOLDER
+
     env = (os.environ.get("PIKPAK_FOLDER_DOMESTIC") or "").strip()
-    return env or "downloads"
+    return env or DEFAULT_FOLDER
 
 
 _JAV_PIKPAK_REGIONS = frozenset({"jav_censored", "uncensored"})
