@@ -62,6 +62,43 @@ class BuildBodyTests(unittest.TestCase):
         self.assertIn("上一份报告", body)
         self.assertIn("将删除（预览）", body)
 
+    def test_domestic_section_in_body(self):
+        body = build_pikpak_dedupe_report_body(
+            generated_at="2026-10-28 14:00:00",
+            folder="downloads",
+            parent_id=None,
+            apply=False,
+            stats={
+                "total_files": 5,
+                "av_groups": 1,
+                "duplicate_groups": 0,
+                "skipped_no_av": 4,
+                "trash_candidates": 0,
+                "domestic_candidates": 4,
+                "domestic_duplicate_groups": 1,
+                "domestic_trash_candidates": 1,
+                "trashed_ok": 0,
+            },
+            groups=[],
+            domestic_groups=[
+                {
+                    "group_key": "title:秘密花园.mp4",
+                    "keeper": {"name": "hhd800.com@秘密花园 720p.mp4", "size": 500},
+                    "trash": [
+                        {
+                            "name": "489155.com@秘密花园 1080p.mp4",
+                            "size": 100,
+                            "id": "dom-1",
+                        },
+                    ],
+                },
+            ],
+        )
+        self.assertIn("无番号 / 国产去重", body)
+        self.assertIn("国产重复组", body)
+        self.assertIn("秘密花园", body)
+        self.assertIn("489155.com@秘密花园 1080p.mp4", body)
+
     def test_apply_body_shows_trash_status(self):
         body = build_pikpak_dedupe_report_body(
             generated_at="2026-10-28 14:00:00",
@@ -115,6 +152,9 @@ class WritePikpakDedupeReportTests(unittest.TestCase):
                     "duplicate_groups": 0,
                     "skipped_no_av": 0,
                     "trash_candidates": 0,
+                    "domestic_candidates": 0,
+                    "domestic_duplicate_groups": 0,
+                    "domestic_trash_candidates": 0,
                     "trashed_ok": 0,
                 },
                 groups=[],

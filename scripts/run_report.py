@@ -1643,6 +1643,7 @@ def write_pikpak_dedupe_report(
     apply: bool,
     stats: dict[str, Any],
     groups: list[dict[str, Any]],
+    domestic_groups: list[dict[str, Any]] | None = None,
     reports_dir: Path | None = None,
 ) -> RunReportResult:
     """Write PikPak downloads dedupe report under reports/pikpak_dedupe_*.md."""
@@ -1662,6 +1663,7 @@ def write_pikpak_dedupe_report(
         apply=apply,
         stats=stats,
         groups=groups,
+        domestic_groups=domestic_groups,
         previous_line=previous_line,
     )
     path.write_text(body, encoding="utf-8")
