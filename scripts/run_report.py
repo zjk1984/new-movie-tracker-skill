@@ -21,7 +21,7 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 REPORTS_DIR = SKILL_DIR / "reports"
 REPORTS_BACKUP_DIR = REPORTS_DIR / "backup"
 REPORT_NAME_RE = re.compile(
-    r"^(?:run|scan|daily|custom)_(\d{4}-\d{2}-\d{2}_\d{6})\.md$",
+    r"^(?:run|scan|daily|custom|pikpak_dedupe)_(\d{4}-\d{2}-\d{2}_\d{6})\.md$",
     re.IGNORECASE,
 )
 
@@ -1632,6 +1632,38 @@ def write_run_report(
 
 {domestic_section}
 """
+    path.write_text(body, encoding="utf-8")
+    return RunReportResult(path=path, archived_paths=archived_paths, previous_report=previous_report)
+
+
+def write_pikpak_dedupe_report(
+    *,
+    folder: str,
+    parent_id: str | None,
+    apply: bool,
+    stats: dict[str, Any],
+    groups: list[dict[str, Any]],
+    reports_dir: Path | None = None,
+) -> RunReportResult:
+    """Write PikPak downloads dedupe report under reports/pikpak_dedupe_*.md."""
+    from pikpak_dedupe_report import build_pikpak_dedupe_report_body
+
+    run_label = "pikpak_dedupe"
+    out_dir = reports_dir or REPORTS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    previous_report, archived_paths = archive_reports_to_backup(out_dir, run_label)
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    path = out_dir / f"{run_label}_{ts}.md"
+    previous_line = _previous_report_line(previous_report, reports_dir=out_dir)
+    body = build_pikpak_dedupe_report_body(
+        generated_at=format_beijing_time(beijing_now()),
+        folder=folder,
+        parent_id=parent_id,
+        apply=apply,
+        stats=stats,
+        groups=groups,
+        previous_line=previous_line,
+    )
     path.write_text(body, encoding="utf-8")
     return RunReportResult(path=path, archived_paths=archived_paths, previous_report=previous_report)
 
