@@ -83,6 +83,36 @@ def resolve_folder(explicit: str | None = None, default: str = "My Pack") -> str
     return saved or default
 
 
+def resolve_default_folder(explicit: str | None = None, default: str = "My Pack") -> str:
+    """Legacy single-folder resolution (explicit → PIKPAK_FOLDER → saved auth file)."""
+    return resolve_folder(explicit, default)
+
+
+def resolve_jav_folder() -> str:
+    env = (os.environ.get("PIKPAK_FOLDER_JAV") or "").strip()
+    return env or "JAV"
+
+
+def resolve_domestic_folder() -> str:
+    env = (os.environ.get("PIKPAK_FOLDER_DOMESTIC") or "").strip()
+    return env or "downloads"
+
+
+_JAV_PIKPAK_REGIONS = frozenset({"jav_censored", "uncensored"})
+
+
+def folder_for_download_item(item: dict, *, fallback: str | None = None) -> str:
+    """Pick PikPak folder from item region; unknown regions use ``fallback`` or default folder."""
+    region = (item.get("region") or item.get("content_region") or "").strip()
+    if region in _JAV_PIKPAK_REGIONS:
+        return resolve_jav_folder()
+    if region == "domestic_leak":
+        return resolve_domestic_folder()
+    if fallback and fallback.strip():
+        return fallback.strip()
+    return resolve_default_folder()
+
+
 _AUTH_ERROR_MARKERS = (
     "no pikpak token",
     "invalid token",
