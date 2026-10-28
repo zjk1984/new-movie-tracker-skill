@@ -22,6 +22,8 @@ DEFAULT_DOMESTIC_SMALL_FOLDERS = "My Pack"
 DOMESTIC_SMALL_MIN_BYTES_DEFAULT = 30 * 1024 * 1024
 DOWNLOADS_KEEPER_FOLDER = "downloads"
 DEDUPE_FOLDER_TAG = "_dedupe_folder"
+RECURSIVE_LISTING_FOLDER_DEFAULTS = frozenset({"My Pack"})
+REL_PATH_TAG = "_dedupe_rel_path"
 
 
 def parse_folder_list(raw: str) -> list[str]:
@@ -340,6 +342,46 @@ def domestic_small_enabled_from_env() -> bool:
         "no",
         "off",
     }
+
+
+def recursive_folders_from_env() -> frozenset[str]:
+    raw = os.environ.get("PIKPAK_DEDUPE_RECURSIVE_FOLDERS", "").strip()
+    if raw:
+        return frozenset(parse_folder_list(raw))
+    return RECURSIVE_LISTING_FOLDER_DEFAULTS
+
+
+def folder_uses_recursive_listing(folder_name: str) -> bool:
+    return (folder_name or "").strip() in recursive_folders_from_env()
+
+
+def small_all_types_from_env() -> bool:
+    """When true, phase-3 trashes any completed file under min size (not domestic-only)."""
+    return os.environ.get("PIKPAK_DEDUPE_SMALL_ALL_TYPES", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def collect_any_small_trash_candidates(
+    files: list[dict[str, Any]],
+    *,
+    min_bytes: int | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (candidates, size_missing_rows) for any file under ``min_bytes``."""
+    threshold = min_bytes if min_bytes is not None else domestic_small_min_bytes_from_env()
+    candidates: list[dict[str, Any]] = []
+    size_missing: list[dict[str, Any]] = []
+    for row in _complete_file_rows(files):
+        size = file_row_size_bytes(row)
+        if size is None:
+            size_missing.append(row)
+            continue
+        if size < threshold:
+            candidates.append(row)
+    return candidates, size_missing
 
 
 def file_row_size_bytes(row: dict[str, Any]) -> int | None:

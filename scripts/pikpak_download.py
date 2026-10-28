@@ -183,6 +183,56 @@ def list_all_files(
     return out
 
 
+def list_all_files_recursive(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    parent_id: str,
+    *,
+    limit: int = 200,
+    workers: int = 10,
+) -> list[dict]:
+    """BFS all completed files under ``parent_id``; traverse ``drive#folder`` nodes only."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    completed_files: list[dict] = []
+    queue: list[str] = [parent_id]
+    seen: set[str] = set()
+
+    def list_children(folder_id: str) -> list[dict]:
+        return list_all_files(
+            session,
+            access_token,
+            device_id,
+            user_id,
+            parent_id=folder_id,
+            limit=limit,
+        )
+
+    while queue:
+        batch_ids: list[str] = []
+        while queue and len(batch_ids) < 50:
+            fid = queue.pop(0)
+            if not fid or fid in seen:
+                continue
+            seen.add(fid)
+            batch_ids.append(fid)
+        if not batch_ids:
+            break
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for children in pool.map(list_children, batch_ids):
+                for row in children:
+                    kind = row.get("kind")
+                    if kind == "drive#file" and row.get("phase") == "PHASE_TYPE_COMPLETE":
+                        completed_files.append(row)
+                    elif kind == "drive#folder":
+                        sub_id = str(row.get("id") or "")
+                        if sub_id and sub_id not in seen:
+                            queue.append(sub_id)
+    return completed_files
+
+
 def trash_file(
     session: requests.Session,
     access_token: str,

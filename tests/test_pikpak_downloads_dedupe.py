@@ -11,7 +11,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from pikpak_downloads_dedupe_lib import (  # noqa: E402
     av_number_for_jav_dedupe,
     classify_filename_variant,
+    collect_any_small_trash_candidates,
     collect_domestic_small_trash_candidates,
+    folder_uses_recursive_listing,
+    small_all_types_from_env,
     cross_folder_dup_groups,
     dedupe_sort_key,
     domestic_dedupe_sort_key,
@@ -305,6 +308,21 @@ class DomesticSmallPurgeTests(unittest.TestCase):
 
     def test_default_min_30_mib(self):
         self.assertEqual(domestic_small_min_bytes_from_env(), 30 * 1024 * 1024)
+
+    def test_any_small_includes_jav(self):
+        row = _file("ABC-123.mp4", self.small, "jav-small")
+        cands, missing = collect_any_small_trash_candidates(
+            [row], min_bytes=self.min_bytes,
+        )
+        self.assertEqual(missing, [])
+        self.assertEqual(len(cands), 1)
+
+    def test_my_pack_uses_recursive_listing(self):
+        self.assertTrue(folder_uses_recursive_listing("My Pack"))
+        self.assertFalse(folder_uses_recursive_listing("downloads"))
+
+    def test_small_all_types_default_on(self):
+        self.assertTrue(small_all_types_from_env())
 
 
 class DomesticSortKeyTests(unittest.TestCase):
