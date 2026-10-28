@@ -177,6 +177,36 @@ def _format_domestic_groups(apply: bool, groups: list[dict[str, Any]]) -> str:
     return "".join(group_sections)
 
 
+def _format_domestic_small_trash(apply: bool, rows: list[dict[str, Any]], min_bytes: int) -> str:
+    min_mib = min_bytes / (1024 * 1024) if min_bytes else 30
+    title = f"## 国产过小文件 (<{min_mib:.0f}MB)\n"
+    if not rows:
+        return f"{title}\n_（无过小国产文件待删）_\n"
+    trash_label = "已移入回收站" if apply else "将删除（预览）"
+    table_rows: list[list[str]] = []
+    for row in rows:
+        status = ""
+        if apply:
+            ok = row.get("trashed_ok")
+            status = "成功" if ok else "失败"
+        table_rows.append([
+            row.get("folder") or "—",
+            format_file_size(int(row.get("size") or 0)),
+            row.get("name") or "",
+            row.get("id") or "",
+            status,
+        ])
+    headers = ["目录", "大小", "文件名", "file id", "删除"]
+    if not apply:
+        headers = headers[:-1]
+        table_rows = [r[:-1] for r in table_rows]
+    return (
+        f"{title}\n"
+        f"**{trash_label}**（{len(rows)} 个，阈值 {format_file_size(min_bytes)}）\n\n"
+        f"{_md_table(headers, table_rows)}"
+    )
+
+
 def build_pikpak_dedupe_report_body(
     *,
     generated_at: str,
@@ -187,6 +217,7 @@ def build_pikpak_dedupe_report_body(
     groups: list[dict[str, Any]],
     cross_folder_groups: list[dict[str, Any]] | None = None,
     domestic_groups: list[dict[str, Any]] | None = None,
+    domestic_small_trash: list[dict[str, Any]] | None = None,
     previous_line: str = "",
 ) -> str:
     mode = "执行（已移入回收站）" if apply else "预览（dry-run，未删除）"
@@ -202,6 +233,8 @@ def build_pikpak_dedupe_report_body(
     domestic_duplicate_groups = int(stats.get("domestic_duplicate_groups") or 0)
     domestic_trash_candidates = int(stats.get("domestic_trash_candidates") or 0)
     domestic_candidates = int(stats.get("domestic_candidates") or 0)
+    domestic_small_trash_candidates = int(stats.get("domestic_small_trash_candidates") or 0)
+    domestic_small_min_bytes = int(stats.get("domestic_small_min_bytes") or 0)
     trashed_ok = int(stats.get("trashed_ok") or 0)
     cross_folder_duplicate_groups = int(stats.get("cross_folder_duplicate_groups") or 0)
     cross_folder_trash_candidates = int(stats.get("cross_folder_trash_candidates") or 0)
@@ -250,11 +283,23 @@ def build_pikpak_dedupe_report_body(
             str(domestic_trash_candidates),
             "保留体积最大，同名按文件名排序",
         ],
+        [
+            "国产过小待删",
+            str(domestic_small_trash_candidates),
+            f"My Pack 等目录内 <{domestic_small_min_bytes / (1024 * 1024):.0f} MiB 国产文件"
+            if domestic_small_min_bytes
+            else "国产过小文件（未运行或已跳过）",
+        ],
     ]
 
     jav_section = _format_jav_groups(apply, groups)
     cross_section = _format_cross_folder_groups(apply, cross_folder_groups or [])
     domestic_section = _format_domestic_groups(apply, domestic_groups or [])
+    domestic_small_section = _format_domestic_small_trash(
+        apply,
+        domestic_small_trash or [],
+        domestic_small_min_bytes or 30 * 1024 * 1024,
+    )
 
     return f"""# PikPak downloads 去重报告
 
@@ -269,4 +314,5 @@ def build_pikpak_dedupe_report_body(
 {jav_section}
 {cross_section}
 {domestic_section}
+{domestic_small_section}
 """

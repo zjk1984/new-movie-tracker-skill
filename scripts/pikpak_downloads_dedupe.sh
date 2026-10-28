@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# PikPak downloads/JAV dedupe (UC > C > size; cross-folder keeps downloads). Default: dry-run.
+# PikPak downloads/JAV dedupe (UC > C > size; cross-folder keeps downloads) plus
+# domestic small-file purge in My Pack (<30 MiB 国产). Default: dry-run.
 # Cron: PIKPAK_DEDUPE_CRON=1 ./scripts/setup_cron.sh
 # Apply on cron VM: PIKPAK_DEDUPE_APPLY=1 PIKPAK_DEDUPE_CRON=1 ./scripts/setup_cron.sh
 # Multi-folder (nightly default): PIKPAK_DEDUPE_FOLDERS=downloads,JAV
+# Domestic small purge folders: PIKPAK_DEDUPE_DOMESTIC_FOLDERS=My Pack (same python run)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -10,6 +12,7 @@ mkdir -p data
 export TZ="${TZ:-Asia/Shanghai}"
 
 export PIKPAK_DEDUPE_FOLDERS="${PIKPAK_DEDUPE_FOLDERS:-downloads,JAV}"
+export PIKPAK_DEDUPE_DOMESTIC_FOLDERS="${PIKPAK_DEDUPE_DOMESTIC_FOLDERS:-My Pack}"
 
 ARGS=(--folders "$PIKPAK_DEDUPE_FOLDERS")
 if [[ -n "${PIKPAK_DEDUPE_PARENT:-}" ]]; then

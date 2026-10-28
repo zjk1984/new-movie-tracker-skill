@@ -1645,6 +1645,7 @@ def write_pikpak_dedupe_report(
     groups: list[dict[str, Any]],
     cross_folder_groups: list[dict[str, Any]] | None = None,
     domestic_groups: list[dict[str, Any]] | None = None,
+    domestic_small_trash: list[dict[str, Any]] | None = None,
     reports_dir: Path | None = None,
 ) -> RunReportResult:
     """Write PikPak downloads dedupe report under reports/pikpak_dedupe_*.md."""
@@ -1666,6 +1667,7 @@ def write_pikpak_dedupe_report(
         groups=groups,
         cross_folder_groups=cross_folder_groups,
         domestic_groups=domestic_groups,
+        domestic_small_trash=domestic_small_trash,
         previous_line=previous_line,
     )
     path.write_text(body, encoding="utf-8")

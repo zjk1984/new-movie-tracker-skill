@@ -9,6 +9,8 @@ Phase 2 (domestic): completed files without a JAV 番号 (including pseudo-JAV c
 when ``PIKPAK_DEDUPE_PSEUDO_AS_JAV=0``) group by btih in filename, PikPak hash,
 or normalized title; keeper is largest size then lexicographic name.
 Use ``--skip-domestic`` or ``PIKPAK_DEDUPE_DOMESTIC=0`` to run phase 1 only.
+Phase 3 (domestic small): trash completed 国产 files under 30 MiB in
+``PIKPAK_DEDUPE_DOMESTIC_FOLDERS`` (default ``My Pack``); ``--skip-domestic-small`` to disable.
 
 Multi-folder: ``--folders downloads,JAV`` or env ``PIKPAK_DEDUPE_FOLDERS=downloads,JAV``.
 Cross-folder policy: same 番号 in downloads and JAV → keep best in downloads (UC > C > size).
@@ -33,8 +35,13 @@ from pikpak_downloads_dedupe_lib import (  # noqa: E402
     DEDUPE_FOLDER_TAG,
     DOWNLOADS_KEEPER_FOLDER,
     classify_filename_variant,
+    collect_domestic_small_trash_candidates,
     cross_folder_dup_groups,
     cross_folder_enabled_from_env,
+    domestic_small_enabled_from_env,
+    domestic_small_folders_from_env,
+    domestic_small_min_bytes_from_env,
+    file_row_size_bytes,
     folders_from_env,
     group_files_by_av_number,
     group_files_domestic,
@@ -289,6 +296,54 @@ def _process_domestic_group(
     }
 
 
+def _process_domestic_small_trash(
+    rows: list[dict[str, Any]],
+    *,
+    apply: bool,
+    session: Any,
+    token: str,
+    device_id: str,
+    user_id: str,
+    trashed_ok_counter: list[int],
+    trash_ids: set[str],
+    min_bytes: int,
+) -> list[dict[str, Any]]:
+    from pikpak_download import trash_file
+
+    report_rows: list[dict[str, Any]] = []
+    for row in rows:
+        t_name = row.get("name", "")
+        t_size = file_row_size_bytes(row) or 0
+        t_folder = str(row.get(DEDUPE_FOLDER_TAG) or "")
+        fid = row.get("id", "")
+        action = "trash" if apply else "would-trash"
+        folder_note = f" folder={t_folder!r}" if t_folder else ""
+        print(
+            f"  [domestic_small {action}] size={t_size} (<{min_bytes}) "
+            f"{t_name!r}{folder_note} id={fid}",
+        )
+        trashed = False
+        if apply and fid and fid not in trash_ids:
+            try:
+                trash_file(session, token, device_id, user_id, fid)
+                trashed_ok_counter[0] += 1
+                trash_ids.add(str(fid))
+                trashed = True
+            except Exception as exc:
+                print(f"  [err] trash failed {t_name!r}: {exc}", file=sys.stderr)
+        report_rows.append(
+            {
+                "name": t_name,
+                "size": t_size,
+                "folder": t_folder,
+                "id": fid,
+                "min_bytes": min_bytes,
+                "trashed_ok": trashed if apply else None,
+            },
+        )
+    return report_rows
+
+
 def run_dedupe(
     *,
     folder: str = DEFAULT_FOLDER,
@@ -298,6 +353,7 @@ def run_dedupe(
     access_token: str | None = None,
     push_report: bool = True,
     skip_domestic: bool = False,
+    skip_domestic_small: bool = False,
     skip_within_folder: bool = False,
     skip_cross_folder: bool = False,
 ) -> int:
@@ -333,7 +389,10 @@ def run_dedupe(
     run_within = not skip_within_folder and within_folder_enabled_from_env()
     run_cross = multi_folder and not skip_cross_folder and cross_folder_enabled_from_env()
     run_domestic = not skip_domestic and domestic_enabled_from_env()
+    run_domestic_small = not skip_domestic_small and domestic_small_enabled_from_env()
     pseudo_jav = pseudo_as_jav_from_env(None)
+    domestic_small_min_bytes = domestic_small_min_bytes_from_env()
+    domestic_small_folder_list = domestic_small_folders_from_env() if run_domestic_small else []
 
     folder_entries: dict[str, list[dict[str, Any]]] = {}
     folder_parent_ids: dict[str, str] = {}
@@ -356,6 +415,27 @@ def run_dedupe(
             session, token, device_id, user_id, parent_id=resolved_parent,
         )
 
+    if run_domestic_small:
+        for folder_name in domestic_small_folder_list:
+            if folder_name in folder_entries:
+                continue
+            try:
+                resolved_parent = resolve_parent_id(
+                    session,
+                    token,
+                    device_id,
+                    user_id,
+                    folder=folder_name,
+                    parent_override=None,
+                )
+            except RuntimeError as exc:
+                print(f"[err] domestic_small folder {exc}", file=sys.stderr)
+                return 1
+            folder_parent_ids[folder_name] = resolved_parent
+            folder_entries[folder_name] = list_all_files(
+                session, token, device_id, user_id, parent_id=resolved_parent,
+            )
+
     folder_desc = ",".join(folder_list)
     parent_desc = (
         folder_parent_ids.get(folder_list[0], "")
@@ -366,8 +446,15 @@ def run_dedupe(
     print(
         f"[info] folders={folder_desc!r} mode={'apply' if apply else 'dry-run'} "
         f"pseudo_as_jav={pseudo_jav} within_folder={'on' if run_within else 'off'} "
-        f"cross_folder={'on' if run_cross else 'off'} domestic={'on' if run_domestic else 'off'}",
+        f"cross_folder={'on' if run_cross else 'off'} domestic={'on' if run_domestic else 'off'} "
+        f"domestic_small={'on' if run_domestic_small else 'off'}",
     )
+    if run_domestic_small:
+        print(
+            f"[info] domestic_small folders={','.join(domestic_small_folder_list)!r} "
+            f"min_bytes={domestic_small_min_bytes} "
+            f"(~{domestic_small_min_bytes / (1024 * 1024):.0f} MiB)",
+        )
 
     all_tagged: list[dict[str, Any]] = []
     total_files = 0
@@ -390,6 +477,7 @@ def run_dedupe(
     report_groups: list[dict[str, Any]] = []
     cross_report_groups: list[dict[str, Any]] = []
     domestic_report_groups: list[dict[str, Any]] = []
+    domestic_small_report_rows: list[dict[str, Any]] = []
     trash_total = 0
     cross_trash_total = 0
     domestic_trash_total = 0
@@ -507,6 +595,43 @@ def run_dedupe(
     else:
         print("[info] domestic dedupe skipped")
 
+    domestic_small_trash_total = 0
+    if run_domestic_small:
+        all_small_candidates: list[dict[str, Any]] = []
+        for folder_name in domestic_small_folder_list:
+            entries = folder_entries.get(folder_name, [])
+            candidates, size_missing = collect_domestic_small_trash_candidates(
+                entries,
+                min_bytes=domestic_small_min_bytes,
+                pseudo_as_jav=pseudo_jav,
+            )
+            for row in size_missing:
+                name = str(row.get("name") or "")
+                print(
+                    f"[warn] domestic_small skip size missing/0: folder={folder_name!r} {name!r}",
+                    file=sys.stderr,
+                )
+            tagged = [tag_row_folder(r, folder_name) for r in candidates]
+            all_small_candidates.extend(tagged)
+        domestic_small_trash_total = len(all_small_candidates)
+        print(f"[info] domestic_small_trash_candidates={domestic_small_trash_total}")
+        if all_small_candidates:
+            domestic_small_report_rows = _process_domestic_small_trash(
+                all_small_candidates,
+                apply=apply,
+                session=session,
+                token=token,
+                device_id=device_id,
+                user_id=user_id,
+                trashed_ok_counter=trashed_ok_counter,
+                trash_ids=trash_ids,
+                min_bytes=domestic_small_min_bytes,
+            )
+        else:
+            print("[info] nothing to trash (domestic_small)")
+    else:
+        print("[info] domestic small-file purge skipped")
+
     trashed_ok = trashed_ok_counter[0]
     stats = {
         "total_files": total_files,
@@ -519,6 +644,9 @@ def run_dedupe(
         "domestic_candidates": domestic_candidates if run_domestic else 0,
         "domestic_duplicate_groups": len(domestic_report_groups),
         "domestic_trash_candidates": domestic_trash_total,
+        "domestic_small_trash_candidates": domestic_small_trash_total if run_domestic_small else 0,
+        "domestic_small_min_bytes": domestic_small_min_bytes if run_domestic_small else 0,
+        "domestic_small_folders": domestic_small_folder_list if run_domestic_small else [],
         "trashed_ok": trashed_ok if apply else 0,
         "folders": folder_list,
     }
@@ -529,6 +657,7 @@ def run_dedupe(
         f"cross_trash={cross_trash_total} "
         f"domestic_duplicate_groups={len(domestic_report_groups)} "
         f"domestic_trash={domestic_trash_total} "
+        f"domestic_small_trash={domestic_small_trash_total} "
         f"trashed={trashed_ok if apply else 0}",
     )
 
@@ -542,6 +671,7 @@ def run_dedupe(
         groups=report_groups,
         cross_folder_groups=cross_report_groups,
         domestic_groups=domestic_report_groups,
+        domestic_small_trash=domestic_small_report_rows,
     )
     _push_dedupe_report(
         report_result.path,
@@ -588,6 +718,11 @@ def main() -> int:
         help="Run JAV 番号 dedupe only (skip domestic/no-av phase)",
     )
     parser.add_argument(
+        "--skip-domestic-small",
+        action="store_true",
+        help="Skip trashing completed domestic files under min size in My Pack (etc.)",
+    )
+    parser.add_argument(
         "--skip-within-folder",
         action="store_true",
         help="Skip per-folder JAV dedupe (cross-folder only when --folders set)",
@@ -629,6 +764,7 @@ def main() -> int:
         apply=apply,
         push_report=push_report,
         skip_domestic=bool(args.skip_domestic),
+        skip_domestic_small=bool(args.skip_domestic_small),
         skip_within_folder=bool(args.skip_within_folder),
         skip_cross_folder=bool(args.skip_cross_folder),
     )
