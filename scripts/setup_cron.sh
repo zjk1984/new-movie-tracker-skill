@@ -49,7 +49,7 @@ Install cron job(s) for scripts/daily_run.sh (and optionally scripts/cnbeta_rss.
 
 Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
 CNBeta RSS cron is off by default; set CNBETA_RSS_CRON=1 to install news aggregation slots.
-Optional PikPak dedupe (downloads+JAV cross-folder): set PIKPAK_DEDUPE_CRON=1 (default 06:45 Asia/Shanghai; dry-run unless PIKPAK_DEDUPE_APPLY=1). Nightly wrapper sets PIKPAK_DEDUPE_FOLDERS=downloads,JAV (keep copy in downloads).
+Optional PikPak dedupe (downloads+JAV cross-folder + My Pack 国产过小): set PIKPAK_DEDUPE_CRON=1 (default 06:45 Asia/Shanghai; dry-run unless PIKPAK_DEDUPE_APPLY=1). Wrapper sets PIKPAK_DEDUPE_FOLDERS=downloads,JAV and PIKPAK_DEDUPE_DOMESTIC_FOLDERS=My Pack (same python run).
 CNBeta RSS loads Feishu credentials from .env.local (see docs/feishu-setup.md).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).

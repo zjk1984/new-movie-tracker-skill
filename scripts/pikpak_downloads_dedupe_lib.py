@@ -8,11 +8,18 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from content_filter import is_pseudo_jav
+from content_filter import (
+    STUDIO_NUM_RE,
+    domestic_keep_reason,
+    is_domestic_context,
+    is_pseudo_jav,
+)
 from download_state import extract_btih
 from javdb_client import extract_av_number
 
 DEFAULT_FOLDER = "downloads"
+DEFAULT_DOMESTIC_SMALL_FOLDERS = "My Pack"
+DOMESTIC_SMALL_MIN_BYTES_DEFAULT = 30 * 1024 * 1024
 DOWNLOADS_KEEPER_FOLDER = "downloads"
 DEDUPE_FOLDER_TAG = "_dedupe_folder"
 
@@ -299,3 +306,142 @@ def group_files_domestic(
         key = domestic_group_key(row, min_normalized_len=min_normalized_len)
         groups[key].append(row)
     return dict(groups), candidates
+
+
+def domestic_small_folders_from_env() -> list[str]:
+    raw = os.environ.get(
+        "PIKPAK_DEDUPE_DOMESTIC_FOLDERS",
+        DEFAULT_DOMESTIC_SMALL_FOLDERS,
+    ).strip()
+    parsed = parse_folder_list(raw)
+    return parsed or [DEFAULT_DOMESTIC_SMALL_FOLDERS]
+
+
+def domestic_small_min_bytes_from_env() -> int:
+    raw_bytes = os.environ.get("PIKPAK_DEDUPE_DOMESTIC_MIN_BYTES", "").strip()
+    if raw_bytes:
+        try:
+            return max(0, int(raw_bytes))
+        except ValueError:
+            pass
+    raw_mb = os.environ.get("PIKPAK_DEDUPE_DOMESTIC_MIN_MB", "").strip()
+    if raw_mb:
+        try:
+            return max(0, int(float(raw_mb) * 1024 * 1024))
+        except ValueError:
+            pass
+    return DOMESTIC_SMALL_MIN_BYTES_DEFAULT
+
+
+def domestic_small_enabled_from_env() -> bool:
+    return os.environ.get("PIKPAK_DEDUPE_DOMESTIC_SMALL", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def file_row_size_bytes(row: dict[str, Any]) -> int | None:
+    """Return size in bytes, or None when missing/invalid/zero (do not trash)."""
+    raw = row.get("size")
+    if raw is None or raw == "":
+        return None
+    try:
+        size = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if size <= 0:
+        return None
+    return size
+
+
+def is_pure_jav_studio_number_filename(name: str) -> bool:
+    """True when filename is essentially a Japanese studio 番号 with no domestic context."""
+    num = extract_av_number(name)
+    if not num:
+        return False
+    if domestic_keep_reason(name, num):
+        return False
+    if is_domestic_context(name):
+        return False
+    if not STUDIO_NUM_RE.match(num):
+        return False
+    stem = _basename_stem(name)
+    stem_u = stem.upper()
+    num_u = num.upper()
+    if stem_u == num_u:
+        return True
+    for suffix in ("-UC", "-C", "-U"):
+        if stem_u == num_u + suffix:
+            return True
+    stripped = _SITE_PREFIX_RE.sub("", stem)
+    stripped = _BRACKET_NOISE_RE.sub(" ", stripped)
+    stripped = _RESOLUTION_TOKEN_RE.sub(" ", stripped)
+    stripped = _DUP_SPACE_RE.sub(" ", stripped).strip()
+    stripped_u = stripped.upper()
+    if stripped_u == num_u:
+        return True
+    for suffix in ("-UC", "-C", "-U"):
+        if stripped_u == num_u + suffix:
+            return True
+    return False
+
+
+def qualifies_domestic_small_purge_name(name: str, *, pseudo_as_jav: bool) -> bool:
+    if av_number_for_jav_dedupe(name, pseudo_as_jav=pseudo_as_jav):
+        return False
+    if is_pure_jav_studio_number_filename(name):
+        return False
+    if domestic_keep_reason(name):
+        return True
+    if is_domestic_context(name) and not is_pure_jav_studio_number_filename(name):
+        return True
+    return False
+
+
+def domestic_small_trash_candidate(
+    row: dict[str, Any],
+    *,
+    min_bytes: int,
+    pseudo_as_jav: bool,
+) -> bool:
+    if row.get("kind") != "drive#file":
+        return False
+    if row.get("phase") != "PHASE_TYPE_COMPLETE":
+        return False
+    name = str(row.get("name") or "")
+    if not qualifies_domestic_small_purge_name(name, pseudo_as_jav=pseudo_as_jav):
+        return False
+    size = file_row_size_bytes(row)
+    if size is None:
+        return False
+    return size < min_bytes
+
+
+def collect_domestic_small_trash_candidates(
+    files: list[dict[str, Any]],
+    *,
+    min_bytes: int | None = None,
+    pseudo_as_jav: bool | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (candidates, size_missing_rows) for domestic small-file purge."""
+    pseudo_jav = pseudo_as_jav if pseudo_as_jav is not None else pseudo_as_jav_from_env(None)
+    threshold = min_bytes if min_bytes is not None else domestic_small_min_bytes_from_env()
+    candidates: list[dict[str, Any]] = []
+    size_missing: list[dict[str, Any]] = []
+    for row in files:
+        if row.get("kind") != "drive#file":
+            continue
+        if row.get("phase") != "PHASE_TYPE_COMPLETE":
+            continue
+        name = str(row.get("name") or "")
+        if not qualifies_domestic_small_purge_name(name, pseudo_as_jav=pseudo_jav):
+            continue
+        size = file_row_size_bytes(row)
+        if size is None:
+            size_missing.append(row)
+            continue
+        if size < threshold:
+            candidates.append(row)
+    return candidates, size_missing

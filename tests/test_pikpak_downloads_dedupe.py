@@ -11,10 +11,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from pikpak_downloads_dedupe_lib import (  # noqa: E402
     av_number_for_jav_dedupe,
     classify_filename_variant,
+    collect_domestic_small_trash_candidates,
     cross_folder_dup_groups,
     dedupe_sort_key,
     domestic_dedupe_sort_key,
     domestic_group_key,
+    domestic_small_min_bytes_from_env,
+    domestic_small_trash_candidate,
     group_files_by_av_number,
     group_files_domestic,
     group_tagged_files_by_av_number,
@@ -23,6 +26,7 @@ from pikpak_downloads_dedupe_lib import (  # noqa: E402
     pick_cross_folder_keeper_and_trash,
     pick_keeper_and_trash,
     pick_keeper_and_trash_domestic,
+    qualifies_domestic_small_purge_name,
     tag_row_folder,
 )
 from javdb_client import extract_av_number  # noqa: E402
@@ -254,6 +258,53 @@ class CrossFolderDedupeTests(unittest.TestCase):
         self.assertEqual(keeper["id"], "dl-uc")
         trash_ids = {r["id"] for r in trash}
         self.assertEqual(trash_ids, {"jav", "dl-plain"})
+
+
+class DomesticSmallPurgeTests(unittest.TestCase):
+    def setUp(self):
+        self.min_bytes = 30 * 1024 * 1024
+        self.domestic_name = "489155.com@某酒店泄密长标题 1080p.mp4"
+        self.small = 10 * 1024 * 1024
+        self.large = 40 * 1024 * 1024
+
+    def test_domestic_small_is_trash_candidate(self):
+        row = _file(self.domestic_name, self.small, "small-dom")
+        self.assertTrue(
+            domestic_small_trash_candidate(
+                row, min_bytes=self.min_bytes, pseudo_as_jav=False,
+            ),
+        )
+        cands, missing = collect_domestic_small_trash_candidates(
+            [row], min_bytes=self.min_bytes, pseudo_as_jav=False,
+        )
+        self.assertEqual(missing, [])
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(cands[0]["id"], "small-dom")
+
+    def test_jav_number_small_not_candidate(self):
+        row = _file("ABC-123.mp4", self.small, "jav-small")
+        self.assertFalse(qualifies_domestic_small_purge_name("ABC-123.mp4", pseudo_as_jav=False))
+        self.assertFalse(
+            domestic_small_trash_candidate(
+                row, min_bytes=self.min_bytes, pseudo_as_jav=False,
+            ),
+        )
+
+    def test_domestic_large_kept(self):
+        row = _file(self.domestic_name, self.large, "big-dom")
+        self.assertTrue(qualifies_domestic_small_purge_name(self.domestic_name, pseudo_as_jav=False))
+        self.assertFalse(
+            domestic_small_trash_candidate(
+                row, min_bytes=self.min_bytes, pseudo_as_jav=False,
+            ),
+        )
+        cands, _ = collect_domestic_small_trash_candidates(
+            [row], min_bytes=self.min_bytes, pseudo_as_jav=False,
+        )
+        self.assertEqual(cands, [])
+
+    def test_default_min_30_mib(self):
+        self.assertEqual(domestic_small_min_bytes_from_env(), 30 * 1024 * 1024)
 
 
 class DomesticSortKeyTests(unittest.TestCase):

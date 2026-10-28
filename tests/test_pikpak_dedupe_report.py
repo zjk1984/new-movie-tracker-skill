@@ -144,6 +144,37 @@ class BuildBodyTests(unittest.TestCase):
         self.assertIn("秘密花园", body)
         self.assertIn("489155.com@秘密花园 1080p.mp4", body)
 
+    def test_domestic_small_section_in_body(self):
+        min_bytes = 30 * 1024 * 1024
+        body = build_pikpak_dedupe_report_body(
+            generated_at="2026-10-28 14:00:00",
+            folder="downloads,JAV",
+            parent_id=None,
+            apply=False,
+            stats={
+                "total_files": 1,
+                "av_groups": 0,
+                "duplicate_groups": 0,
+                "skipped_no_av": 0,
+                "trash_candidates": 0,
+                "domestic_small_trash_candidates": 1,
+                "domestic_small_min_bytes": min_bytes,
+                "trashed_ok": 0,
+            },
+            groups=[],
+            domestic_small_trash=[
+                {
+                    "folder": "My Pack",
+                    "name": "489155.com@泄密小文件 720p.mp4",
+                    "size": 10 * 1024 * 1024,
+                    "id": "sm-1",
+                },
+            ],
+        )
+        self.assertIn("国产过小文件", body)
+        self.assertIn("489155.com@泄密小文件 720p.mp4", body)
+        self.assertIn("国产过小待删", body)
+
     def test_apply_body_shows_trash_status(self):
         body = build_pikpak_dedupe_report_body(
             generated_at="2026-10-28 14:00:00",
