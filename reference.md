@@ -288,7 +288,7 @@ python scripts/pikpak_login.py status --check
 
 Stored in `pikpak_auth.json` (gitignored, mode 600). Priority: `PIKPAK_TOKEN` env → saved file.
 
-Region-based PikPak folders: `PIKPAK_FOLDER_JAV` (default `JAV`), `PIKPAK_FOLDER_DOMESTIC` (default `downloads`); legacy `PIKPAK_FOLDER` / `--pikpak-folder` is fallback when an item has no region.
+Region-based PikPak folders: `PIKPAK_FOLDER_JAV` (default `JAV`), `PIKPAK_FOLDER_DOMESTIC` (default `My Pack`); legacy `PIKPAK_FOLDER` / `--pikpak-folder` is fallback when an item has no region.
 
 2. First Cloudflare pass (headed browser):
 
