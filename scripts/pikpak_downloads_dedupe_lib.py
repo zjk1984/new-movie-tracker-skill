@@ -13,6 +13,108 @@ from download_state import extract_btih
 from javdb_client import extract_av_number
 
 DEFAULT_FOLDER = "downloads"
+DOWNLOADS_KEEPER_FOLDER = "downloads"
+DEDUPE_FOLDER_TAG = "_dedupe_folder"
+
+
+def parse_folder_list(raw: str) -> list[str]:
+    """Parse comma-separated PikPak folder names (dedupe order preserved)."""
+    parts = [p.strip() for p in str(raw or "").split(",")]
+    return [p for p in parts if p]
+
+
+def folders_from_env() -> list[str] | None:
+    raw = os.environ.get("PIKPAK_DEDUPE_FOLDERS", "").strip()
+    if not raw:
+        return None
+    parsed = parse_folder_list(raw)
+    return parsed or None
+
+
+def tag_row_folder(row: dict[str, Any], folder: str) -> dict[str, Any]:
+    tagged = dict(row)
+    tagged[DEDUPE_FOLDER_TAG] = folder
+    return tagged
+
+
+def cross_folder_dup_groups(
+    av_groups: dict[str, list[dict[str, Any]]],
+    *,
+    keeper_folder: str = DOWNLOADS_KEEPER_FOLDER,
+) -> dict[str, list[dict[str, Any]]]:
+    """Groups spanning multiple folders where keeper_folder is present."""
+    out: dict[str, list[dict[str, Any]]] = {}
+    for av, rows in av_groups.items():
+        if len(rows) < 2:
+            continue
+        folders_present = {str(r.get(DEDUPE_FOLDER_TAG) or "") for r in rows}
+        folders_present.discard("")
+        if len(folders_present) < 2:
+            continue
+        if keeper_folder not in folders_present:
+            continue
+        out[av] = rows
+    return out
+
+
+def pick_cross_folder_keeper_and_trash(
+    rows: list[dict[str, Any]],
+    *,
+    keeper_folder: str = DOWNLOADS_KEEPER_FOLDER,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Keep best file in keeper_folder only; trash all other folders + extras in keeper."""
+    in_keeper = [r for r in rows if str(r.get(DEDUPE_FOLDER_TAG) or "") == keeper_folder]
+    if not in_keeper:
+        raise ValueError(f"cross-folder group has no files in keeper folder {keeper_folder!r}")
+    other = [r for r in rows if str(r.get(DEDUPE_FOLDER_TAG) or "") != keeper_folder]
+    if len(in_keeper) == 1:
+        keeper = in_keeper[0]
+        trash = list(other)
+    else:
+        keeper, trash_in_keeper = pick_keeper_and_trash(in_keeper)
+        trash = list(other) + trash_in_keeper
+    return keeper, trash
+
+
+def group_tagged_files_by_av_number(
+    rows: list[dict[str, Any]],
+    *,
+    pseudo_as_jav: bool | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], int]:
+    """Like group_files_by_av_number but rows may already be folder-tagged."""
+    pseudo_jav = pseudo_as_jav if pseudo_as_jav is not None else pseudo_as_jav_from_env(None)
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    skipped = 0
+    for row in rows:
+        if row.get("kind") != "drive#file":
+            continue
+        if row.get("phase") != "PHASE_TYPE_COMPLETE":
+            continue
+        name = str(row.get("name") or "")
+        av = av_number_for_jav_dedupe(name, pseudo_as_jav=pseudo_jav)
+        if not av:
+            skipped += 1
+            continue
+        groups[av].append(row)
+    return dict(groups), skipped
+
+
+def within_folder_enabled_from_env() -> bool:
+    return os.environ.get("PIKPAK_DEDUPE_WITHIN_FOLDER", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def cross_folder_enabled_from_env() -> bool:
+    return os.environ.get("PIKPAK_DEDUPE_CROSS_FOLDER", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
 
 DOMESTIC_MIN_NORMALIZED_LEN = 8
 

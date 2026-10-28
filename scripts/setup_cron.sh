@@ -49,7 +49,7 @@ Install cron job(s) for scripts/daily_run.sh (and optionally scripts/cnbeta_rss.
 
 Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
 CNBeta RSS cron is off by default; set CNBETA_RSS_CRON=1 to install news aggregation slots.
-Optional PikPak downloads dedupe: set PIKPAK_DEDUPE_CRON=1 (default 06:45 Asia/Shanghai; dry-run unless PIKPAK_DEDUPE_APPLY=1).
+Optional PikPak dedupe (downloads+JAV cross-folder): set PIKPAK_DEDUPE_CRON=1 (default 06:45 Asia/Shanghai; dry-run unless PIKPAK_DEDUPE_APPLY=1). Nightly wrapper sets PIKPAK_DEDUPE_FOLDERS=downloads,JAV (keep copy in downloads).
 CNBeta RSS loads Feishu credentials from .env.local (see docs/feishu-setup.md).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).
@@ -70,9 +70,10 @@ Environment overrides:
   DAILY_RUN_TZ=Asia/Shanghai
   DAILY_RUN_TIMES=07:00,13:00,20:00
   CNBETA_RSS_CRON=1          install CNBeta RSS cron lines (default: off)
-  PIKPAK_DEDUPE_CRON=1       install PikPak downloads dedupe (default: off)
+  PIKPAK_DEDUPE_CRON=1       install PikPak downloads+JAV dedupe (default: off)
   PIKPAK_DEDUPE_TIME=06:45   dedupe schedule when PIKPAK_DEDUPE_CRON=1
   PIKPAK_DEDUPE_APPLY=1      pass --apply to dedupe script on cron (default: dry-run)
+  PIKPAK_DEDUPE_FOLDERS=downloads,JAV  scanned folders; cross-folder keeps downloads (wrapper default)
 
 Container / Cloud Agent VMs (PID 1 is tini, cron may start late or die):
   Cron is best-effort. Run the external supervisor in tmux (recommended):

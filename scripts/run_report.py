@@ -1643,6 +1643,7 @@ def write_pikpak_dedupe_report(
     apply: bool,
     stats: dict[str, Any],
     groups: list[dict[str, Any]],
+    cross_folder_groups: list[dict[str, Any]] | None = None,
     domestic_groups: list[dict[str, Any]] | None = None,
     reports_dir: Path | None = None,
 ) -> RunReportResult:
@@ -1663,6 +1664,7 @@ def write_pikpak_dedupe_report(
         apply=apply,
         stats=stats,
         groups=groups,
+        cross_folder_groups=cross_folder_groups,
         domestic_groups=domestic_groups,
         previous_line=previous_line,
     )

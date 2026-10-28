@@ -89,6 +89,53 @@ def _format_jav_groups(apply: bool, groups: list[dict[str, Any]]) -> str:
     return "".join(group_sections)
 
 
+def _format_cross_folder_groups(apply: bool, groups: list[dict[str, Any]]) -> str:
+    group_sections: list[str] = []
+    if groups:
+        group_sections.append(f"## 跨目录重复番号（保留 downloads，{len(groups)} 组）\n")
+        for entry in groups:
+            av = entry.get("av_number") or "?"
+            keeper = entry.get("keeper") or {}
+            keeper_folder = entry.get("keeper_folder") or keeper.get("folder") or "downloads"
+            trash_list = list(entry.get("trash") or [])
+            k_rank = int(keeper.get("variant_rank") or 0)
+            k_name = keeper.get("name") or ""
+            k_size = int(keeper.get("size") or 0)
+            group_sections.append(
+                f"### {av}\n\n"
+                f"- **保留**（`{keeper_folder}`）: {variant_rank_label(k_rank)} · "
+                f"{format_file_size(k_size)} · `{k_name}`\n",
+            )
+            if trash_list:
+                trash_label = "已移入回收站" if apply else "将删除（预览）"
+                rows = []
+                for row in trash_list:
+                    t_rank = int(row.get("variant_rank") or 0)
+                    status = ""
+                    if apply:
+                        ok = row.get("trashed_ok")
+                        status = "成功" if ok else "失败"
+                    rows.append([
+                        row.get("folder") or "?",
+                        variant_rank_label(t_rank),
+                        format_file_size(int(row.get("size") or 0)),
+                        row.get("name") or "",
+                        row.get("id") or "",
+                        status,
+                    ])
+                headers = ["来源目录", "版本", "大小", "文件名", "file id", "删除"]
+                if not apply:
+                    headers = headers[:-1]
+                    rows = [r[:-1] for r in rows]
+                group_sections.append(f"**{trash_label}**（{len(trash_list)} 个）\n\n")
+                group_sections.append(_md_table(headers, rows))
+            else:
+                group_sections.append("_（无待删文件）_\n")
+    else:
+        group_sections.append("## 跨目录重复番号\n\n_（无跨目录重复组）_\n")
+    return "".join(group_sections)
+
+
 def _format_domestic_groups(apply: bool, groups: list[dict[str, Any]]) -> str:
     group_sections: list[str] = []
     if groups:
@@ -138,6 +185,7 @@ def build_pikpak_dedupe_report_body(
     apply: bool,
     stats: dict[str, Any],
     groups: list[dict[str, Any]],
+    cross_folder_groups: list[dict[str, Any]] | None = None,
     domestic_groups: list[dict[str, Any]] | None = None,
     previous_line: str = "",
 ) -> str:
@@ -155,6 +203,12 @@ def build_pikpak_dedupe_report_body(
     domestic_trash_candidates = int(stats.get("domestic_trash_candidates") or 0)
     domestic_candidates = int(stats.get("domestic_candidates") or 0)
     trashed_ok = int(stats.get("trashed_ok") or 0)
+    cross_folder_duplicate_groups = int(stats.get("cross_folder_duplicate_groups") or 0)
+    cross_folder_trash_candidates = int(stats.get("cross_folder_trash_candidates") or 0)
+    folders_list = stats.get("folders")
+    folders_note = ""
+    if isinstance(folders_list, list) and folders_list:
+        folders_note = ", ".join(str(f) for f in folders_list)
 
     summary_rows = [
         ["文件夹", folder_desc, "PikPak 去重目标目录"],
@@ -164,9 +218,30 @@ def build_pikpak_dedupe_report_body(
         ["重复番号组", str(duplicate_groups), "同番号 ≥2 个文件"],
         ["无番号跳过", str(skipped_no_av), "文件名未解析出番号（或伪番号走国产）"],
         [
-            "JAV 待删/已删",
-            f"{trash_candidates} / {trashed_ok}" if apply else str(trash_candidates),
-            "重复组内保留 1 个（UC > C > 体积）",
+            "目录内 JAV 待删",
+            str(trash_candidates),
+            "各目录内同番号去重（UC > C > 体积）",
+        ],
+        [
+            "跨目录重复组",
+            str(cross_folder_duplicate_groups),
+            f"同番号跨目录；保留 downloads"
+            + (f"（扫描: {folders_note}）" if folders_note else ""),
+        ],
+        [
+            "跨目录待删",
+            str(cross_folder_trash_candidates),
+            "downloads 保留 1 个，其它目录同番号全删",
+        ],
+        [
+            "JAV 待删合计",
+            str(trash_candidates + cross_folder_trash_candidates),
+            "目录内 + 跨目录（去重 file id 后执行）",
+        ],
+        [
+            "已移入回收站",
+            str(trashed_ok) if apply else "—",
+            "apply 模式下实际 trash 成功数",
         ],
         ["国产候选", str(domestic_candidates), "无番号 / 伪番号（默认）文件数"],
         ["国产重复组", str(domestic_duplicate_groups), "btih / hash / 标题归一化 ≥2"],
@@ -178,6 +253,7 @@ def build_pikpak_dedupe_report_body(
     ]
 
     jav_section = _format_jav_groups(apply, groups)
+    cross_section = _format_cross_folder_groups(apply, cross_folder_groups or [])
     domestic_section = _format_domestic_groups(apply, domestic_groups or [])
 
     return f"""# PikPak downloads 去重报告
@@ -191,5 +267,6 @@ def build_pikpak_dedupe_report_body(
 {_md_table(["项目", "数值", "说明"], summary_rows)}
 
 {jav_section}
+{cross_section}
 {domestic_section}
 """

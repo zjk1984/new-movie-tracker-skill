@@ -62,6 +62,51 @@ class BuildBodyTests(unittest.TestCase):
         self.assertIn("上一份报告", body)
         self.assertIn("将删除（预览）", body)
 
+    def test_cross_folder_section_in_body(self):
+        body = build_pikpak_dedupe_report_body(
+            generated_at="2026-10-28 14:00:00",
+            folder="downloads,JAV",
+            parent_id=None,
+            apply=False,
+            stats={
+                "total_files": 10,
+                "av_groups": 5,
+                "duplicate_groups": 0,
+                "skipped_no_av": 0,
+                "trash_candidates": 0,
+                "cross_folder_duplicate_groups": 1,
+                "cross_folder_trash_candidates": 1,
+                "trashed_ok": 0,
+                "folders": ["downloads", "JAV"],
+            },
+            groups=[],
+            cross_folder_groups=[
+                {
+                    "av_number": "ADN-549",
+                    "keeper_folder": "downloads",
+                    "keeper": {
+                        "name": "adn-549.mp4",
+                        "size": 5_000_000_000,
+                        "variant_rank": 0,
+                        "folder": "downloads",
+                    },
+                    "trash": [
+                        {
+                            "name": "ADN-549-C.mp4",
+                            "size": 9_000_000_000,
+                            "variant_rank": 1,
+                            "folder": "JAV",
+                            "id": "jav-1",
+                        },
+                    ],
+                },
+            ],
+        )
+        self.assertIn("跨目录重复番号", body)
+        self.assertIn("保留 downloads", body)
+        self.assertIn("ADN-549-C.mp4", body)
+        self.assertIn("JAV", body)
+
     def test_domestic_section_in_body(self):
         body = build_pikpak_dedupe_report_body(
             generated_at="2026-10-28 14:00:00",
