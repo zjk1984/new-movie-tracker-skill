@@ -28,19 +28,20 @@ def video_basename_stem(name: str) -> str:
     return base
 
 
-def metadata_folder_name(av_number: str) -> str:
-    """PikPak subfolder under ``downloads`` for Jellyfin metadata (番号)."""
+def canonical_av_number(av_number: str) -> str:
+    """Uppercase 番号 used as sidecar filename base."""
     return (av_number or "").strip().upper()
 
 
-def metadata_sidecar_names(*, include_fanart: bool = False) -> dict[str, str]:
-    """Jellyfin movie-folder sidecars under ``downloads/{番号}/``."""
+def metadata_sidecar_names(av_number: str, *, include_fanart: bool = False) -> dict[str, str]:
+    """Flat sidecars directly under PikPak ``downloads`` root."""
+    base = canonical_av_number(av_number)
     names = {
-        "nfo": "movie.nfo",
-        "poster": "poster.jpg",
+        "nfo": f"{base}.nfo",
+        "poster": f"{base}-poster.jpg",
     }
     if include_fanart:
-        names["fanart"] = "fanart.jpg"
+        names["fanart"] = f"{base}-fanart.jpg"
     return names
 
 
