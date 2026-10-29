@@ -89,8 +89,10 @@ def resolve_default_folder(explicit: str | None = None, default: str = "My Pack"
 
 
 def resolve_jav_folder() -> str:
+    from pikpak_download import DEFAULT_FOLDER
+
     env = (os.environ.get("PIKPAK_FOLDER_JAV") or "").strip()
-    return env or "JAV"
+    return env or DEFAULT_FOLDER
 
 
 def resolve_domestic_folder() -> str:
