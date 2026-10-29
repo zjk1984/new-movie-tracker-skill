@@ -183,6 +183,172 @@ def list_all_files(
     return out
 
 
+def list_children_page(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    parent_id: str = "",
+    limit: int = 200,
+    page_token: str = "",
+    *,
+    complete_files_only: bool = False,
+) -> tuple[list[dict], str]:
+    """List folder children; optionally restrict to completed files only."""
+    filter_parts: dict[str, Any] = {"trashed": {"eq": False}}
+    if complete_files_only:
+        filter_parts["phase"] = {"eq": "PHASE_TYPE_COMPLETE"}
+    filters = json.dumps(filter_parts, separators=(",", ":"))
+    params: dict[str, str] = {
+        "parent_id": parent_id,
+        "thumbnail_size": "SIZE_MEDIUM",
+        "limit": str(limit),
+        "with_audit": "true",
+        "filters": filters,
+    }
+    if page_token:
+        params["page_token"] = page_token
+    captcha_token = get_captcha_token(session, device_id, user_id, "GET:/drive/v1/files/")
+    resp = session.get(
+        f"{DRIVE_HOST}/drive/v1/files",
+        headers=api_headers(access_token, device_id, captcha_token),
+        params=params,
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"list files failed: HTTP {resp.status_code} {resp.text[:300]}")
+    data = resp.json()
+    files = data.get("files") or []
+    next_token = (data.get("next_page_token") or "").strip()
+    return files, next_token
+
+
+def list_all_children(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    parent_id: str = "",
+    limit: int = 200,
+    *,
+    complete_files_only: bool = False,
+) -> list[dict]:
+    out: list[dict] = []
+    page_token = ""
+    while True:
+        batch, page_token = list_children_page(
+            session,
+            access_token,
+            device_id,
+            user_id,
+            parent_id=parent_id,
+            limit=limit,
+            page_token=page_token,
+            complete_files_only=complete_files_only,
+        )
+        out.extend(batch)
+        if not page_token:
+            break
+    return out
+
+
+def calc_gcid(data: bytes) -> str:
+    """PikPak GCID (SHA1-of-SHA1 block hash) for upload requests."""
+    size = len(data)
+    psize = 0x40000
+    while size / psize > 0x200 and psize < 0x200000:
+        psize <<= 1
+    total = hashlib.sha1()
+    offset = 0
+    while offset < size:
+        chunk = data[offset : offset + psize]
+        total.update(hashlib.sha1(chunk).digest())
+        offset += psize
+    return total.hexdigest().upper()
+
+
+def upload_file_bytes(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    *,
+    name: str,
+    data: bytes,
+    parent_id: str,
+    content_type: str = "application/octet-stream",
+) -> dict:
+    """Upload small files (NFO, poster) next to a video via UPLOAD_TYPE_FORM."""
+    size = len(data)
+    gcid = calc_gcid(data)
+    body = {
+        "kind": "drive#file",
+        "name": name,
+        "parent_id": parent_id,
+        "folder_type": "NORMAL",
+        "size": str(size),
+        "hash": gcid,
+        "upload_type": "UPLOAD_TYPE_FORM",
+    }
+    captcha_token = get_captcha_token(session, device_id, user_id, "POST:/drive/v1/files")
+    resp = session.post(
+        f"{DRIVE_HOST}/drive/v1/files",
+        headers=api_headers(access_token, device_id, captcha_token),
+        json=body,
+        timeout=60,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"upload init failed for {name}: HTTP {resp.status_code} {resp.text[:400]}")
+    payload = resp.json()
+    file_info = payload.get("file") or {}
+    if file_info.get("phase") == "PHASE_TYPE_COMPLETE":
+        return payload
+
+    form = payload.get("form") or {}
+    form_url = form.get("url") or ""
+    multi = form.get("multi_parts") or form.get("multiParts") or {}
+    if not form_url or not multi:
+        raise RuntimeError(f"upload form missing for {name}: {str(payload)[:300]}")
+
+    fields = {
+        "OSSAccessKeyId": multi.get("OSSAccessKeyId") or multi.get("ossaccesskeyid") or "",
+        "Signature": multi.get("Signature") or multi.get("signature") or "",
+        "callback": multi.get("callback") or multi.get("Callback") or "",
+        "key": multi.get("key") or "",
+        "policy": multi.get("policy") or "",
+        "x:user_data": multi.get("x:user_data") or multi.get("x-user_data") or "",
+    }
+    files = {"file": (name, data, content_type)}
+    up_resp = session.post(form_url, data=fields, files=files, timeout=120)
+    if up_resp.status_code >= 400:
+        raise RuntimeError(
+            f"upload POST failed for {name}: HTTP {up_resp.status_code} {up_resp.text[:300]}",
+        )
+    return payload
+
+
+def upload_file_from_url(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    *,
+    name: str,
+    url: str,
+    parent_id: str,
+) -> dict:
+    """Add a remote file (e.g. cover image) via PikPak URL upload."""
+    return offline_download_url(
+        session,
+        access_token,
+        device_id,
+        user_id,
+        name,
+        url,
+        parent_id=parent_id,
+    )
+
+
 def trash_file(
     session: requests.Session,
     access_token: str,
