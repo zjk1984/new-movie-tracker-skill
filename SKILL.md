@@ -254,7 +254,7 @@ python scripts/pikpak_login.py login
 python scripts/pikpak_login.py status --check
 ```
 
-Token is saved to `pikpak_auth.json` (gitignored). Scripts pick it up automatically; env `PIKPAK_TOKEN` overrides if set. Region folders: `PIKPAK_FOLDER_JAV` (default `JAV`), `PIKPAK_FOLDER_DOMESTIC` (default `My Pack`); `PIKPAK_FOLDER` / `--pikpak-folder` is fallback only.
+Token is saved to `pikpak_auth.json` (gitignored). Scripts pick it up automatically; env `PIKPAK_TOKEN` overrides if set. Region folders: `PIKPAK_FOLDER_JAV` and `PIKPAK_FOLDER_DOMESTIC` (both default `My Pack`); `PIKPAK_FOLDER` / `--pikpak-folder` is fallback only.
 
 **One command (API fallback):**
 ```bash

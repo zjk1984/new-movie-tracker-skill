@@ -25,7 +25,7 @@ class FolderResolverTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("PIKPAK_FOLDER_JAV", None)
             os.environ.pop("PIKPAK_FOLDER_DOMESTIC", None)
-            self.assertEqual(resolve_jav_folder(), "JAV")
+            self.assertEqual(resolve_jav_folder(), "My Pack")
             self.assertEqual(resolve_domestic_folder(), "My Pack")
 
     def test_env_overrides(self):
@@ -40,11 +40,11 @@ class FolderResolverTests(unittest.TestCase):
     def test_folder_for_download_item_by_region(self):
         self.assertEqual(
             folder_for_download_item({"region": "jav_censored"}, fallback="My Pack"),
-            "JAV",
+            "My Pack",
         )
         self.assertEqual(
             folder_for_download_item({"region": "uncensored"}, fallback="My Pack"),
-            "JAV",
+            "My Pack",
         )
         self.assertEqual(
             folder_for_download_item({"region": "domestic_leak"}, fallback="My Pack"),
@@ -52,7 +52,7 @@ class FolderResolverTests(unittest.TestCase):
         )
         self.assertEqual(
             folder_for_download_item({"content_region": "jav_censored"}, fallback="Legacy"),
-            "JAV",
+            "My Pack",
         )
         self.assertEqual(
             folder_for_download_item({}, fallback="Legacy"),
@@ -86,7 +86,7 @@ class SubmitDownloadsFolderRoutingTests(unittest.TestCase):
             json.dumps({"sub": "user1", "exp": future_exp}).encode()
         ).decode().rstrip("=")
         token = f"{header}.{payload_b64}.sig"
-        folder_ids = {"JAV": "pid-jav", "My Pack": "pid-cn"}
+        folder_ids = {"My Pack": "pid-cn"}
 
         def fake_find_folder(session, access_token, device_id, user_id, folder_name):
             return folder_ids.get(folder_name)
@@ -110,7 +110,7 @@ class SubmitDownloadsFolderRoutingTests(unittest.TestCase):
         self.assertEqual(pending, [])
         self.assertEqual(reason, "")
         parent_ids = [call.kwargs.get("parent_id") for call in submit_mock.call_args_list]
-        self.assertEqual(parent_ids, ["pid-jav", "pid-cn"])
+        self.assertEqual(parent_ids, ["pid-cn", "pid-cn"])
 
 
 if __name__ == "__main__":

@@ -66,7 +66,9 @@ def _push_report(
 def _resolve_jav_folder_name(folder: str | None, folder_list: list[str] | None) -> str | None:
     from pikpak_auth import resolve_jav_folder
 
-    jav_name = (folder or resolve_jav_folder()).strip() or "JAV"
+    from pikpak_download import DEFAULT_FOLDER
+
+    jav_name = (folder or resolve_jav_folder()).strip() or DEFAULT_FOLDER
     if folder_list is not None:
         if jav_name in folder_list:
             return jav_name
@@ -243,7 +245,7 @@ def main() -> int:
     parser.add_argument(
         "--folder",
         default=None,
-        help="PikPak JAV folder name (default: PIKPAK_FOLDER_JAV or JAV)",
+        help="PikPak JAV folder name (default: PIKPAK_FOLDER_JAV or My Pack)",
     )
     parser.add_argument(
         "--parent",
