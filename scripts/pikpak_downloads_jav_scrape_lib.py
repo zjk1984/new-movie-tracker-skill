@@ -9,9 +9,9 @@ from typing import Any, Callable, Iterator
 from content_filter import classify_region
 from javdb_client import JAV_REPORT_REGIONS, JavDBClient
 from jellyfin_nfo import (
+    canonical_av_number,
     is_video_filename,
     merge_scrape_metadata,
-    metadata_folder_name,
     metadata_sidecar_names,
 )
 from pikpak_downloads_dedupe_lib import (
@@ -172,16 +172,15 @@ def lookup_scrape_metadata(
 
 def plan_sidecars_for_av(
     av_number: str,
-    metadata_parent_id: str,
+    downloads_parent_id: str,
     *,
     existing_names: set[str],
     include_fanart: bool,
 ) -> dict[str, Any]:
-    sidecars = metadata_sidecar_names(include_fanart=include_fanart)
+    sidecars = metadata_sidecar_names(av_number, include_fanart=include_fanart)
     return {
-        "av_number": av_number,
-        "metadata_folder": metadata_folder_name(av_number),
-        "metadata_parent_id": metadata_parent_id,
+        "av_number": canonical_av_number(av_number),
+        "downloads_parent_id": downloads_parent_id,
         "sidecars": sidecars,
         "needs_nfo": sidecars["nfo"] not in existing_names,
         "needs_poster": sidecars["poster"] not in existing_names,

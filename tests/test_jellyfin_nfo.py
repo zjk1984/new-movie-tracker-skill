@@ -10,23 +10,27 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from jellyfin_nfo import (  # noqa: E402
     build_movie_nfo_xml,
+    canonical_av_number,
     extract_actress_names,
     extract_cover_url,
     merge_scrape_metadata,
-    metadata_folder_name,
     metadata_sidecar_names,
     validate_nfo_xml,
 )
 
 
 class SidecarNamingTests(unittest.TestCase):
-    def test_metadata_sidecars_jellyfin_folder(self):
-        names = metadata_sidecar_names()
-        self.assertEqual(names["nfo"], "movie.nfo")
-        self.assertEqual(names["poster"], "poster.jpg")
+    def test_flat_root_sidecars_by_av_number(self):
+        names = metadata_sidecar_names("ssis-001")
+        self.assertEqual(names["nfo"], "SSIS-001.nfo")
+        self.assertEqual(names["poster"], "SSIS-001-poster.jpg")
 
-    def test_metadata_folder_is_av_number(self):
-        self.assertEqual(metadata_folder_name("ssis-001"), "SSIS-001")
+    def test_fanart_optional(self):
+        names = metadata_sidecar_names("MIDV-671", include_fanart=True)
+        self.assertEqual(names["fanart"], "MIDV-671-fanart.jpg")
+
+    def test_canonical_av_number(self):
+        self.assertEqual(canonical_av_number("  pred-899 "), "PRED-899")
 
 
 class MetadataExtractTests(unittest.TestCase):

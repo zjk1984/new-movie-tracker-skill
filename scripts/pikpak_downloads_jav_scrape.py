@@ -2,20 +2,16 @@
 # -*- coding: utf-8 -*-
 """Scrape JavDB metadata for completed JAV videos in PikPak ``downloads`` and upload Jellyfin sidecars.
 
-Metadata layout (always):
-  ``downloads/{番号}/movie.nfo``
-  ``downloads/{番号}/poster.jpg``
-  optional ``downloads/{番号}/fanart.jpg`` with ``--fanart``
+Metadata layout (flat, directly under the ``downloads`` folder root):
+  ``downloads/{番号}.nfo``          e.g. ``SSIS-001.nfo``
+  ``downloads/{番号}-poster.jpg``
+  optional ``downloads/{番号}-fanart.jpg`` with ``--fanart``
 
-The per-番号 folder is created under ``downloads`` when missing (``--apply`` only).
-**Videos are not moved** in v1: a file may stay at ``downloads/FOO-123-UC.mp4`` or inside
-another subfolder; sidecars still land in ``downloads/FOO-123/``. Jellyfin may need the
-library to include both paths or future file moves for full auto-match.
+Multiple video files with the same 番号 share one NFO and one poster at the root.
+**Video files are not moved** (they may stay at ``downloads/*.mp4`` or in nested subfolders).
 
-Multiple completed files with the same 番号 share one metadata folder and one JavDB fetch.
-
-Defaults to dry-run; pass ``--apply`` to create folders and upload sidecars. JavDB responses
-are cached via ``javdb_client``. Rate limit: ``JAVDB_SCRAPE_DELAY`` (default 1.5s).
+Defaults to dry-run; pass ``--apply`` to upload sidecars. No metadata subfolders are created.
+JavDB responses are cached via ``javdb_client``. Rate limit: ``JAVDB_SCRAPE_DELAY`` (default 1.5s).
 
 Only scans ``downloads`` (not ``My Pack``) unless ``--folder`` is set.
 """
@@ -34,7 +30,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from env_utils import load_env_local  # noqa: E402
-from jellyfin_nfo import build_movie_nfo_xml, metadata_folder_name, validate_nfo_xml  # noqa: E402
+from jellyfin_nfo import build_movie_nfo_xml, validate_nfo_xml  # noqa: E402
 from pikpak_downloads_jav_scrape_lib import (  # noqa: E402
     downloads_folder_from_env,
     fetch_cover_bytes,
@@ -51,7 +47,7 @@ def _resolve_session():
     import requests
 
     from pikpak_auth import inspect_jwt_token, resolve_token
-    from pikpak_download import ensure_child_folder, find_folder_id, list_all_children
+    from pikpak_download import find_folder_id, list_all_children
 
     load_env_local()
     token = resolve_token(None)
@@ -68,7 +64,7 @@ def _resolve_session():
     user_id = payload.get("sub", "")
     device_id = hashlib.md5(user_id.encode()).hexdigest()
     session = requests.Session()
-    return session, token, device_id, user_id, list_all_children, find_folder_id, ensure_child_folder
+    return session, token, device_id, user_id, list_all_children, find_folder_id
 
 
 def run_scrape(
@@ -86,15 +82,7 @@ def run_scrape(
     from javdb_client import JavDBClient
     from pikpak_download import upload_file_bytes, upload_file_from_url
 
-    (
-        session,
-        token,
-        device_id,
-        user_id,
-        list_all_children,
-        find_folder_id,
-        ensure_child_folder,
-    ) = _resolve_session()
+    session, token, device_id, user_id, list_all_children, find_folder_id = _resolve_session()
 
     if parent_id_override:
         downloads_parent = parent_id_override.strip()
@@ -121,6 +109,10 @@ def run_scrape(
     if numbers_filter:
         av_groups = {k: v for k, v in av_groups.items() if k in numbers_filter}
 
+    root_existing = sibling_name_set(
+        list_all_children, session, token, device_id, user_id, downloads_parent,
+    )
+
     stats: dict[str, Any] = {
         "folder": folder,
         "downloads_parent_id": downloads_parent,
@@ -134,7 +126,6 @@ def run_scrape(
         "planned_poster": 0,
         "planned_fanart": 0,
         "skipped_existing": 0,
-        "folders_created": 0,
         "javdb_errors": 0,
         "uploaded_nfo": 0,
         "uploaded_poster": 0,
@@ -142,52 +133,14 @@ def run_scrape(
         "items": [],
     }
 
-    from pikpak_download import find_child_folder_id
-
-    metadata_folder_cache: dict[str, str] = {}
     processed_groups = 0
 
     for av in sorted(av_groups.keys()):
         videos = av_groups[av]
-        folder_name = metadata_folder_name(av)
-        if folder_name in metadata_folder_cache:
-            meta_folder_id = metadata_folder_cache[folder_name]
-        elif apply:
-            existed = find_child_folder_id(
-                session, token, device_id, user_id, downloads_parent, folder_name,
-            )
-            meta_folder_id = ensure_child_folder(
-                session,
-                token,
-                device_id,
-                user_id,
-                downloads_parent,
-                folder_name,
-            )
-            if not existed:
-                stats["folders_created"] += 1
-            metadata_folder_cache[folder_name] = meta_folder_id
-        else:
-            meta_folder_id = find_child_folder_id(
-                session,
-                token,
-                device_id,
-                user_id,
-                downloads_parent,
-                folder_name,
-            ) or ""
-            if meta_folder_id:
-                metadata_folder_cache[folder_name] = meta_folder_id
-
-        existing: set[str] = set()
-        if meta_folder_id:
-            existing = sibling_name_set(
-                list_all_children, session, token, device_id, user_id, meta_folder_id,
-            )
         plan = plan_sidecars_for_av(
             av,
-            meta_folder_id or downloads_parent,
-            existing_names=existing,
+            downloads_parent,
+            existing_names=root_existing,
             include_fanart=include_fanart,
         )
         if skip_existing and not plan["needs_nfo"] and not plan["needs_poster"]:
@@ -196,8 +149,7 @@ def run_scrape(
 
         item: dict[str, Any] = {
             "av_number": av,
-            "metadata_path": f"{folder}/{folder_name}",
-            "metadata_parent_id": meta_folder_id,
+            "metadata_path": f"{folder}/{plan['sidecars']['nfo']}",
             "sidecars": plan["sidecars"],
             "videos": videos,
         }
@@ -227,20 +179,7 @@ def run_scrape(
         if plan["needs_fanart"] and include_fanart:
             stats["planned_fanart"] += 1
 
-        if apply and not meta_folder_id:
-            meta_folder_id = ensure_child_folder(
-                session,
-                token,
-                device_id,
-                user_id,
-                downloads_parent,
-                folder_name,
-            )
-            metadata_folder_cache[folder_name] = meta_folder_id
-            stats["folders_created"] += 1
-
-        upload_parent = meta_folder_id
-        if apply and upload_parent:
+        if apply:
             if plan["needs_nfo"]:
                 upload_file_bytes(
                     session,
@@ -249,10 +188,11 @@ def run_scrape(
                     user_id,
                     name=plan["sidecars"]["nfo"],
                     data=nfo_text.encode("utf-8"),
-                    parent_id=upload_parent,
+                    parent_id=downloads_parent,
                     content_type="application/xml",
                 )
                 stats["uploaded_nfo"] += 1
+                root_existing.add(plan["sidecars"]["nfo"])
             if plan["needs_poster"] and cover_url:
                 poster_name = plan["sidecars"]["poster"]
                 try:
@@ -264,10 +204,11 @@ def run_scrape(
                         user_id,
                         name=poster_name,
                         data=cover_bytes,
-                        parent_id=upload_parent,
+                        parent_id=downloads_parent,
                         content_type="image/jpeg",
                     )
                     stats["uploaded_poster"] += 1
+                    root_existing.add(poster_name)
                 except Exception as cover_exc:
                     try:
                         upload_file_from_url(
@@ -277,9 +218,10 @@ def run_scrape(
                             user_id,
                             name=poster_name,
                             url=cover_url,
-                            parent_id=upload_parent,
+                            parent_id=downloads_parent,
                         )
                         stats["uploaded_poster"] += 1
+                        root_existing.add(poster_name)
                         item["poster_via"] = "pikpak_url"
                     except Exception as url_exc:
                         item["poster_error"] = f"bytes: {cover_exc}; url: {url_exc}"
@@ -293,10 +235,11 @@ def run_scrape(
                         user_id,
                         name=plan["sidecars"]["fanart"],
                         data=fanart_bytes,
-                        parent_id=upload_parent,
+                        parent_id=downloads_parent,
                         content_type="image/jpeg",
                     )
                     stats["uploaded_fanart"] += 1
+                    root_existing.add(plan["sidecars"]["fanart"])
                 except Exception as exc:
                     item["fanart_error"] = str(exc)
 
@@ -313,7 +256,7 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
 
     parser = argparse.ArgumentParser(
-        description="JavDB scrape → Jellyfin NFO/posters under downloads/{番号}/",
+        description="JavDB scrape → Jellyfin NFO/posters at downloads root ({番号}.nfo)",
     )
     parser.add_argument(
         "--folder",
@@ -323,7 +266,7 @@ def main() -> int:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Create metadata folders and upload sidecars (default: dry-run)",
+        help="Upload sidecars to PikPak downloads root (default: dry-run)",
     )
     parser.add_argument(
         "--limit",
@@ -340,12 +283,12 @@ def main() -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Upload even when movie.nfo / poster.jpg already exist",
+        help="Upload even when {番号}.nfo / {番号}-poster.jpg already exist",
     )
     parser.add_argument(
         "--fanart",
         action="store_true",
-        help="Also upload fanart.jpg (same image as poster)",
+        help="Also upload {番号}-fanart.jpg (same image as poster)",
     )
     parser.add_argument(
         "--no-recursive",
@@ -394,8 +337,7 @@ def main() -> int:
         )
         if stats["mode"] == "apply":
             print(
-                f"[info] folders_created={stats['folders_created']} "
-                f"uploaded nfo={stats['uploaded_nfo']} poster={stats['uploaded_poster']} "
+                f"[info] uploaded nfo={stats['uploaded_nfo']} poster={stats['uploaded_poster']} "
                 f"fanart={stats['uploaded_fanart']}",
             )
     return 0
