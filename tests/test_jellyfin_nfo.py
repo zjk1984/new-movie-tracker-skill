@@ -13,21 +13,20 @@ from jellyfin_nfo import (  # noqa: E402
     extract_actress_names,
     extract_cover_url,
     merge_scrape_metadata,
-    sidecar_names_for_video,
+    metadata_folder_name,
+    metadata_sidecar_names,
     validate_nfo_xml,
 )
 
 
 class SidecarNamingTests(unittest.TestCase):
-    def test_flat_layout(self):
-        names = sidecar_names_for_video("SSIS-001-UC.mp4", subfolder_layout=False)
-        self.assertEqual(names["nfo"], "SSIS-001-UC.nfo")
-        self.assertEqual(names["poster"], "SSIS-001-UC-poster.jpg")
-
-    def test_subfolder_layout(self):
-        names = sidecar_names_for_video("movie.mp4", subfolder_layout=True)
+    def test_metadata_sidecars_jellyfin_folder(self):
+        names = metadata_sidecar_names()
         self.assertEqual(names["nfo"], "movie.nfo")
         self.assertEqual(names["poster"], "poster.jpg")
+
+    def test_metadata_folder_is_av_number(self):
+        self.assertEqual(metadata_folder_name("ssis-001"), "SSIS-001")
 
 
 class MetadataExtractTests(unittest.TestCase):
