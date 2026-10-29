@@ -99,6 +99,15 @@ def domestic_enabled_from_env() -> bool:
     }
 
 
+def jav_low_score_enabled_from_env() -> bool:
+    return os.environ.get("PIKPAK_JAV_LOW_SCORE", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
 def _resolve_folders(
     folder: str,
     folders_arg: str | None,
@@ -356,6 +365,7 @@ def run_dedupe(
     skip_domestic_small: bool = False,
     skip_within_folder: bool = False,
     skip_cross_folder: bool = False,
+    skip_jav_low_score: bool = False,
 ) -> int:
     import requests
 
@@ -661,6 +671,42 @@ def run_dedupe(
         f"trashed={trashed_ok if apply else 0}",
     )
 
+    jav_low_score_stats: dict[str, Any] | None = None
+    jav_low_score_rows: list[dict[str, Any]] | None = None
+    jav_low_score_max: float | None = None
+    jav_low_score_report_path: Path | None = None
+    jav_low_score_archived: list[Path] = []
+
+    run_jav_low = not skip_jav_low_score and jav_low_score_enabled_from_env()
+    if run_jav_low:
+        from pikpak_jav_low_score_report import (
+            _resolve_jav_folder_name,
+            run_jav_low_score_report,
+        )
+
+        jav_folder_name = _resolve_jav_folder_name(None, folder_list)
+        if jav_folder_name and jav_folder_name in folder_entries:
+            try:
+                low_result = run_jav_low_score_report(
+                    folder=jav_folder_name,
+                    folder_list=folder_list,
+                    entries=folder_entries[jav_folder_name],
+                    resolved_parent=folder_parent_ids.get(jav_folder_name),
+                    push_report=False,
+                    write_standalone=True,
+                )
+                jav_low_score_stats = low_result.get("stats")
+                jav_low_score_rows = low_result.get("rows")
+                jav_low_score_max = low_result.get("max_score_exclusive")
+                rp = low_result.get("report_path")
+                if rp is not None:
+                    jav_low_score_report_path = Path(rp)
+                jav_low_score_archived = list(low_result.get("archived_paths") or [])
+            except RuntimeError as exc:
+                print(f"[warn] jav_low_score skipped: {exc}")
+        else:
+            print("[info] jav_low_score skipped (JAV folder not in scan set)")
+
     from run_report import write_pikpak_dedupe_report
 
     report_result = write_pikpak_dedupe_report(
@@ -672,12 +718,21 @@ def run_dedupe(
         cross_folder_groups=cross_report_groups,
         domestic_groups=domestic_report_groups,
         domestic_small_trash=domestic_small_report_rows,
+        jav_low_score_stats=jav_low_score_stats,
+        jav_low_score_rows=jav_low_score_rows,
+        jav_low_score_max_exclusive=jav_low_score_max,
     )
     _push_dedupe_report(
         report_result.path,
         push_report=push_report,
         archived_paths=report_result.archived_paths,
     )
+    if jav_low_score_report_path is not None:
+        _push_dedupe_report(
+            jav_low_score_report_path,
+            push_report=push_report,
+            archived_paths=jav_low_score_archived,
+        )
     return 0
 
 
@@ -733,6 +788,11 @@ def main() -> int:
         help="Skip cross-folder dedupe (within-folder only)",
     )
     parser.add_argument(
+        "--skip-jav-low-score",
+        action="store_true",
+        help="Skip JAV folder JavDB low-score report (default: on when JAV scanned)",
+    )
+    parser.add_argument(
         "--no-push",
         action="store_true",
         help="Write report locally but do not commit/push to GitHub",
@@ -767,6 +827,7 @@ def main() -> int:
         skip_domestic_small=bool(args.skip_domestic_small),
         skip_within_folder=bool(args.skip_within_folder),
         skip_cross_folder=bool(args.skip_cross_folder),
+        skip_jav_low_score=bool(args.skip_jav_low_score),
     )
 
 
