@@ -108,4 +108,16 @@ grep -Fq 'CNBETA_RSS_CRON' "$SCRIPT"
 grep -Fq 'cnbeta_cron_enabled' "$SCRIPT"
 grep -Fq 'CNBETA_RSS_CRON' "$ENSURE_SCRIPT"
 
+PIKPAK_DEDUPE="$ROOT/scripts/pikpak_downloads_dedupe.sh"
+PIKPAK_DRY="$(PIKPAK_DEDUPE_CRON=1 "$SCRIPT" --dry-run 2>/dev/null)"
+echo "$PIKPAK_DRY" | grep -q 'new-movie-tracker-pikpak-dedupe'
+echo "$PIKPAK_DRY" | grep -q 'PIKPAK_JAV_LOW_SCORE=0'
+echo "$PIKPAK_DRY" | grep -q 'PIKPAK_JAV_SCRAPE_CRON=1'
+echo "$PIKPAK_DRY" | grep -q 'PIKPAK_DEDUPE_DOMESTIC_SMALL=0'
+echo "$PIKPAK_DRY" | grep -q 'pikpak_jav_scrape_cron.log'
+grep -Fq 'PIKPAK_JAV_SCRAPE_CRON' "$PIKPAK_DEDUPE"
+grep -Fq 'pikpak_downloads_jav_scrape.py --apply' "$PIKPAK_DEDUPE"
+grep -Fq 'pikpak_jav_scrape_cron.log' "$PIKPAK_DEDUPE"
+grep -Fq 'jav_scrape_cron_enabled' "$PIKPAK_DEDUPE"
+
 echo "[ok] setup_cron validation passed"
