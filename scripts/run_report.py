@@ -21,7 +21,8 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 REPORTS_DIR = SKILL_DIR / "reports"
 REPORTS_BACKUP_DIR = REPORTS_DIR / "backup"
 REPORT_NAME_RE = re.compile(
-    r"^(?:run|scan|daily|custom|pikpak_dedupe)_(\d{4}-\d{2}-\d{2}_\d{6})\.md$",
+    r"^(?:run|scan|daily|custom|pikpak_dedupe|pikpak_jav_low_score)_"
+    r"(\d{4}-\d{2}-\d{2}_\d{6})\.md$",
     re.IGNORECASE,
 )
 
@@ -1646,6 +1647,9 @@ def write_pikpak_dedupe_report(
     cross_folder_groups: list[dict[str, Any]] | None = None,
     domestic_groups: list[dict[str, Any]] | None = None,
     domestic_small_trash: list[dict[str, Any]] | None = None,
+    jav_low_score_stats: dict[str, Any] | None = None,
+    jav_low_score_rows: list[dict[str, Any]] | None = None,
+    jav_low_score_max_exclusive: float | None = None,
     reports_dir: Path | None = None,
 ) -> RunReportResult:
     """Write PikPak downloads dedupe report under reports/pikpak_dedupe_*.md."""
@@ -1668,6 +1672,41 @@ def write_pikpak_dedupe_report(
         cross_folder_groups=cross_folder_groups,
         domestic_groups=domestic_groups,
         domestic_small_trash=domestic_small_trash,
+        jav_low_score_stats=jav_low_score_stats,
+        jav_low_score_rows=jav_low_score_rows,
+        jav_low_score_max_exclusive=jav_low_score_max_exclusive,
+        previous_line=previous_line,
+    )
+    path.write_text(body, encoding="utf-8")
+    return RunReportResult(path=path, archived_paths=archived_paths, previous_report=previous_report)
+
+
+def write_pikpak_jav_low_score_report(
+    *,
+    folder: str,
+    parent_id: str | None,
+    stats: dict[str, Any],
+    rows: list[dict[str, Any]],
+    max_score_exclusive: float,
+    reports_dir: Path | None = None,
+) -> RunReportResult:
+    """Write PikPak JAV low-score report under reports/pikpak_jav_low_score_*.md."""
+    from pikpak_jav_low_score_report_md import build_pikpak_jav_low_score_report_body
+
+    run_label = "pikpak_jav_low_score"
+    out_dir = reports_dir or REPORTS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    previous_report, archived_paths = archive_reports_to_backup(out_dir, run_label)
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    path = out_dir / f"{run_label}_{ts}.md"
+    previous_line = _previous_report_line(previous_report, reports_dir=out_dir)
+    body = build_pikpak_jav_low_score_report_body(
+        generated_at=format_beijing_time(beijing_now()),
+        folder=folder,
+        parent_id=parent_id,
+        stats=stats,
+        rows=rows,
+        max_score_exclusive=max_score_exclusive,
         previous_line=previous_line,
     )
     path.write_text(body, encoding="utf-8")

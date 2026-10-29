@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # PikPak downloads/JAV dedupe (UC > C > size; cross-folder keeps downloads) plus
+# JAV JavDB low-score report (rating < 4, standalone + dedupe report section) and
 # domestic small-file purge in My Pack (<30 MiB 国产). Default: dry-run.
 # Cron: PIKPAK_DEDUPE_CRON=1 ./scripts/setup_cron.sh
 # Apply on cron VM: PIKPAK_DEDUPE_APPLY=1 PIKPAK_DEDUPE_CRON=1 ./scripts/setup_cron.sh

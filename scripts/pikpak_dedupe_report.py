@@ -218,6 +218,9 @@ def build_pikpak_dedupe_report_body(
     cross_folder_groups: list[dict[str, Any]] | None = None,
     domestic_groups: list[dict[str, Any]] | None = None,
     domestic_small_trash: list[dict[str, Any]] | None = None,
+    jav_low_score_stats: dict[str, Any] | None = None,
+    jav_low_score_rows: list[dict[str, Any]] | None = None,
+    jav_low_score_max_exclusive: float | None = None,
     previous_line: str = "",
 ) -> str:
     mode = "执行（已移入回收站）" if apply else "预览（dry-run，未删除）"
@@ -301,6 +304,21 @@ def build_pikpak_dedupe_report_body(
         domestic_small_min_bytes or 30 * 1024 * 1024,
     )
 
+    jav_low_score_section = ""
+    if jav_low_score_stats is not None and jav_low_score_rows is not None:
+        from pikpak_jav_low_score_report_md import build_jav_low_score_section
+
+        max_ex = float(
+            jav_low_score_max_exclusive
+            or jav_low_score_stats.get("max_score_exclusive")
+            or 4.0,
+        )
+        jav_low_score_section = build_jav_low_score_section(
+            stats=jav_low_score_stats,
+            rows=jav_low_score_rows,
+            max_score_exclusive=max_ex,
+        )
+
     return f"""# PikPak downloads 去重报告
 
 - **生成时间**: {generated_at}
@@ -315,4 +333,5 @@ def build_pikpak_dedupe_report_body(
 {cross_section}
 {domestic_section}
 {domestic_small_section}
+{jav_low_score_section}
 """
