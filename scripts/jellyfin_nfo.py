@@ -2,7 +2,6 @@
 """Build Jellyfin/Kodi-compatible movie NFO XML from JavDB metadata."""
 from __future__ import annotations
 
-import html
 import re
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -29,27 +28,20 @@ def video_basename_stem(name: str) -> str:
     return base
 
 
-def sidecar_names_for_video(video_name: str, *, subfolder_layout: bool) -> dict[str, str]:
-    """Return sidecar filenames for a video row.
+def metadata_folder_name(av_number: str) -> str:
+    """PikPak subfolder under ``downloads`` for Jellyfin metadata (番号)."""
+    return (av_number or "").strip().upper()
 
-    Flat layout (video directly under ``downloads``):
-      ``{stem}.nfo``, ``{stem}-poster.jpg``, optional ``{stem}-fanart.jpg``
 
-    Per-title subfolder (video inside a child folder of ``downloads``):
-      ``movie.nfo``, ``poster.jpg``, optional ``fanart.jpg`` (Jellyfin movie folder convention)
-    """
-    if subfolder_layout:
-        return {
-            "nfo": "movie.nfo",
-            "poster": "poster.jpg",
-            "fanart": "fanart.jpg",
-        }
-    stem = video_basename_stem(video_name)
-    return {
-        "nfo": f"{stem}.nfo",
-        "poster": f"{stem}-poster.jpg",
-        "fanart": f"{stem}-fanart.jpg",
+def metadata_sidecar_names(*, include_fanart: bool = False) -> dict[str, str]:
+    """Jellyfin movie-folder sidecars under ``downloads/{番号}/``."""
+    names = {
+        "nfo": "movie.nfo",
+        "poster": "poster.jpg",
     }
+    if include_fanart:
+        names["fanart"] = "fanart.jpg"
+    return names
 
 
 def _first_str(detail: dict[str, Any], *keys: str) -> str:

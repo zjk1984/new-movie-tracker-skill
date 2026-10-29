@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import os
-import time
-from collections import deque
+from collections import defaultdict, deque
 from typing import Any, Callable, Iterator
 
 from content_filter import classify_region
@@ -12,7 +11,8 @@ from javdb_client import JAV_REPORT_REGIONS, JavDBClient
 from jellyfin_nfo import (
     is_video_filename,
     merge_scrape_metadata,
-    sidecar_names_for_video,
+    metadata_folder_name,
+    metadata_sidecar_names,
 )
 from pikpak_downloads_dedupe_lib import (
     DEFAULT_FOLDER,
@@ -49,7 +49,7 @@ def is_jav_video_row(name: str, *, pseudo_as_jav: bool | None = None) -> tuple[b
     return True, av
 
 
-def iter_video_files_under_parent(
+def iter_jav_video_files(
     list_children: Callable[..., list[dict]],
     session: Any,
     token: str,
@@ -58,11 +58,11 @@ def iter_video_files_under_parent(
     downloads_parent_id: str,
     *,
     recursive: bool = True,
-) -> Iterator[tuple[dict[str, Any], str, bool]]:
-    """Yield (file_row, parent_id, subfolder_layout) for JAV videos under downloads."""
-    queue: deque[tuple[str, bool]] = deque([(downloads_parent_id, False)])
+) -> Iterator[tuple[dict[str, Any], str]]:
+    """Yield (completed video file row, parent_id) under ``downloads``."""
+    queue: deque[str] = deque([downloads_parent_id])
     while queue:
-        parent_id, inside_subfolder = queue.popleft()
+        parent_id = queue.popleft()
         rows = list_children(
             session,
             token,
@@ -71,12 +71,13 @@ def iter_video_files_under_parent(
             parent_id=parent_id,
             complete_files_only=True,
         )
-        subfolders: list[str] = []
         for row in rows:
             kind = row.get("kind")
             if kind == "drive#folder":
                 if recursive:
-                    subfolders.append(str(row.get("id") or ""))
+                    folder_id = str(row.get("id") or "")
+                    if folder_id:
+                        queue.append(folder_id)
                 continue
             if kind != "drive#file":
                 continue
@@ -88,10 +89,29 @@ def iter_video_files_under_parent(
             ok, _av = is_jav_video_row(name)
             if not ok:
                 continue
-            yield row, parent_id, inside_subfolder
-        for folder_id in subfolders:
-            if folder_id:
-                queue.append((folder_id, True))
+            yield row, parent_id
+
+
+def group_videos_by_av(
+    videos: list[tuple[dict[str, Any], str]],
+    *,
+    pseudo_as_jav: bool | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Group scanned videos by 番号 (one metadata folder per 番号)."""
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row, video_parent_id in videos:
+        name = str(row.get("name") or "")
+        ok, av = is_jav_video_row(name, pseudo_as_jav=pseudo_as_jav)
+        if not ok or not av:
+            continue
+        groups[av.upper()].append(
+            {
+                "video_id": row.get("id"),
+                "video_name": name,
+                "video_parent_id": video_parent_id,
+            },
+        )
+    return dict(groups)
 
 
 def sibling_name_set(
@@ -150,24 +170,20 @@ def lookup_scrape_metadata(
     return merge_scrape_metadata(info, detail)
 
 
-def plan_sidecars_for_video(
-    video_row: dict[str, Any],
-    parent_id: str,
+def plan_sidecars_for_av(
+    av_number: str,
+    metadata_parent_id: str,
     *,
-    subfolder_layout: bool,
     existing_names: set[str],
     include_fanart: bool,
 ) -> dict[str, Any]:
-    video_name = str(video_row.get("name") or "")
-    sidecars = sidecar_names_for_video(video_name, subfolder_layout=subfolder_layout)
-    plan: dict[str, Any] = {
-        "video_id": video_row.get("id"),
-        "video_name": video_name,
-        "parent_id": parent_id,
-        "subfolder_layout": subfolder_layout,
+    sidecars = metadata_sidecar_names(include_fanart=include_fanart)
+    return {
+        "av_number": av_number,
+        "metadata_folder": metadata_folder_name(av_number),
+        "metadata_parent_id": metadata_parent_id,
         "sidecars": sidecars,
         "needs_nfo": sidecars["nfo"] not in existing_names,
         "needs_poster": sidecars["poster"] not in existing_names,
-        "needs_fanart": include_fanart and sidecars["fanart"] not in existing_names,
+        "needs_fanart": include_fanart and sidecars.get("fanart", "") not in existing_names,
     }
-    return plan

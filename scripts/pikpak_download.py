@@ -384,6 +384,79 @@ def find_folder_id(
     return None
 
 
+def find_child_folder_id(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    parent_id: str,
+    folder_name: str,
+) -> str | None:
+    """Return folder id for ``folder_name`` directly under ``parent_id``."""
+    for item in list_all_children(
+        session,
+        access_token,
+        device_id,
+        user_id,
+        parent_id=parent_id,
+        complete_files_only=False,
+    ):
+        if item.get("kind") == "drive#folder" and item.get("name") == folder_name:
+            return str(item.get("id") or "") or None
+    return None
+
+
+def create_folder(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    name: str,
+    parent_id: str,
+) -> str:
+    """Create a normal folder under ``parent_id``; return new folder id."""
+    body = {
+        "kind": "drive#folder",
+        "name": name,
+        "parent_id": parent_id,
+        "folder_type": "NORMAL",
+    }
+    captcha_token = get_captcha_token(session, device_id, user_id, "POST:/drive/v1/files")
+    resp = session.post(
+        f"{DRIVE_HOST}/drive/v1/files",
+        headers=api_headers(access_token, device_id, captcha_token),
+        json=body,
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"create folder failed for {name!r}: HTTP {resp.status_code} {resp.text[:300]}")
+    data = resp.json()
+    folder = data.get("file") or data
+    folder_id = str(folder.get("id") or "")
+    if not folder_id:
+        raise RuntimeError(f"create folder {name!r}: response had no id")
+    return folder_id
+
+
+def ensure_child_folder(
+    session: requests.Session,
+    access_token: str,
+    device_id: str,
+    user_id: str,
+    parent_id: str,
+    folder_name: str,
+) -> str:
+    """Find or create ``folder_name`` under ``parent_id``."""
+    existing = find_child_folder_id(
+        session, access_token, device_id, user_id, parent_id, folder_name,
+    )
+    if existing:
+        return existing
+    return create_folder(
+        session, access_token, device_id, user_id, folder_name, parent_id,
+    )
+
+
 def offline_download_url(
     session: requests.Session,
     access_token: str,
