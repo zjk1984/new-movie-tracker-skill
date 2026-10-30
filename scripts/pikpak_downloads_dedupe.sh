@@ -4,8 +4,8 @@
 # and domestic small-file purge in My Pack (<30 MiB 国产). Default: dry-run.
 # Cron: PIKPAK_DEDUPE_CRON=1 ./scripts/setup_cron.sh
 # Apply on cron VM: PIKPAK_DEDUPE_APPLY=1 PIKPAK_DEDUPE_CRON=1 ./scripts/setup_cron.sh
-# Cron line sets PIKPAK_JAV_LOW_SCORE=0 and PIKPAK_JAV_SCRAPE_CRON=1 (incremental
-# Jellyfin sidecars in downloads after successful dedupe; log: pikpak_jav_scrape_cron.log).
+# Cron line sets PIKPAK_JAV_LOW_SCORE=0; incremental Jellyfin sidecars in downloads run
+# only when PIKPAK_JAV_SCRAPE_CRON=1 (opt-in via setup_cron; log: pikpak_jav_scrape_cron.log).
 # Multi-folder (nightly default): PIKPAK_DEDUPE_FOLDERS=downloads,JAV
 # Domestic small purge folders: PIKPAK_DEDUPE_DOMESTIC_FOLDERS=My Pack (same python run)
 set -euo pipefail

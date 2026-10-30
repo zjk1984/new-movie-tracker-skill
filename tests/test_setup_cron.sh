@@ -112,9 +112,14 @@ PIKPAK_DEDUPE="$ROOT/scripts/pikpak_downloads_dedupe.sh"
 PIKPAK_DRY="$(PIKPAK_DEDUPE_CRON=1 "$SCRIPT" --dry-run 2>/dev/null)"
 echo "$PIKPAK_DRY" | grep -q 'new-movie-tracker-pikpak-dedupe'
 echo "$PIKPAK_DRY" | grep -q 'PIKPAK_JAV_LOW_SCORE=0'
-echo "$PIKPAK_DRY" | grep -q 'PIKPAK_JAV_SCRAPE_CRON=1'
+if echo "$PIKPAK_DRY" | grep -q 'PIKPAK_JAV_SCRAPE_CRON=1'; then
+  echo "[err] pikpak dedupe cron should not set PIKPAK_JAV_SCRAPE_CRON=1 by default" >&2
+  exit 1
+fi
 echo "$PIKPAK_DRY" | grep -q 'PIKPAK_DEDUPE_DOMESTIC_SMALL=0'
-echo "$PIKPAK_DRY" | grep -q 'pikpak_jav_scrape_cron.log'
+PIKPAK_SCRAPE_DRY="$(PIKPAK_DEDUPE_CRON=1 PIKPAK_JAV_SCRAPE_CRON=1 "$SCRIPT" --dry-run 2>/dev/null)"
+echo "$PIKPAK_SCRAPE_DRY" | grep -q 'PIKPAK_JAV_SCRAPE_CRON=1'
+echo "$PIKPAK_SCRAPE_DRY" | grep -q 'pikpak_jav_scrape_cron.log'
 grep -Fq 'PIKPAK_JAV_SCRAPE_CRON' "$PIKPAK_DEDUPE"
 grep -Fq 'pikpak_downloads_jav_scrape.py --apply' "$PIKPAK_DEDUPE"
 grep -Fq 'pikpak_jav_scrape_cron.log' "$PIKPAK_DEDUPE"
