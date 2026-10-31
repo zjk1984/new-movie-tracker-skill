@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import uuid
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
@@ -32,13 +34,39 @@ def agent_name() -> str:
 def cli_env() -> dict[str, str]:
     env = os.environ.copy()
     env.setdefault("GUANGYAPAN_DRIVE_LOGIN_MODE", "device")
+    node = resolve_node_executable()
+    node_dir = str(Path(node).parent)
+    path = env.get("PATH", "")
+    if node_dir and node_dir not in path.split(os.pathsep):
+        env["PATH"] = f"{node_dir}{os.pathsep}{path}" if path else node_dir
     return env
+
+
+@lru_cache(maxsize=1)
+def resolve_node_executable() -> str:
+    """Node for guangyapan Skill CLI (cron/tmux often lack agent PATH)."""
+    override = (os.environ.get("GUANGYAPAN_NODE") or os.environ.get("NODE_BINARY") or "").strip()
+    if override and Path(override).is_file():
+        return override
+    found = shutil.which("node")
+    if found:
+        return found
+    for candidate in (
+        "/exec-daemon/node",
+        "/usr/bin/node",
+        "/usr/local/bin/node",
+    ):
+        if Path(candidate).is_file():
+            return candidate
+    raise FileNotFoundError(
+        "node not found for guangyapan-drive CLI; set GUANGYAPAN_NODE or install Node.js",
+    )
 
 
 def _base_cmd(*extra: str) -> list[str]:
     root = skill_root()
     return [
-        "node",
+        resolve_node_executable(),
         str(root / "bin" / "guangyapan.mjs"),
         *extra,
         "--agent-name",

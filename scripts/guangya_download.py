@@ -26,7 +26,9 @@ GUANGYA_V1_UNSUPPORTED_SHA = "GuangYa v1: PikPak feature codes are not supported
 
 def build_client():
     from guangyaclient import GuangyaClient
+    from guangya_auth import sync_credentials_from_skill_store
 
+    sync_credentials_from_skill_store()
     access = resolve_access_token()
     refresh = resolve_refresh_token()
     device_id = resolve_device_id()
