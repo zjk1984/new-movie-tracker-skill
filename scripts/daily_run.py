@@ -72,8 +72,18 @@ def run_scan(
     return subprocess.call(cmd, cwd=str(SKILL_DIR))
 
 
-def resolve_download_provider(explicit: str | None = None) -> str:
-    raw = (explicit or os.environ.get("DOWNLOAD_PROVIDER") or "pikpak").strip().lower()
+def resolve_download_provider(
+    explicit: str | None = None,
+    *,
+    use_pikpak: bool = False,
+) -> str:
+    if use_pikpak or (os.environ.get("DAILY_USE_PIKPAK") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return "pikpak"
+    raw = (explicit or os.environ.get("DOWNLOAD_PROVIDER") or "guangya").strip().lower()
     if raw not in {"pikpak", "guangya"}:
         raise ValueError(f"unsupported DOWNLOAD_PROVIDER: {raw!r} (use pikpak or guangya)")
     return raw
@@ -83,25 +93,30 @@ def run_download(args: argparse.Namespace, output_dir: Path) -> tuple[int, int |
     sys.path.insert(0, str(SCRIPTS_DIR))
     import json
 
-    provider = resolve_download_provider(getattr(args, "download_provider", None))
+    provider = resolve_download_provider(
+        getattr(args, "download_provider", None),
+        use_pikpak=getattr(args, "use_pikpak", False),
+    )
     result_path = output_dir / "last_result.json"
     if not result_path.exists():
         print(f"[err] scan result missing: {result_path}", file=sys.stderr)
         return 1, None, None
 
     if provider == "guangya":
-        from guangya_download import extract_pending_submit_uris, submit_from_result
+        from guangya_cloud_daily import extract_pending_submit_uris, submit_from_result
     else:
         from pikpak_auth import resolve_folder
         from pikpak_download import extract_pending_submit_uris, submit_from_result
 
     try:
         if provider == "guangya":
+            dry_run = True if getattr(args, "guangya_dry_run", False) else None
             ok, total = submit_from_result(
                 result_path,
                 today_only=False,
                 region_filter=True,
                 new_only=True,
+                dry_run=dry_run,
             )
         else:
             ok, total = submit_from_result(
@@ -132,7 +147,7 @@ def run_download(args: argparse.Namespace, output_dir: Path) -> tuple[int, int |
         rc = 0
     elif ok > 0:
         rc = 0
-        print(f"[warn] pikpak partial success: {ok}/{total}")
+        print(f"[warn] {provider} partial success: {ok}/{total}")
     else:
         rc = 1
     return rc, ok, total
@@ -170,19 +185,19 @@ def maybe_feishu_pikpak_done(
     if not enabled:
         return
     sys.path.insert(0, str(SCRIPTS_DIR))
-    from feishu_notify import is_configured, send_pikpak_done
+    from feishu_notify import is_configured, send_cloud_done
 
     if not is_configured():
         return
     report_path = output_dir / "download_report.json"
     try:
-        send_pikpak_done(
+        send_cloud_done(
             report_path,
             run_label=run_label,
-            pikpak_ok=pikpak_ok,
-            pikpak_total=pikpak_total,
+            submit_ok=pikpak_ok,
+            submit_total=pikpak_total,
         )
-        print("[ok] feishu pikpak-done card sent")
+        print("[ok] feishu cloud-done card sent")
     except Exception as exc:
         print(f"[warn] feishu pikpak-done failed: {exc}")
 
@@ -257,7 +272,7 @@ def main() -> int:
     parser.add_argument(
         "--scan-only",
         action="store_true",
-        help="Scan only, skip PikPak download",
+        help="Scan only, skip cloud download (GuangYa / PikPak)",
     )
     parser.add_argument(
         "--download-only",
@@ -276,7 +291,17 @@ def main() -> int:
         "--download-provider",
         default=None,
         choices=("pikpak", "guangya"),
-        help="Cloud offline download backend (default: env DOWNLOAD_PROVIDER or pikpak)",
+        help="Cloud backend (default: guangya Skill CLI; env DOWNLOAD_PROVIDER)",
+    )
+    parser.add_argument(
+        "--use-pikpak",
+        action="store_true",
+        help="Use PikPak instead of GuangYa cloud add (or set DAILY_USE_PIKPAK=1)",
+    )
+    parser.add_argument(
+        "--guangya-dry-run",
+        action="store_true",
+        help="Plan GuangYa cloud adds only (no cloud_collection_add; or GUANGYA_CLOUD_DRY_RUN=1)",
     )
     parser.add_argument(
         "--feishu",

@@ -439,6 +439,15 @@ def extract_task_id_from_run_result(data: dict[str, Any], operation_id: str) -> 
     return ""
 
 
+def cloud_submit_batch_size() -> int:
+    raw = (os.environ.get("GUANGYA_CLOUD_SUBMIT_BATCH_SIZE") or "12").strip()
+    try:
+        size = int(raw)
+    except ValueError:
+        size = 12
+    return max(1, size)
+
+
 def submit_rows_to_guangya(
     rows: list[dict[str, Any]],
     *,
@@ -447,28 +456,45 @@ def submit_rows_to_guangya(
     runner: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     if not rows:
-        return {"submitted": 0, "results": []}
+        return {"submitted": 0, "results": [], "exit_code": 0, "stderr": "", "response": {}}
 
-    operations: list[dict[str, Any]] = []
-    if preflight:
-        operations.extend(preflight_resolve_operations(rows))
-    operations.extend(cloud_collection_add_operations(rows, remote_parent_id))
+    batch_size = cloud_submit_batch_size()
+    combined_results: list[dict[str, Any]] = []
+    last_code = 0
+    last_stderr = ""
+    last_data: dict[str, Any] = {}
 
-    code, data, stderr = run_operations(operations, runner=runner)
-    results: list[dict[str, Any]] = []
-    for index, row in enumerate(rows):
-        op_id = f"add-{index + 1}"
-        task_id = extract_task_id_from_run_result(data, op_id)
-        results.append({
-            "av_number": row.get("av_number"),
-            "uri": row.get("uri"),
-            "task_id": task_id,
-            "operation_id": op_id,
-        })
+    for start in range(0, len(rows), batch_size):
+        chunk = rows[start : start + batch_size]
+        operations: list[dict[str, Any]] = []
+        if preflight:
+            pre = preflight_resolve_operations(chunk)
+            for index, op in enumerate(pre):
+                op["id"] = f"resolve-{start + index + 1}"
+            operations.extend(pre)
+        chunk_ops = cloud_collection_add_operations(chunk, remote_parent_id)
+        for index, op in enumerate(chunk_ops):
+            op["id"] = f"add-{start + index + 1}"
+        operations.extend(chunk_ops)
+
+        code, data, stderr = run_operations(operations, runner=runner)
+        last_code, last_stderr, last_data = code, stderr or "", data
+        for index, row in enumerate(chunk):
+            op_id = f"add-{start + index + 1}"
+            task_id = extract_task_id_from_run_result(data, op_id)
+            combined_results.append({
+                "av_number": row.get("av_number"),
+                "uri": row.get("uri"),
+                "task_id": task_id,
+                "operation_id": op_id,
+            })
+        if code != 0:
+            break
+
     return {
-        "exit_code": code,
-        "stderr": stderr,
-        "response": data,
-        "submitted": len(rows),
-        "results": results,
+        "exit_code": last_code,
+        "stderr": last_stderr,
+        "response": last_data,
+        "submitted": len(combined_results),
+        "results": combined_results,
     }

@@ -998,6 +998,7 @@ def save_download_report(
     source: str = "",
     pending_submit: list[dict] | None = None,
     submit_skip_reason: str = "",
+    provider: str = "",
 ) -> dict:
     from datetime import datetime
 
@@ -1006,6 +1007,7 @@ def save_download_report(
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "folder": folder,
         "source": source,
+        "provider": (provider or "").strip() or "pikpak",
         "ok": len(succeeded),
         "failed_count": len(failed),
         "total": len(succeeded) + len(failed),

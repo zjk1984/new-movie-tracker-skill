@@ -9,6 +9,20 @@ DEFAULT_GUANGYA_FOLDER = "My Pack"
 _JAV_GUANGYA_REGIONS = frozenset({"jav_censored", "uncensored"})
 
 
+def resolve_cloud_parent_override() -> tuple[str | None, str | None]:
+    """``GUANGYA_CLOUD_PARENT`` / ``GUANGYAPAN_CLOUD_PARENT``: folder name or remote id."""
+    raw = (
+        os.environ.get("GUANGYA_CLOUD_PARENT")
+        or os.environ.get("GUANGYAPAN_CLOUD_PARENT")
+        or ""
+    ).strip()
+    if not raw:
+        return None, None
+    if " " not in raw and (len(raw) > 20 or "_" in raw):
+        return None, raw
+    return raw, None
+
+
 def resolve_guangya_folder(explicit: str | None = None, default: str = DEFAULT_GUANGYA_FOLDER) -> str:
     if explicit and explicit.strip():
         return explicit.strip()

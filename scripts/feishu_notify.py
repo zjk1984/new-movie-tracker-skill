@@ -454,7 +454,7 @@ def build_scan_summary_card(
         f"4. 有链接: **{with_link}** 帖 | 无链接: **{without_link}** 帖\n"
         f"5. JavDB 低分/无分: **{skipped_score}** 帖\n"
         f"{_submit_funnel_card_lines(scan_stats)}"
-        f"6. PikPak 提交: 成功 **{ok}** + 失败 **{fail}** = **{total}** 条（按链接计）\n"
+        f"6. {_submit_step_label(download_report)}: 成功 **{ok}** + 失败 **{fail}** = **{total}** 条（按链接计）\n"
         f"{_submit_funnel_footnote(scan_stats, link_sum, total)}\n"
         f"{jav_lines}{domestic_lines}\n"
         f"**失败原因汇总**\n{_error_summary(download_report.get('failed') or [])}\n"
@@ -733,7 +733,7 @@ def build_scan_done_card(
         f"3. 可下载: **{scan_stats.get('downloadable', 0)}** 帖\n"
         f"4. 有链接: **{scan_stats.get('with_link', 0)}** 帖"
         f" | 无链接: **{scan_stats.get('without_link', 0)}** 帖\n\n"
-        f"**下一步** PikPak 提交进行中（若未跳过下载）"
+        f"**下一步** {_scan_next_submit_step()}进行中（若未跳过下载）"
     )
     return {
         "config": {"wide_screen_mode": True},
@@ -747,7 +747,22 @@ def build_scan_done_card(
     }
 
 
-def build_pikpak_done_card(
+def _submit_step_label(download_report: dict[str, Any] | None = None) -> str:
+    provider = ((download_report or {}).get("provider") or _default_download_provider()).strip().lower()
+    return "PikPak 提交" if provider == "pikpak" else "光鸭云添加"
+
+
+def _default_download_provider() -> str:
+    if (os.environ.get("DAILY_USE_PIKPAK") or "").strip().lower() in {"1", "true", "yes"}:
+        return "pikpak"
+    return (os.environ.get("DOWNLOAD_PROVIDER") or "guangya").strip().lower() or "guangya"
+
+
+def _scan_next_submit_step() -> str:
+    return _submit_step_label({"provider": _default_download_provider()})
+
+
+def build_cloud_done_card(
     download_report: dict[str, Any],
     *,
     run_label: str = "scan",
@@ -755,10 +770,11 @@ def build_pikpak_done_card(
     ok = int(download_report.get("ok") or 0)
     fail = int(download_report.get("failed_count") or 0)
     total = int(download_report.get("total") or (ok + fail))
+    step = _submit_step_label(download_report)
     md = (
         f"**完成时间** {format_beijing_time(beijing_now(), with_label=True)}\n\n"
         f"**任务类型** {_run_label_title(run_label)}\n\n"
-        f"**PikPak 提交结果**（按链接计）\n"
+        f"**{step}结果**（按链接计）\n"
         f"• 成功: **{ok}**\n"
         f"• 失败: **{fail}**\n"
         f"• 合计: **{total}**\n\n"
@@ -767,16 +783,25 @@ def build_pikpak_done_card(
         md += f"**失败原因**\n{_error_summary(download_report.get('failed') or [])}\n\n"
     md += "**下一步** 正在生成完整 Markdown 报告并推送"
     template = "green" if fail == 0 else "yellow"
+    title = f"✅ {step}完成"
     return {
         "config": {"wide_screen_mode": True},
         "header": {
             "template": template,
-            "title": {"tag": "plain_text", "content": "✅ PikPak 提交完成"},
+            "title": {"tag": "plain_text", "content": title},
         },
         "elements": [
             {"tag": "div", "text": {"tag": "lark_md", "content": md}},
         ],
     }
+
+
+def build_pikpak_done_card(
+    download_report: dict[str, Any],
+    *,
+    run_label: str = "scan",
+) -> dict[str, Any]:
+    return build_cloud_done_card(download_report, run_label=run_label)
 
 
 def send_scan_done(
@@ -790,6 +815,24 @@ def send_scan_done(
     return send_interactive_card(build_scan_done_card(scan_stats, run_label=run_label))
 
 
+def send_cloud_done(
+    download_report_path: Path,
+    *,
+    run_label: str = "scan",
+    submit_ok: int | None = None,
+    submit_total: int | None = None,
+) -> dict[str, Any] | None:
+    if not is_configured():
+        return None
+    report = load_download_report(download_report_path if download_report_path.exists() else None)
+    if submit_ok is not None:
+        report["ok"] = submit_ok
+    if submit_total is not None:
+        report["total"] = submit_total
+        report["failed_count"] = max(0, submit_total - int(report.get("ok") or 0))
+    return send_interactive_card(build_cloud_done_card(report, run_label=run_label))
+
+
 def send_pikpak_done(
     download_report_path: Path,
     *,
@@ -797,15 +840,12 @@ def send_pikpak_done(
     pikpak_ok: int | None = None,
     pikpak_total: int | None = None,
 ) -> dict[str, Any] | None:
-    if not is_configured():
-        return None
-    report = load_download_report(download_report_path if download_report_path.exists() else None)
-    if pikpak_ok is not None:
-        report["ok"] = pikpak_ok
-    if pikpak_total is not None:
-        report["total"] = pikpak_total
-        report["failed_count"] = max(0, pikpak_total - int(report.get("ok") or 0))
-    return send_interactive_card(build_pikpak_done_card(report, run_label=run_label))
+    return send_cloud_done(
+        download_report_path,
+        run_label=run_label,
+        submit_ok=pikpak_ok,
+        submit_total=pikpak_total,
+    )
 
 
 def send_scan_progress(
