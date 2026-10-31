@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Daily scan + incremental cloud download (default PikPak; set DOWNLOAD_PROVIDER=guangya for 光鸭).
+# GuangYa JAV/国产 → My Pack by default (GUANGYAPAN_FOLDER_JAV / GUANGYAPAN_FOLDER_DOMESTIC).
 # Install cron: scripts/setup_cron.sh  (default 07:00 + 13:00 + 20:00 Asia/Shanghai)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

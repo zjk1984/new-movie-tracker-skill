@@ -110,6 +110,7 @@ python scripts/scan.py --days 3 --cnsub-priority --pikpak
 python scripts/guangya_login.py login   # 保存 access_token + refresh_token 到 guangya_auth.json
 python scripts/guangya_login.py status --check
 export DOWNLOAD_PROVIDER=guangya       # 或 daily_run: --download-provider guangya
+# 日番 / 国产默认光鸭目录 My Pack（GUANGYAPAN_FOLDER_JAV / GUANGYAPAN_FOLDER_DOMESTIC）
 python scripts/daily_run.py --download-only --download-provider guangya
 python scripts/guangya_download.py --magnet "magnet:?xt=urn:btih:..."
 
