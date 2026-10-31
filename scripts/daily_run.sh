@@ -9,6 +9,8 @@ source "$ROOT/scripts/lib/daily_run_lock.sh"
 cd "$ROOT"
 mkdir -p data
 export TZ="${TZ:-Asia/Shanghai}"
+# Cron/supervisor tmux sessions often omit Cloud Agent PATH (/exec-daemon/node).
+export PATH="/exec-daemon:/exec-daemon/tools:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
 LOCK_FILE="$(daily_run_lock_path "$ROOT")"
 if ! try_acquire_daily_run_lock "$LOCK_FILE"; then

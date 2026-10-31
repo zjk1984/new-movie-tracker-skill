@@ -218,3 +218,58 @@ def refresh_access_token(
     if not data.get("access_token"):
         raise RuntimeError(f"refresh response missing access_token: {data}")
     return data
+
+
+def _skill_agent_credentials_paths() -> list[Path]:
+    """Candidate guangyapan-drive Skill ``credentials.json`` files (newest first)."""
+    paths: list[Path] = []
+    profile = (os.environ.get("GUANGYAPAN_PROFILE_DIR") or "").strip()
+    if profile:
+        paths.append(Path(profile) / "account" / "credentials.json")
+    state_root = Path(
+        os.environ.get("GUANGYAPAN_DRIVE_STATE_ROOT", str(Path.home() / ".guangyapan-drive")),
+    )
+    agents = state_root / "agents"
+    if agents.is_dir():
+        for cred in agents.glob("*/account/credentials.json"):
+            paths.append(cred)
+    # De-dupe, newest mtime first
+    seen: set[Path] = set()
+    ordered: list[Path] = []
+    for path in sorted(set(paths), key=lambda p: p.stat().st_mtime if p.is_file() else 0, reverse=True):
+        if path not in seen:
+            seen.add(path)
+            ordered.append(path)
+    return ordered
+
+
+def needs_skill_token_sync() -> bool:
+    """True when daily HTTP client should pull tokens from the Skill credential store."""
+    if not load_saved_refresh_token():
+        return True
+    access = load_saved_access_token()
+    # Legacy placeholder tokens from early guangya_login (no refresh, 401 on API).
+    return access.startswith("TOKEN")
+
+
+def sync_credentials_from_skill_store(*, force: bool = False) -> bool:
+    """Mirror Skill CLI tokens into ``guangya_auth.json`` for ``guangya_download`` HTTP client."""
+    if not force and not needs_skill_token_sync() and load_saved_access_token():
+        return False
+    for path in _skill_agent_credentials_paths():
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        creds = payload.get("credentials") if isinstance(payload, dict) else None
+        if not isinstance(creds, dict):
+            continue
+        access = (creds.get("accessToken") or creds.get("access_token") or "").strip()
+        refresh = (creds.get("refreshToken") or creds.get("refresh_token") or "").strip()
+        if not access:
+            continue
+        save_credentials(access_token=access, refresh_token=refresh or None)
+        return True
+    return False
