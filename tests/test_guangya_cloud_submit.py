@@ -14,9 +14,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from guangya_cloud_submit_lib import (  # noqa: E402
     cloud_collection_add_operations,
     enumerate_av_numbers_from_files,
+    extract_params_url_from_pikpak_file_payload,
+    extract_params_url_from_pikpak_task_payload,
+    fetch_pikpak_file_params_url,
     load_matched_by_av,
     mark_state_submitted,
     resolve_submit_row_for_av,
+    row_from_pikpak_params_url,
     state_has_submission,
     submit_rows_to_guangya,
     uri_supported_by_guangya,
@@ -78,6 +82,7 @@ class ResolveSubmitRowTests(unittest.TestCase):
                     representative_name="SSIS-001-C.mp4",
                     scan_item=None,
                     javdb_client=mock_client,
+                    apply_policy_gate=True,
                     region_filter=True,
                     javdb_score_gate=True,
                 )
@@ -98,11 +103,95 @@ class ResolveSubmitRowTests(unittest.TestCase):
                     "IPX-100",
                     scan_item=scan_item,
                     javdb_client=None,
+                    apply_policy_gate=False,
                     javdb_score_gate=False,
                 )
         self.assertEqual(source, "scan")
         assert row is not None
         self.assertIn("forum111", row["uri"])
+
+    def test_policy_gate_off_ignores_submit_eligible(self) -> None:
+        mock_client = MagicMock()
+        mock_client.lookup.return_value = {
+            "number": "SSIS-002",
+            "query_status": "ok",
+            "score": 1.0,
+            "content_type": "jav_censored",
+            "best_magnet": "magnet:?xt=urn:btih:lowscore",
+            "magnets": ["magnet:?xt=urn:btih:lowscore"],
+            "magnet_status": "available",
+        }
+        with patch("guangya_cloud_submit_lib.is_submit_eligible", return_value=False):
+            with patch("guangya_cloud_submit_lib.apply_region_filter", return_value=True):
+                row, reason, source = resolve_submit_row_for_av(
+                    "SSIS-002",
+                    javdb_client=mock_client,
+                    apply_policy_gate=False,
+                )
+        self.assertFalse(reason)
+        self.assertEqual(source, "javdb")
+        assert row is not None
+        self.assertIn("lowscore", row["uri"])
+
+
+class PikPakUrlExtractionTests(unittest.TestCase):
+    def test_file_payload_url(self) -> None:
+        url, task_id = extract_params_url_from_pikpak_file_payload({
+            "id": "f1",
+            "params": {"url": "magnet:?xt=urn:btih:fromfile", "task_id": "t9"},
+        })
+        self.assertEqual(url, "magnet:?xt=urn:btih:fromfile")
+        self.assertEqual(task_id, "t9")
+
+    def test_task_payload_url(self) -> None:
+        self.assertEqual(
+            extract_params_url_from_pikpak_task_payload({
+                "params": {"url": "ed2k://|file|a|1|h|/"},
+            }),
+            "ed2k://|file|a|1|h|/",
+        )
+
+    def test_row_from_params_url(self) -> None:
+        row = row_from_pikpak_params_url(
+            "magnet:?xt=urn:btih:pikpaksha",
+            av_number="ABC-123",
+            representative_name="ABC-123.mp4",
+        )
+        assert row is not None
+        self.assertTrue(row["uri"].startswith("magnet:"))
+        self.assertEqual(row["av_number"], "ABC-123")
+
+    def test_fetch_file_then_task_fallback(self) -> None:
+        session = MagicMock()
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            if url.endswith("/files/fid1"):
+                resp.status_code = 200
+                resp.json.return_value = {"params": {"task_id": "tid1"}}
+            elif url.endswith("/tasks/tid1"):
+                resp.status_code = 200
+                resp.json.return_value = {"params": {"url": "magnet:?xt=urn:btih:taskmag"}}
+            else:
+                resp.status_code = 404
+                resp.text = "missing"
+            return resp
+
+        session.get.side_effect = fake_get
+
+        def fake_captcha(_session, _device, _user, action):
+            return f"cap-{action}"
+
+        url = fetch_pikpak_file_params_url(
+            session,
+            "token",
+            "device",
+            "user",
+            "fid1",
+            get_captcha=fake_captcha,
+        )
+        self.assertEqual(url, "magnet:?xt=urn:btih:taskmag")
+        self.assertEqual(session.get.call_count, 2)
 
 
 class MatchedByAvTests(unittest.TestCase):
@@ -159,6 +248,28 @@ class SubmitRowsCliMockTests(unittest.TestCase):
             )
         self.assertEqual(out["submitted"], 1)
         self.assertEqual(out["results"][0]["task_id"], "task-99")
+
+    def test_submit_chunks_large_batches(self) -> None:
+        rows = [
+            {"uri": f"magnet:?xt=urn:btih:{i:02x}", "av_number": f"X-{i}"}
+            for i in range(13)
+        ]
+        call_ops: list[list] = []
+
+        def fake_run(ops, **kwargs):
+            call_ops.append(ops)
+            return 0, {"data": {"items": []}}, ""
+
+        with patch("guangya_cloud_submit_lib.run_operations", side_effect=fake_run):
+            out = submit_rows_to_guangya(rows, remote_parent_id="p", batch_size=12)
+        self.assertEqual(out["batches"], 2)
+        self.assertEqual(out["submitted"], 13)
+        self.assertEqual(len(call_ops), 2)
+        add_ops_first = [op for op in call_ops[0] if op["type"] == "cloud_collection_add"]
+        add_ops_second = [op for op in call_ops[1] if op["type"] == "cloud_collection_add"]
+        self.assertEqual(len(add_ops_first), 12)
+        self.assertEqual(len(add_ops_second), 1)
+        self.assertEqual(add_ops_second[0]["id"], "add-13")
 
 
 if __name__ == "__main__":
