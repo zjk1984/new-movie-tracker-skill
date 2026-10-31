@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Daily scheduled scan + incremental PikPak download (new magnets since last run).
 
-Japanese JAV (有码/无码) and domestic 国产/流出 both default to PikPak folder ``My Pack``
-(override with ``PIKPAK_FOLDER_JAV`` / ``PIKPAK_FOLDER_DOMESTIC``). ``--pikpak-folder`` /
-``PIKPAK_FOLDER`` apply only when an item has no region tag (fallback).
+Japanese JAV (有码/无码) and domestic 国产/流出 both default to cloud folder ``My Pack``
+(PikPak: ``PIKPAK_FOLDER_JAV`` / ``PIKPAK_FOLDER_DOMESTIC``; GuangYa:
+``GUANGYAPAN_FOLDER_JAV`` / ``GUANGYAPAN_FOLDER_DOMESTIC``). ``--pikpak-folder`` /
+``PIKPAK_FOLDER`` apply only when an item has no region tag (PikPak fallback).
+``DOWNLOAD_PROVIDER=guangya`` uses the same region routing via ``guangya_folder.py``.
 """
 from __future__ import annotations
 

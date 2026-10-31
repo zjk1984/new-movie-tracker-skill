@@ -83,7 +83,12 @@ def prepare_guangya_item(item: dict) -> tuple[dict | None, str | None]:
     return out, None
 
 
-def submit_magnet(client, url: str, *, parent_id: int | None = None) -> dict[str, Any]:
+def submit_magnet(
+    client,
+    url: str,
+    *,
+    parent_id: str | int | None = None,
+) -> dict[str, Any]:
     result = client.cloud_create_task(url, parent_id=parent_id)
     if not isinstance(result, dict):
         return {"raw": result}
@@ -98,7 +103,7 @@ def submit_one(
     client,
     item: dict,
     *,
-    parent_id: int | None = None,
+    parent_id: str | int | None = None,
 ) -> dict[str, Any]:
     prepared, err = prepare_guangya_item(item)
     if err:
@@ -111,15 +116,36 @@ def submit_one(
 def submit_downloads(
     items: list[dict],
     *,
+    folder: str | None = None,
     access_token: str | None = None,
-    parent_id: int | None = None,
+    parent_id: str | int | None = None,
 ) -> tuple[int, int, list[dict], list[dict], list[dict], str]:
+    from guangya_cloud_submit_lib import resolve_guangya_parent_id
+    from guangya_folder import guangya_folder_for_download_item, resolve_guangya_folder
+
     token = resolve_access_token(access_token)
     if not token:
         raise RuntimeError(
             "no GuangYa access token: run `python scripts/guangya_login.py login` "
             "or set GUANGYA_ACCESS_TOKEN"
         )
+
+    fallback_folder = resolve_guangya_folder(folder)
+    fixed_parent_id = parent_id if parent_id is not None else _resolve_env_parent_id()
+    folder_parent_ids: dict[str, str | int | None] = {}
+    logged_folders: set[str] = set()
+
+    def parent_id_for_folder(folder_name: str) -> str | int | None:
+        if fixed_parent_id is not None:
+            return fixed_parent_id
+        if folder_name in folder_parent_ids:
+            return folder_parent_ids[folder_name]
+        remote_id = resolve_guangya_parent_id(folder_name, create_if_missing=False)
+        folder_parent_ids[folder_name] = remote_id
+        if folder_name not in logged_folders:
+            logged_folders.add(folder_name)
+            print(f"[info] guangya folder: {folder_name} ({remote_id})")
+        return remote_id
 
     client = build_client()
     ok = 0
@@ -131,8 +157,18 @@ def submit_downloads(
     try:
         for index, item in enumerate(items):
             label = item.get("name") or "download"
+            item_folder = guangya_folder_for_download_item(item, fallback=fallback_folder)
             try:
-                result = submit_one(client, item, parent_id=parent_id)
+                item_parent_id = parent_id_for_folder(item_folder)
+            except RuntimeError as exc:
+                err = str(exc)
+                print(f"[err] {label}: {err}", file=sys.stderr)
+                record = dict(item)
+                record.update({"status": "failed", "error": err, "folder": item_folder})
+                failed.append(record)
+                continue
+            try:
+                result = submit_one(client, item, parent_id=item_parent_id)
                 persist_client_tokens(client)
                 task_id = (
                     result.get("taskId")
@@ -148,7 +184,14 @@ def submit_downloads(
                 if title:
                     print(f"     {title}")
                 record = dict(item)
-                record.update({"status": "ok", "task_id": str(task_id), "phase": "submitted"})
+                record.update(
+                    {
+                        "status": "ok",
+                        "task_id": str(task_id),
+                        "phase": "submitted",
+                        "folder": item_folder,
+                    },
+                )
                 succeeded.append(record)
                 ok += 1
             except Exception as exc:
@@ -200,14 +243,16 @@ def extract_pending_submit_uris(report: dict) -> list[str]:
 def submit_from_result(
     result_path: Path,
     *,
+    folder: str | None = None,
     today_only: bool = True,
     region_filter: bool = True,
     new_only: bool = False,
     skip_scan_repeat: bool = True,
     state_file: Path | None = None,
     access_token: str | None = None,
-    parent_id: int | None = None,
+    parent_id: str | int | None = None,
 ) -> tuple[int, int]:
+    from guangya_folder import resolve_guangya_folder
     from download_state import (
         default_state_path,
         filter_new_items,
@@ -219,6 +264,7 @@ def submit_from_result(
     from pikpak_download import load_downloads_from_result, save_download_report
 
     report_path = result_path.parent / "download_report.json"
+    folder_label = resolve_guangya_folder(folder)
 
     items = load_downloads_from_result(
         result_path,
@@ -247,7 +293,7 @@ def submit_from_result(
             report_path,
             succeeded=[],
             failed=[],
-            folder="",
+            folder=folder_label,
             source=str(result_path),
         )
         if new_only and state is not None:
@@ -263,7 +309,7 @@ def submit_from_result(
             report_path,
             succeeded=[],
             failed=[],
-            folder="",
+            folder=folder_label,
             source=str(result_path),
             pending_submit=items,
             submit_skip_reason=reason,
@@ -278,6 +324,7 @@ def submit_from_result(
     try:
         ok, total, succeeded, failed, pending, submit_skip_reason = submit_downloads(
             items,
+            folder=folder,
             access_token=access_token,
             parent_id=parent_id,
         )
@@ -290,7 +337,7 @@ def submit_from_result(
                 report_path,
                 succeeded=[],
                 failed=[],
-                folder="",
+                folder=folder_label,
                 source=str(result_path),
                 pending_submit=items,
                 submit_skip_reason=reason,
@@ -309,7 +356,7 @@ def submit_from_result(
         report_path,
         succeeded=succeeded,
         failed=failed,
-        folder="",
+        folder=folder_label,
         source=str(result_path),
         pending_submit=pending or None,
         submit_skip_reason=submit_skip_reason,
@@ -323,15 +370,19 @@ def submit_from_result(
     return ok, total
 
 
-def _resolve_parent_id() -> int | None:
+def _resolve_env_parent_id() -> str | int | None:
+    """Optional fixed folder id for all submits (overrides region → folder name routing)."""
     raw = (os.environ.get("GUANGYA_PARENT_ID") or "").strip()
     if not raw:
         return None
     try:
         return int(raw)
     except ValueError:
-        print(f"[warn] invalid GUANGYA_PARENT_ID: {raw}", file=sys.stderr)
-        return None
+        return raw
+
+
+def _resolve_parent_id() -> str | int | None:
+    return _resolve_env_parent_id()
 
 
 def main() -> int:
