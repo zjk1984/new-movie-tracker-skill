@@ -2,8 +2,13 @@
 """Helpers for PikPak downloads JAV → Jellyfin sidecar scrape."""
 from __future__ import annotations
 
+import io
 import os
+import shutil
+import subprocess
+import tempfile
 from collections import defaultdict, deque
+from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from content_filter import classify_region
@@ -166,6 +171,114 @@ def validate_jpeg_cover_bytes(data: bytes) -> None:
         raise RuntimeError(f"cover is not a valid JPEG (expected ff d8 ff; got {magic})")
 
 
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def is_webp_image(data: bytes) -> bool:
+    return len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP"
+
+
+def is_png_image(data: bytes) -> bool:
+    return len(data) >= len(PNG_MAGIC) and data[: len(PNG_MAGIC)] == PNG_MAGIC
+
+
+def is_avif_image(data: bytes) -> bool:
+    if len(data) < 12:
+        return False
+    if data[4:8] != b"ftyp":
+        return False
+    brand = data[8:12]
+    return brand in (b"avif", b"avis", b"mif1") or b"avif" in data[:64]
+
+
+def cover_bytes_input_suffix(data: bytes) -> str:
+    if is_webp_image(data):
+        return ".webp"
+    if is_png_image(data):
+        return ".png"
+    if is_avif_image(data):
+        return ".avif"
+    return ".img"
+
+
+def _transcode_cover_with_pillow(data: bytes) -> bytes | None:
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            rgb = img.convert("RGB")
+            out = io.BytesIO()
+            rgb.save(out, format="JPEG", quality=90, optimize=True)
+            return out.getvalue()
+    except Exception:
+        return None
+
+
+def _transcode_cover_with_ffmpeg(data: bytes) -> bytes:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("cover transcode requires Pillow or ffmpeg on PATH")
+    suffix = cover_bytes_input_suffix(data)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src = Path(tmpdir) / f"cover_in{suffix}"
+        dst = Path(tmpdir) / "cover_out.jpg"
+        src.write_bytes(data)
+        proc = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(src),
+                "-frames:v",
+                "1",
+                "-f",
+                "image2",
+                "-vcodec",
+                "mjpeg",
+                "-q:v",
+                "2",
+                str(dst),
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            err = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"ffmpeg cover transcode failed: {err or proc.returncode}")
+        out = dst.read_bytes()
+        if not out:
+            raise RuntimeError("ffmpeg cover transcode produced empty output")
+        return out
+
+
+def transcode_cover_bytes_to_jpeg(data: bytes) -> bytes:
+    """Convert WebP/AVIF/PNG (etc.) cover bytes to JPEG."""
+    if is_jpeg_image(data):
+        return data
+    if looks_like_html_body(data):
+        raise RuntimeError("cover response looks like HTML, not an image")
+    via_pillow = _transcode_cover_with_pillow(data)
+    if via_pillow and is_jpeg_image(via_pillow):
+        return via_pillow
+    return _transcode_cover_with_ffmpeg(data)
+
+
+def ensure_jpeg_cover_bytes(data: bytes) -> bytes:
+    if not data:
+        raise RuntimeError("empty cover body")
+    if looks_like_html_body(data):
+        raise RuntimeError("cover response looks like HTML, not a JPEG")
+    if not is_jpeg_image(data):
+        data = transcode_cover_bytes_to_jpeg(data)
+    validate_jpeg_cover_bytes(data)
+    return data
+
+
 def fetch_cover_bytes(url: str, *, timeout: float = 30.0) -> bytes:
     url = normalize_cover_url(url)
     if not url:
@@ -176,9 +289,7 @@ def fetch_cover_bytes(url: str, *, timeout: float = 30.0) -> bytes:
     resp = http.get(url, impersonate="chrome120", timeout=timeout, headers=headers)
     if resp.status_code >= 400:
         raise RuntimeError(f"cover HTTP {resp.status_code}")
-    data = resp.content
-    validate_jpeg_cover_bytes(data)
-    return data
+    return ensure_jpeg_cover_bytes(resp.content)
 
 
 def lookup_scrape_metadata(
