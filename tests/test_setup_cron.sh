@@ -117,6 +117,8 @@ grep -Fq 'GUANGYA_JAV_SCRAPE_CRON' "$GUANGYA_DEDUPE"
 grep -Fq 'guangya_downloads_jav_scrape.py --apply' "$GUANGYA_DEDUPE"
 grep -Fq 'guangya_jav_scrape_cron.log' "$GUANGYA_DEDUPE"
 grep -Fq 'jav_scrape_cron_enabled' "$GUANGYA_DEDUPE"
+grep -Fq 'guangya_audit_incremental.py' "$GUANGYA_DEDUPE"
+grep -Fq 'GUANGYA_AUDIT_REPORT_JSON' "$GUANGYA_DEDUPE"
 
 PIKPAK_DEDUPE="$ROOT/scripts/pikpak_downloads_dedupe.sh"
 PIKPAK_DRY="$(PIKPAK_DEDUPE_CRON=1 GUANGYA_DEDUPE_CRON=0 "$SCRIPT" --dry-run 2>/dev/null)"

@@ -39,5 +39,10 @@ jav_scrape_cron_enabled() {
     } >> data/guangya_jav_scrape_cron.log 2>&1
     ec=$scrape_ec
   fi
+  if [[ "$ec" -eq 0 ]] && [[ -n "${GUANGYA_AUDIT_REPORT_JSON:-}" ]]; then
+    echo "===== $(date -Iseconds) guangya_audit_incremental.py start ====="
+    python3 scripts/guangya_audit_incremental.py --report "$GUANGYA_AUDIT_REPORT_JSON" --json-stdout || ec=$?
+    echo "===== $(date -Iseconds) guangya_audit_incremental.py exit $ec ====="
+  fi
   exit "$ec"
 } >> data/guangya_dedupe.log 2>&1
