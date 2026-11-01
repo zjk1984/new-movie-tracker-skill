@@ -60,6 +60,12 @@ class CoverValidationTests(unittest.TestCase):
             "https://img.example/c.jpg",
         )
 
+    def test_normalize_spfcas_to_jdbstatic(self):
+        self.assertEqual(
+            normalize_cover_url("https://tp.spfcas.com/rhe951l4q/covers/gy/gyBBdg.jpg"),
+            "https://c0.jdbstatic.com/covers/gy/gyBBdg.jpg",
+        )
+
     @patch("pikpak_downloads_jav_scrape_lib.http")
     def test_fetch_cover_validates_jpeg(self, mock_http):
         mock_http.get.return_value.status_code = 200

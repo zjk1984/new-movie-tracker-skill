@@ -137,6 +137,11 @@ def run_scrape(
             existing_names=root_existing,
             include_fanart=include_fanart,
         )
+        if not skip_existing:
+            plan["needs_nfo"] = True
+            plan["needs_poster"] = True
+            if include_fanart:
+                plan["needs_fanart"] = True
         if skip_existing and not plan["needs_nfo"] and not plan["needs_poster"]:
             stats["skipped_existing"] += 1
             continue

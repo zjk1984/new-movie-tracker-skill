@@ -148,7 +148,13 @@ JPEG_MAGIC = b"\xff\xd8\xff"
 def normalize_cover_url(url: str) -> str:
     u = (url or "").strip()
     if u.startswith("//"):
-        return f"https:{u}"
+        u = f"https:{u}"
+    # JavDB detail often returns tp.spfcas.com URLs whose body is encrypted/obfuscated.
+    # Same cover path on jdbstatic serves a normal JPEG/WebP.
+    if "spfcas.com" in u and "/covers/" in u:
+        path = u.split("/covers/", 1)[1].split("?", 1)[0]
+        if path:
+            return f"https://c0.jdbstatic.com/covers/{path}"
     return u
 
 
