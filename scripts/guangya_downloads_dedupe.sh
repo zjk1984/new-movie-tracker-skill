@@ -15,7 +15,7 @@ case "${GUANGYA_DEDUPE_APPLY:-0}" in
 esac
 
 jav_scrape_cron_enabled() {
-  case "${GUANGYA_JAV_SCRAPE_CRON:-1}" in
+  case "${GUANGYA_JAV_SCRAPE_CRON:-0}" in
     1|true|yes|on) return 0 ;;
     *) return 1 ;;
   esac

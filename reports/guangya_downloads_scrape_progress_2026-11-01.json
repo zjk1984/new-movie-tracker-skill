@@ -1,0 +1,66 @@
+{
+  "report_type": "guangya_downloads_scrape_progress",
+  "date": "2026-11-01",
+  "stopped_at_utc": "2026-11-01T12:57:00Z",
+  "stop_reason": "user_requested_pause_manual_scrape",
+  "status": "paused_incomplete",
+  "guangya_folder": "downloads",
+  "scrape_flags": {
+    "no_translate": true,
+    "skip_existing_default": true,
+    "force": false
+  },
+  "sessions": [
+    {
+      "tmux": "jp-downloads-scrape",
+      "resume_utc": "2026-11-01T10:51:05Z",
+      "batch_limit": 50,
+      "note": "first resume after API_TIMEOUT on initial apply"
+    },
+    {
+      "tmux": "jp-downloads-scrape",
+      "restart_utc": "2026-11-01T12:55:00Z",
+      "batch_limit": 25,
+      "note": "restarted after post-batch dry-run stall; stopped before batch 2"
+    }
+  ],
+  "batches_completed": [
+    {
+      "batch": 1,
+      "uploaded_nfo": 50,
+      "uploaded_poster": 50,
+      "skipped_existing": 45,
+      "javdb_errors": 0,
+      "fail_samples": [],
+      "artifact": "/tmp/jp_scrape_batch_1.json"
+    }
+  ],
+  "totals_uploaded": {
+    "uploaded_nfo": 50,
+    "uploaded_poster": 50,
+    "batches": 1
+  },
+  "last_dry_run": {
+    "planned_nfo": 360,
+    "planned_poster": 360,
+    "skipped_existing": 64,
+    "source": "/tmp/jp_downloads_scrape.log",
+    "note": "before batch 1 apply on resume; ~310 sidecars likely remain after batch 1 (360 - 50)"
+  },
+  "estimated_remaining_after_batch_1": {
+    "planned_nfo": 310,
+    "planned_poster": 310,
+    "note": "approximate; re-run dry-run before resume"
+  },
+  "cron": {
+    "guangya_jav_scrape_cron": "disabled_as_of_2026-11-01",
+    "guangya_dedupe_cron": "unchanged_0645_apply"
+  },
+  "log_paths": [
+    "/tmp/jp_downloads_scrape.log",
+    "/tmp/jp_downloads_scrape.out",
+    "/tmp/jp_scrape_batch_1.json",
+    "data/guangya_jav_scrape_cron.log"
+  ],
+  "resume_command": "tmux new-session -d -s jp-downloads-scrape -c /workspace -- bash -lc 'export PATH=\"/exec-daemon:$PATH\" GUANGYAPAN_DRIVE_LOGIN_MODE=device PYTHONPATH=/workspace/scripts; python3 scripts/guangya_downloads_jav_scrape.py --no-translate --json && while true; do python3 scripts/guangya_downloads_jav_scrape.py --apply --no-translate --limit 30 --json || sleep 90; python3 scripts/guangya_downloads_jav_scrape.py --no-translate --json | tail -1; done'"
+}
