@@ -108,6 +108,56 @@ def extract_cover_url(detail: dict[str, Any]) -> str:
     return ""
 
 
+def localize_scrape_metadata_zh(meta: dict[str, Any]) -> dict[str, Any]:
+    """Translate Japanese text fields to Simplified Chinese for Jellyfin NFO."""
+    from title_translate import has_japanese, translate_ja_to_zh
+
+    out = dict(meta)
+    title = _any_str(meta.get("title"))
+    if title:
+        out.setdefault("originaltitle", title)
+        if has_japanese(title):
+            zh = translate_ja_to_zh(title)
+            if zh:
+                out["title"] = zh
+
+    plot = _any_str(meta.get("plot"))
+    if plot and has_japanese(plot):
+        from rss_translate import translate_text
+
+        out["plot"] = translate_text(plot)
+
+    localized_tags: list[str] = []
+    for tag in meta.get("tags") or []:
+        name = _any_str(tag).strip()
+        if not name:
+            continue
+        if has_japanese(name):
+            localized_tags.append(translate_ja_to_zh(name) or name)
+        else:
+            localized_tags.append(name)
+    out["tags"] = localized_tags
+
+    for field in ("maker_name", "series_name"):
+        val = _any_str(meta.get(field))
+        if val and has_japanese(val):
+            zh = translate_ja_to_zh(val)
+            if zh:
+                out[field] = zh
+
+    actresses: list[str] = []
+    for actress in meta.get("actresses") or []:
+        name = _any_str(actress).strip()
+        if not name:
+            continue
+        if has_japanese(name):
+            actresses.append(translate_ja_to_zh(name) or name)
+        else:
+            actresses.append(name)
+    out["actresses"] = actresses
+    return out
+
+
 def merge_scrape_metadata(
     lookup: dict[str, Any],
     detail: dict[str, Any],

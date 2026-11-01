@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -13,11 +14,11 @@ from jellyfin_nfo import (  # noqa: E402
     canonical_av_number,
     extract_actress_names,
     extract_cover_url,
+    localize_scrape_metadata_zh,
     merge_scrape_metadata,
     metadata_sidecar_names,
     validate_nfo_xml,
 )
-
 
 class SidecarNamingTests(unittest.TestCase):
     def test_flat_root_sidecars_by_av_number(self):
@@ -55,6 +56,16 @@ class MetadataExtractTests(unittest.TestCase):
         self.assertEqual(meta["actresses"], ["山田花"])
         self.assertEqual(extract_cover_url(detail), "https://img.example/cover.jpg")
         self.assertEqual(extract_actress_names(detail), ["山田花"])
+
+
+class LocalizeMetadataTests(unittest.TestCase):
+    @patch("title_translate.translate_ja_to_zh", return_value="中文标题")
+    @patch("title_translate.has_japanese", return_value=True)
+    def test_localize_title_keeps_originaltitle(self, _has_ja, _translate):
+        meta = {"title": "日本語タイトル", "plot": "中文简介", "tags": []}
+        out = localize_scrape_metadata_zh(meta)
+        self.assertEqual(out["title"], "中文标题")
+        self.assertEqual(out["originaltitle"], "日本語タイトル")
 
 
 class NfoXmlTests(unittest.TestCase):
