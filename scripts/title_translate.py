@@ -85,8 +85,9 @@ def _translate_with_google(text: str) -> str:
 
 def _translate_ja_to_zh_cached(text: str) -> str:
     _load_disk_cache()
-    if text in _cache:
-        return _cache[text]
+    cached = _cache.get(text)
+    if cached and not (has_japanese(cached) and cached.strip() == text.strip()):
+        return cached
     try:
         zh = (_translate_with_mymemory(text) or "").strip()
     except Exception:
@@ -123,7 +124,39 @@ def translate_av_metadata_to_zh(text: str) -> str:
         return text
     if not TRANSLATE_ENABLED:
         return text
-    return _translate_ja_to_zh_cached(text) or text
+    zh = _translate_ja_to_zh_cached(text)
+    if zh and not has_japanese(zh):
+        return zh
+    return zh or text
+
+
+def translate_title_to_zh(text: str) -> str:
+    """Translate a JavDB title to Simplified Chinese; prefer outputs without kana."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    if _ASCII_LABEL_RE.fullmatch(text):
+        return text
+    if not TRANSLATE_ENABLED:
+        return text
+    candidates: list[str] = []
+    if has_japanese(text):
+        ja = translate_ja_to_zh(text)
+        if ja:
+            candidates.append(ja)
+    meta = translate_av_metadata_to_zh(text)
+    if meta:
+        candidates.append(meta)
+    direct = _translate_ja_to_zh_cached(text)
+    if direct:
+        candidates.append(direct)
+    for zh in candidates:
+        if zh and not has_japanese(zh):
+            return zh
+    for zh in candidates:
+        if zh and zh.strip() != text:
+            return zh
+    return text
 
 
 def _magnet_dn_text(item: dict[str, Any]) -> str:

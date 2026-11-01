@@ -9,7 +9,10 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from guangya_downloads_jav_scrape_lib import iter_guangya_jav_video_files  # noqa: E402
+from guangya_downloads_jav_scrape_lib import (  # noqa: E402
+    iter_guangya_jav_video_files,
+    nfo_xml_title_japanese,
+)
 from pikpak_downloads_jav_scrape_lib import group_videos_by_av  # noqa: E402
 
 
@@ -35,6 +38,18 @@ class GuangYaJavIterTests(unittest.TestCase):
         groups = group_videos_by_av(videos, pseudo_as_jav=True)
         self.assertIn("JUR-832", groups)
         self.assertEqual(len(groups["JUR-832"]), 2)
+
+
+class NfoRetranslateTests(unittest.TestCase):
+    def test_nfo_xml_title_japanese_detects_kana(self):
+        xml = """<?xml version="1.0" encoding="utf-8"?>
+<movie><title>ADN-767 限界集落の村</title></movie>"""
+        self.assertTrue(nfo_xml_title_japanese(xml))
+
+    def test_nfo_xml_title_chinese_only_false(self):
+        xml = """<?xml version="1.0" encoding="utf-8"?>
+<movie><title>ADN-767 边界村落</title></movie>"""
+        self.assertFalse(nfo_xml_title_japanese(xml))
 
 
 if __name__ == "__main__":

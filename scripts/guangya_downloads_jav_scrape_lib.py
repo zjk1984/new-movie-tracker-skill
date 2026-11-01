@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import xml.etree.ElementTree as ET
 from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -29,6 +30,9 @@ __all__ = [
     "plan_sidecars_for_av",
     "fetch_cover_bytes",
     "upload_sidecar_bytes",
+    "build_root_file_index",
+    "nfo_xml_title_japanese",
+    "root_nfo_needs_retranslate",
 ]
 
 
@@ -123,12 +127,75 @@ def guangya_root_sibling_names(
     *,
     runner: Callable[..., Any] | None = None,
 ) -> set[str]:
+    return build_root_file_index(downloads_parent_id, runner=runner)[0]
+
+
+def build_root_file_index(
+    downloads_parent_id: str,
+    *,
+    runner: Callable[..., Any] | None = None,
+) -> tuple[set[str], dict[str, str]]:
+    """Return (root file names, name → remote file id) for direct children."""
     names: set[str] = set()
+    by_name: dict[str, str] = {}
     for row in list_guangya_dir_paged(downloads_parent_id, runner=runner):
         name = str(row.get("name") or "")
-        if name:
-            names.add(name)
-    return names
+        if not name:
+            continue
+        names.add(name)
+        if row.get("type") == "file":
+            fid = str(row.get("id") or "").strip()
+            if fid:
+                by_name[name] = fid
+    return names, by_name
+
+
+def fetch_guangya_file_text(
+    remote_id: str,
+    *,
+    runner: Callable[..., Any] | None = None,
+) -> str:
+    code, data, _stderr = run_operations(
+        [{"id": "return-text", "type": "return_text", "remote_id": remote_id}],
+        runner=runner,
+    )
+    if code != 0:
+        return ""
+    items = (data.get("data") or {}).get("items") or []
+    if not items:
+        return ""
+    result = items[0].get("result") or {}
+    return str(result.get("content") or "")
+
+
+def nfo_xml_title_japanese(nfo_text: str) -> bool:
+    """True when ``<title>`` or ``<originaltitle>`` still contains hiragana/katakana."""
+    from title_translate import has_japanese
+
+    if not (nfo_text or "").strip():
+        return False
+    try:
+        root = ET.fromstring(nfo_text.encode("utf-8"))
+    except ET.ParseError:
+        return False
+    for tag in ("title", "originaltitle"):
+        el = root.find(tag)
+        if el is not None and el.text and has_japanese(el.text):
+            return True
+    return False
+
+
+def root_nfo_needs_retranslate(
+    nfo_filename: str,
+    *,
+    root_file_ids: dict[str, str],
+    runner: Callable[..., Any] | None = None,
+) -> bool:
+    remote_id = root_file_ids.get(nfo_filename)
+    if not remote_id:
+        return False
+    text = fetch_guangya_file_text(remote_id, runner=runner)
+    return nfo_xml_title_japanese(text)
 
 
 def upload_sidecar_bytes(
