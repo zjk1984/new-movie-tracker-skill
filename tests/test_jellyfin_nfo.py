@@ -17,6 +17,7 @@ from jellyfin_nfo import (  # noqa: E402
     localize_scrape_metadata_zh,
     merge_scrape_metadata,
     metadata_sidecar_names,
+    nfo_display_title,
     validate_nfo_xml,
 )
 
@@ -68,6 +69,20 @@ class LocalizeMetadataTests(unittest.TestCase):
         self.assertEqual(out["originaltitle"], "日本語タイトル")
 
 
+class NfoTitleTests(unittest.TestCase):
+    def test_display_title_prefixes_number(self):
+        self.assertEqual(
+            nfo_display_title({"number": "SSIS-001", "title": "测试标题"}),
+            "SSIS-001 测试标题",
+        )
+
+    def test_display_title_keeps_existing_number(self):
+        self.assertEqual(
+            nfo_display_title({"number": "SSIS-001", "title": "SSIS-001 测试"}),
+            "SSIS-001 测试",
+        )
+
+
 class NfoXmlTests(unittest.TestCase):
     def test_build_movie_nfo_contains_core_fields(self):
         meta = {
@@ -84,7 +99,7 @@ class NfoXmlTests(unittest.TestCase):
         xml = build_movie_nfo_xml(meta)
         validate_nfo_xml(xml)
         self.assertIn('<?xml version', xml)
-        self.assertIn("<title>测试标题</title>", xml)
+        self.assertIn("<title>MIDV-671 测试标题</title>", xml)
         self.assertIn("<plot>一段中文简介。</plot>", xml)
         self.assertIn("<premiered>2023-05-06</premiered>", xml)
         self.assertIn("<year>2023</year>", xml)

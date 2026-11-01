@@ -138,11 +138,11 @@ def upload_sidecar_bytes(
     *,
     runner: Callable[..., Any] | None = None,
 ) -> None:
-    suffix = Path(filename).suffix or ".bin"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(data)
-        path = Path(tmp.name)
-    try:
+    """Upload bytes using ``filename`` as the remote object name (Skill uses local basename)."""
+    name = Path(filename).name
+    if not name or name != filename or name in {".", ".."}:
+        raise ValueError(f"invalid sidecar filename: {filename!r}")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / name
+        path.write_bytes(data)
         upload_local_file(path, remote_parent_id, runner=runner)
-    finally:
-        path.unlink(missing_ok=True)

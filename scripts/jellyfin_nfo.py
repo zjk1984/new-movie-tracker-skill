@@ -94,6 +94,8 @@ def extract_cover_url(detail: dict[str, Any]) -> str:
     )
     if direct.startswith("http"):
         return direct
+    if direct.startswith("//"):
+        return f"https:{direct}"
     for key in ("images", "previews", "covers"):
         raw = detail.get(key)
         if not isinstance(raw, list):
@@ -158,6 +160,19 @@ def localize_scrape_metadata_zh(meta: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def nfo_display_title(meta: dict[str, Any]) -> str:
+    """Jellyfin-friendly title: always includes 番号 when known."""
+    number = canonical_av_number(_any_str(meta.get("number")))
+    title = _any_str(meta.get("title")).strip()
+    if not number:
+        return title
+    if not title:
+        return number
+    if number in title.upper():
+        return title
+    return f"{number} {title}"
+
+
 def merge_scrape_metadata(
     lookup: dict[str, Any],
     detail: dict[str, Any],
@@ -196,8 +211,8 @@ def build_movie_nfo_xml(meta: dict[str, Any]) -> str:
     """Return UTF-8 Jellyfin/Kodi ``<movie>`` NFO document."""
     root = ET.Element("movie")
 
-    number = _any_str(meta.get("number"))
-    title = _any_str(meta.get("title"))
+    number = canonical_av_number(_any_str(meta.get("number")))
+    title = nfo_display_title(meta)
     if title:
         _xml_text(root, "title", title)
     if number:
