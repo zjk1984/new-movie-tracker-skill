@@ -60,13 +60,22 @@ class MetadataExtractTests(unittest.TestCase):
 
 
 class LocalizeMetadataTests(unittest.TestCase):
-    @patch("title_translate.translate_ja_to_zh", return_value="中文标题")
+    @patch("title_translate.translate_ja_to_zh", side_effect=lambda t: f"ZH:{t}")
     @patch("title_translate.has_japanese", return_value=True)
-    def test_localize_title_keeps_originaltitle(self, _has_ja, _translate):
-        meta = {"title": "日本語タイトル", "plot": "中文简介", "tags": []}
+    def test_localize_title_and_actress_only(self, _has_ja, _translate):
+        meta = {
+            "title": "日本語タイトル",
+            "plot": "日本語あらすじ",
+            "tags": ["タグ"],
+            "actresses": ["山田花子"],
+        }
         out = localize_scrape_metadata_zh(meta)
-        self.assertEqual(out["title"], "中文标题")
-        self.assertEqual(out["originaltitle"], "日本語タイトル")
+        self.assertEqual(out["title"], "ZH:日本語タイトル")
+        self.assertEqual(out["plot"], "日本語あらすじ")
+        self.assertEqual(out["tags"], ["タグ"])
+        self.assertEqual(out["actresses"], ["ZH:山田花子"])
+        _translate.assert_any_call("日本語タイトル")
+        _translate.assert_any_call("山田花子")
 
 
 class NfoTitleTests(unittest.TestCase):
@@ -84,7 +93,7 @@ class NfoTitleTests(unittest.TestCase):
 
 
 class NfoXmlTests(unittest.TestCase):
-    def test_build_movie_nfo_contains_core_fields(self):
+    def test_build_movie_nfo_minimal_fields(self):
         meta = {
             "number": "MIDV-671",
             "title": "测试标题",
@@ -95,17 +104,31 @@ class NfoXmlTests(unittest.TestCase):
             "maker_name": "Maker",
             "score": 4.2,
             "javdb_id": "xyz",
+            "originaltitle": "日文原标题",
         }
         xml = build_movie_nfo_xml(meta)
         validate_nfo_xml(xml)
         self.assertIn('<?xml version', xml)
         self.assertIn("<title>MIDV-671 测试标题</title>", xml)
-        self.assertIn("<plot>一段中文简介。</plot>", xml)
-        self.assertIn("<premiered>2023-05-06</premiered>", xml)
+        self.assertIn("<sorttitle>MIDV-671</sorttitle>", xml)
         self.assertIn("<year>2023</year>", xml)
         self.assertIn("<name>演员甲</name>", xml)
+        self.assertIn("<name>演员乙</name>", xml)
         self.assertIn('<uniqueid type="jav"', xml)
         self.assertIn("MIDV-671", xml)
+        for omitted in (
+            "<plot>",
+            "<outline>",
+            "<originaltitle>",
+            "<premiered>",
+            "<releasedate>",
+            "<studio>",
+            "<tag>",
+            "<rating>",
+            "<num>",
+            'type="javdb"',
+        ):
+            self.assertNotIn(omitted, xml, msg=f"unexpected field {omitted}")
 
 
 if __name__ == "__main__":

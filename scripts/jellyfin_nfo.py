@@ -111,41 +111,15 @@ def extract_cover_url(detail: dict[str, Any]) -> str:
 
 
 def localize_scrape_metadata_zh(meta: dict[str, Any]) -> dict[str, Any]:
-    """Translate Japanese text fields to Simplified Chinese for Jellyfin NFO."""
+    """Translate title and actress names to Simplified Chinese for minimal Jellyfin NFO."""
     from title_translate import has_japanese, translate_ja_to_zh
 
     out = dict(meta)
     title = _any_str(meta.get("title"))
-    if title:
-        out.setdefault("originaltitle", title)
-        if has_japanese(title):
-            zh = translate_ja_to_zh(title)
-            if zh:
-                out["title"] = zh
-
-    plot = _any_str(meta.get("plot"))
-    if plot and has_japanese(plot):
-        from rss_translate import translate_text
-
-        out["plot"] = translate_text(plot)
-
-    localized_tags: list[str] = []
-    for tag in meta.get("tags") or []:
-        name = _any_str(tag).strip()
-        if not name:
-            continue
-        if has_japanese(name):
-            localized_tags.append(translate_ja_to_zh(name) or name)
-        else:
-            localized_tags.append(name)
-    out["tags"] = localized_tags
-
-    for field in ("maker_name", "series_name"):
-        val = _any_str(meta.get(field))
-        if val and has_japanese(val):
-            zh = translate_ja_to_zh(val)
-            if zh:
-                out[field] = zh
+    if title and has_japanese(title):
+        zh = translate_ja_to_zh(title)
+        if zh:
+            out["title"] = zh
 
     actresses: list[str] = []
     for actress in meta.get("actresses") or []:
@@ -208,7 +182,7 @@ def _xml_text(parent: ET.Element, tag: str, text: str) -> None:
 
 
 def build_movie_nfo_xml(meta: dict[str, Any]) -> str:
-    """Return UTF-8 Jellyfin/Kodi ``<movie>`` NFO document."""
+    """Return UTF-8 Jellyfin ``<movie>`` NFO: 番号, 中文标题, 女优, minimal ids."""
     root = ET.Element("movie")
 
     number = canonical_av_number(_any_str(meta.get("number")))
@@ -223,44 +197,11 @@ def build_movie_nfo_xml(meta: dict[str, Any]) -> str:
             uid.set("type", "jav")
             uid.set("default", "true")
 
-    original = _any_str(meta.get("originaltitle"))
-    if original and original != title:
-        _xml_text(root, "originaltitle", original)
-
     release = _any_str(meta.get("release_date"))
     if release:
-        _xml_text(root, "premiered", release)
-        _xml_text(root, "releasedate", release)
         year_match = re.match(r"(\d{4})", release)
         if year_match:
             _xml_text(root, "year", year_match.group(1))
-
-    plot = _any_str(meta.get("plot"))
-    if plot:
-        _xml_text(root, "plot", plot)
-        _xml_text(root, "outline", plot)
-
-    maker = _any_str(meta.get("maker_name"))
-    if maker:
-        _xml_text(root, "studio", maker)
-
-    series = _any_str(meta.get("series_name"))
-    if series:
-        _xml_text(root, "set", series)
-
-    score = meta.get("score")
-    if score is not None:
-        try:
-            _xml_text(root, "rating", f"{float(score):.2f}")
-        except (TypeError, ValueError):
-            pass
-
-    javdb_id = _any_str(meta.get("javdb_id"))
-    if javdb_id:
-        uid_el = ET.SubElement(root, "uniqueid")
-        uid_el.text = javdb_id
-        uid_el.set("type", "javdb")
-        uid_el.set("default", "false")
 
     for actress in meta.get("actresses") or []:
         name = _any_str(actress).strip()
@@ -269,14 +210,6 @@ def build_movie_nfo_xml(meta: dict[str, Any]) -> str:
         actor_el = ET.SubElement(root, "actor")
         _xml_text(actor_el, "name", name)
         _xml_text(actor_el, "type", "Actor")
-
-    for tag in meta.get("tags") or []:
-        tag_name = _any_str(tag).strip()
-        if tag_name:
-            _xml_text(root, "tag", tag_name)
-
-    if number:
-        _xml_text(root, "num", number)
 
     xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     return xml_bytes.decode("utf-8")
