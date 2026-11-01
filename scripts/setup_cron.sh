@@ -79,6 +79,7 @@ Environment overrides:
   GUANGYA_DEDUPE_APPLY=1     pass --apply to guangya_downloads_dedupe.py on cron
   GUANGYA_DEDUPE_FOLDERS=downloads,JAV
   GUANGYA_JAV_SCRAPE_CRON=1  after dedupe, run guangya_downloads_jav_scrape.py --apply (skip_existing default)
+  GUANGYA_AUDIT_REPORT_JSON=reports/pikpak_guangya_audit_2026-11-01.json  incremental new downloads log after chain
   PIKPAK_DEDUPE_CRON=1       legacy PikPak dedupe (only if GUANGYA_DEDUPE_CRON=0)
 
 Container / Cloud Agent VMs (PID 1 is tini, cron may start late or die):
@@ -206,7 +207,9 @@ cron_line_for_guangya_dedupe() {
   case "${GUANGYA_DEDUPE_APPLY:-0}" in
     1|true|yes|on) apply_env="GUANGYA_DEDUPE_APPLY=1 " ;;
   esac
-  echo "$minute $hour * * * TZ=$TZ_NAME ${apply_env}GUANGYA_JAV_SCRAPE_CRON=1 GUANGYA_DEDUPE_FOLDERS=downloads,JAV $GUANGYA_DEDUPE_WRAPPER $GUANGYA_DEDUPE_MARK"
+  local audit_json="${GUANGYA_AUDIT_REPORT_JSON:-reports/pikpak_guangya_audit_2026-11-01.json}"
+  local audit_env="GUANGYA_AUDIT_REPORT_JSON=${audit_json} "
+  echo "$minute $hour * * * TZ=$TZ_NAME ${apply_env}${audit_env}GUANGYA_JAV_SCRAPE_CRON=1 GUANGYA_DEDUPE_FOLDERS=downloads,JAV $GUANGYA_DEDUPE_WRAPPER $GUANGYA_DEDUPE_MARK"
 }
 
 cron_line_for_pikpak_dedupe() {
