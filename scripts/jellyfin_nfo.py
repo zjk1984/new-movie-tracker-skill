@@ -2,6 +2,7 @@
 """Build Jellyfin/Kodi-compatible movie NFO XML from JavDB metadata."""
 from __future__ import annotations
 
+import os
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -12,6 +13,28 @@ from javdb_client import _any_str, extract_tag_names
 VIDEO_EXTENSIONS = frozenset({
     ".mp4", ".mkv", ".avi", ".wmv", ".mov", ".m4v", ".ts", ".iso", ".flv", ".webm",
 })
+
+# Direct `<movie>` child tag order for ADN-148 Jellyfin template (strict alignment).
+MOVIE_NFO_CHILD_TAG_ORDER: tuple[str, ...] = (
+    "plot",
+    "lockdata",
+    "dateadded",
+    "title",
+    "originaltitle",
+    "director",
+    "year",
+    "mpaa",
+    "premiered",
+    "releasedate",
+    "runtime",
+    "tagline",
+    "genre",
+    "studio",
+    "tag",
+    "metatubeid",
+    "art",
+    "actor",
+)
 
 
 def is_video_filename(name: str) -> bool:
@@ -44,6 +67,19 @@ def metadata_sidecar_names(av_number: str, *, include_fanart: bool = False) -> d
     if include_fanart:
         names["fanart"] = f"{base}-fanart.jpg"
     return names
+
+
+def nfo_art_path(basename: str) -> str:
+    """Sidecar art path: basename only, or ``NFO_ART_PATH_PREFIX`` + basename."""
+    base = (basename or "").strip()
+    if not base:
+        return ""
+    prefix = os.environ.get("NFO_ART_PATH_PREFIX", "").strip()
+    if not prefix:
+        return base
+    if prefix.endswith("/"):
+        return f"{prefix}{base}"
+    return f"{prefix}/{base}"
 
 
 def _first_str(detail: dict[str, Any], *keys: str) -> str:
@@ -255,37 +291,53 @@ def merge_scrape_metadata(
     }
 
 
-def _xml_text(parent: ET.Element, tag: str, text: str) -> None:
-    if text is None:
-        return
-    child = ET.SubElement(parent, tag)
-    child.text = text
+def _escape_xml_text(text: str) -> str:
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
-def _xml_empty(parent: ET.Element, tag: str) -> None:
-    ET.SubElement(parent, tag)
+def _indent(level: int, line: str) -> str:
+    return "  " * level + line
+
+
+def _serialize_movie_nfo(lines: list[str]) -> str:
+    header = '<?xml version="1.0" encoding="utf-8" standalone="yes"?>'
+    body = "\n".join(lines)
+    return f"{header}\n{body}\n"
+
+
+def movie_nfo_direct_child_tags(xml_text: str) -> list[str]:
+    """Return ordered direct child tag names under ``<movie>`` (for golden tests)."""
+    root = ET.fromstring(xml_text.encode("utf-8"))
+    if root.tag != "movie":
+        raise ValueError("expected <movie> root")
+    return [child.tag for child in root]
 
 
 def build_movie_nfo_xml(meta: dict[str, Any]) -> str:
-    """Return UTF-8 Jellyfin ``<movie>`` NFO matching ADN-148 template (Chinese-only)."""
-    root = ET.Element("movie")
+    """Return UTF-8 Jellyfin ``<movie>`` NFO strictly aligned to ADN-148 template."""
+    lines: list[str] = ["<movie>"]
 
-    _xml_empty(root, "plot")
-    _xml_text(root, "lockdata", "false")
+    lines.append(_indent(1, "<plot />"))
+    lines.append(_indent(1, "<lockdata>false</lockdata>"))
 
     dateadded = _any_str(meta.get("dateadded")).strip()
     if not dateadded:
         dateadded = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _xml_text(root, "dateadded", dateadded)
+    lines.append(_indent(1, f"<dateadded>{_escape_xml_text(dateadded)}</dateadded>"))
 
     number = canonical_av_number(_any_str(meta.get("number")))
     title = nfo_display_title(meta)
     if title:
-        _xml_text(root, "title", title)
+        lines.append(_indent(1, f"<title>{_escape_xml_text(title)}</title>"))
+        lines.append(_indent(1, f"<originaltitle>{_escape_xml_text(title)}</originaltitle>"))
 
     director = _any_str(meta.get("director")).strip()
     if director:
-        _xml_text(root, "director", director)
+        lines.append(_indent(1, f"<director>{_escape_xml_text(director)}</director>"))
 
     release = _any_str(meta.get("release_date")).strip()
     year = ""
@@ -293,55 +345,63 @@ def build_movie_nfo_xml(meta: dict[str, Any]) -> str:
         year_match = re.match(r"(\d{4})", release)
         if year_match:
             year = year_match.group(1)
-            _xml_text(root, "year", year)
-        _xml_text(root, "premiered", release)
-        _xml_text(root, "releasedate", release)
-        _xml_text(root, "tagline", f"配信开始日 {release}")
+            lines.append(_indent(1, f"<year>{year}</year>"))
 
-    _xml_text(root, "mpaa", "JP-18+")
+    lines.append(_indent(1, "<mpaa>JP-18+</mpaa>"))
+
+    if release:
+        lines.append(_indent(1, f"<premiered>{_escape_xml_text(release)}</premiered>"))
+        lines.append(_indent(1, f"<releasedate>{_escape_xml_text(release)}</releasedate>"))
 
     runtime = parse_runtime_minutes(meta.get("runtime") or meta.get("duration"))
     if runtime:
-        _xml_text(root, "runtime", runtime)
+        lines.append(_indent(1, f"<runtime>{runtime}</runtime>"))
+
+    if release:
+        lines.append(_indent(1, f"<tagline>配信开始日 {_escape_xml_text(release)}</tagline>"))
 
     for genre in meta.get("genres") or []:
         name = _any_str(genre).strip()
         if name:
-            _xml_text(root, "genre", name)
+            lines.append(_indent(1, f"<genre>{_escape_xml_text(name)}</genre>"))
 
     maker = _any_str(meta.get("maker_name")).strip()
-    _xml_empty(root, "studio")
+    lines.append(_indent(1, "<studio />"))
     if maker:
-        _xml_text(root, "studio", maker)
+        lines.append(_indent(1, f"<studio>{_escape_xml_text(maker)}</studio>"))
 
     for tag in meta.get("tags") or []:
         tag_name = _any_str(tag).strip()
         if tag_name:
-            _xml_text(root, "tag", tag_name)
+            lines.append(_indent(1, f"<tag>{_escape_xml_text(tag_name)}</tag>"))
 
     if number:
-        _xml_text(root, "metatubeid", f"JavBus:{number}")
+        lines.append(_indent(1, f"<metatubeid>JavBus:{number}</metatubeid>"))
 
     sidecars = metadata_sidecar_names(number, include_fanart=True)
     poster_path = _any_str(meta.get("poster_path")).strip() or sidecars["poster"]
     fanart_path = _any_str(meta.get("fanart_path")).strip() or sidecars.get("fanart", "")
+    poster_path = nfo_art_path(poster_path)
+    fanart_path = nfo_art_path(fanart_path)
     if poster_path or fanart_path:
-        art_el = ET.SubElement(root, "art")
+        lines.append(_indent(1, "<art>"))
         if poster_path:
-            _xml_text(art_el, "poster", poster_path)
+            lines.append(_indent(2, f"<poster>{_escape_xml_text(poster_path)}</poster>"))
         if fanart_path:
-            _xml_text(art_el, "fanart", fanart_path)
+            lines.append(_indent(2, f"<fanart>{_escape_xml_text(fanart_path)}</fanart>"))
+        lines.append(_indent(1, "</art>"))
 
     for actress in meta.get("actresses") or []:
         name = _any_str(actress).strip()
         if not name:
             continue
-        actor_el = ET.SubElement(root, "actor")
-        _xml_text(actor_el, "name", name)
-        _xml_text(actor_el, "type", "Actor")
+        lines.append(_indent(1, "<actor>"))
+        lines.append(_indent(2, f"<name>{_escape_xml_text(name)}</name>"))
+        lines.append(_indent(2, "<type>Actor</type>"))
+        lines.append(_indent(1, "</actor>"))
 
-    xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
-    return xml_bytes.decode("utf-8")
+    lines.append("</movie>")
+    return _serialize_movie_nfo(lines)
 
 
 def validate_nfo_xml(text: str) -> None:
