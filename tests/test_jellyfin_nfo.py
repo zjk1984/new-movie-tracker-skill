@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from jellyfin_nfo import (  # noqa: E402
+    MOVIE_NFO_CHILD_TAG_ORDER,
     build_movie_nfo_xml,
     canonical_av_number,
     extract_actress_names,
@@ -17,10 +19,25 @@ from jellyfin_nfo import (  # noqa: E402
     localize_scrape_metadata_zh,
     merge_scrape_metadata,
     metadata_sidecar_names,
+    movie_nfo_direct_child_tags,
+    nfo_art_path,
     nfo_display_title,
     parse_runtime_minutes,
     validate_nfo_xml,
 )
+
+ADN148_FIXTURE_META = {
+    "number": "ADN-148",
+    "title": "不忠的等级关系",
+    "release_date": "2017-12-16",
+    "duration": 118,
+    "director": "佐田正男",
+    "actresses": ["松下纱荣子"],
+    "genres": ["OL", "剧情", "高清", "中文字幕", "人妻", "单体作品", "巨乳", "独占配信"],
+    "tags": ["Attackers", "大人的剧情"],
+    "maker_name": "Attackers",
+    "dateadded": "2026-07-29 18:59:44",
+}
 
 
 class SidecarNamingTests(unittest.TestCase):
@@ -35,6 +52,18 @@ class SidecarNamingTests(unittest.TestCase):
 
     def test_canonical_av_number(self):
         self.assertEqual(canonical_av_number("  pred-899 "), "PRED-899")
+
+
+class NfoArtPathTests(unittest.TestCase):
+    def test_basename_only_by_default(self):
+        self.assertEqual(nfo_art_path("ADN-148-poster.jpg"), "ADN-148-poster.jpg")
+
+    def test_optional_prefix(self):
+        with patch.dict(os.environ, {"NFO_ART_PATH_PREFIX": "/data/489155.com@"}):
+            self.assertEqual(
+                nfo_art_path("ADN-148-poster.jpg"),
+                "/data/489155.com@/ADN-148-poster.jpg",
+            )
 
 
 class MetadataExtractTests(unittest.TestCase):
@@ -118,45 +147,60 @@ class NfoTitleTests(unittest.TestCase):
         )
 
 
+def _collapse_repeated_tags(tags: list[str]) -> list[str]:
+    """Map consecutive duplicate tag names to one entry (genre×N → genre)."""
+    if not tags:
+        return []
+    out = [tags[0]]
+    for tag in tags[1:]:
+        if tag != out[-1]:
+            out.append(tag)
+    return out
+
+
 class NfoXmlTests(unittest.TestCase):
     def test_build_movie_nfo_adn148_template_shape(self):
-        meta = {
-            "number": "ADN-148",
-            "title": "不忠的等级关系",
-            "release_date": "2017-12-16",
-            "duration": 118,
-            "director": "佐田正男",
-            "actresses": ["松下纱荣子"],
-            "genres": ["OL", "剧情", "高清", "中文字幕", "人妻", "单体作品", "巨乳", "独占配信"],
-            "tags": ["Attackers", "大人的剧情"],
-            "maker_name": "Attackers",
-            "dateadded": "2026-07-29 18:59:44",
-        }
-        xml = build_movie_nfo_xml(meta)
+        xml = build_movie_nfo_xml(ADN148_FIXTURE_META)
         validate_nfo_xml(xml)
-        self.assertIn('<?xml version', xml)
-        self.assertRegex(xml, r"<plot\s*/>")
-        self.assertIn("<lockdata>false</lockdata>", xml)
-        self.assertIn("<dateadded>2026-07-29 18:59:44</dateadded>", xml)
-        self.assertIn("<title>ADN-148 不忠的等级关系 松下纱荣子</title>", xml)
-        self.assertNotIn("<originaltitle>", xml)
-        self.assertIn("<director>佐田正男</director>", xml)
-        self.assertIn("<year>2017</year>", xml)
-        self.assertIn("<mpaa>JP-18+</mpaa>", xml)
-        self.assertIn("<premiered>2017-12-16</premiered>", xml)
-        self.assertIn("<releasedate>2017-12-16</releasedate>", xml)
-        self.assertIn("<runtime>118</runtime>", xml)
-        self.assertIn("<tagline>配信开始日 2017-12-16</tagline>", xml)
-        self.assertIn("<genre>OL</genre>", xml)
-        self.assertIn("<genre>剧情</genre>", xml)
-        self.assertRegex(xml, r"<studio\s*/>")
-        self.assertIn("<studio>Attackers</studio>", xml)
-        self.assertIn("<metatubeid>JavBus:ADN-148</metatubeid>", xml)
-        self.assertIn("<poster>ADN-148-poster.jpg</poster>", xml)
-        self.assertIn("<fanart>ADN-148-fanart.jpg</fanart>", xml)
-        self.assertIn("<name>松下纱荣子</name>", xml)
+        self.assertTrue(xml.startswith('<?xml version="1.0" encoding="utf-8" standalone="yes"?>'))
+        self.assertIn("  <plot />", xml)
+        self.assertIn("  <lockdata>false</lockdata>", xml)
+        self.assertIn("  <dateadded>2026-07-29 18:59:44</dateadded>", xml)
+        display = "ADN-148 不忠的等级关系 松下纱荣子"
+        self.assertIn(f"  <title>{display}</title>", xml)
+        self.assertIn(f"  <originaltitle>{display}</originaltitle>", xml)
+        self.assertIn("  <director>佐田正男</director>", xml)
+        self.assertIn("  <year>2017</year>", xml)
+        self.assertIn("  <mpaa>JP-18+</mpaa>", xml)
+        self.assertIn("  <premiered>2017-12-16</premiered>", xml)
+        self.assertIn("  <releasedate>2017-12-16</releasedate>", xml)
+        self.assertIn("  <runtime>118</runtime>", xml)
+        self.assertIn("  <tagline>配信开始日 2017-12-16</tagline>", xml)
+        self.assertIn("  <genre>OL</genre>", xml)
+        self.assertRegex(xml, r"  <studio\s*/>")
+        self.assertIn("  <studio>Attackers</studio>", xml)
+        self.assertIn("  <metatubeid>JavBus:ADN-148</metatubeid>", xml)
+        self.assertIn("    <poster>ADN-148-poster.jpg</poster>", xml)
+        self.assertIn("    <fanart>ADN-148-fanart.jpg</fanart>", xml)
+        self.assertIn("    <name>松下纱荣子</name>", xml)
         for omitted in ("<sorttitle>", "<uniqueid", "<rating>", "<num>", "fileinfo", "streamdetails"):
             self.assertNotIn(omitted, xml, msg=f"unexpected field {omitted}")
+
+    def test_adn148_golden_child_tag_order(self):
+        xml = build_movie_nfo_xml(ADN148_FIXTURE_META)
+        tags = movie_nfo_direct_child_tags(xml)
+        collapsed = _collapse_repeated_tags(tags)
+        self.assertEqual(collapsed, list(MOVIE_NFO_CHILD_TAG_ORDER))
+
+    def test_mpaa_before_premiered_in_raw_xml(self):
+        xml = build_movie_nfo_xml(ADN148_FIXTURE_META)
+        mpaa_pos = xml.index("<mpaa>")
+        premiered_pos = xml.index("<premiered>")
+        runtime_pos = xml.index("<runtime>")
+        tagline_pos = xml.index("<tagline>")
+        self.assertLess(mpaa_pos, premiered_pos)
+        self.assertLess(premiered_pos, runtime_pos)
+        self.assertLess(runtime_pos, tagline_pos)
 
 
 if __name__ == "__main__":
