@@ -213,6 +213,38 @@ def wait_batch_terminal(
     raise TimeoutError(f"GuangYa batch {batch_id!r} did not finish within {timeout}s; last={last!r}")
 
 
+def delete_remote_files(
+    file_ids: list[str],
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    wait_timeout: float = 600.0,
+) -> dict[str, Any]:
+    """Delete remote files (recycle/trash per GuangYa backend) via Skill ``delete_files``."""
+    ids = [str(i).strip() for i in file_ids if str(i).strip()]
+    if not ids:
+        return {"deleted": 0, "batches": 0}
+    total_deleted = 0
+    batch_count = 0
+    for start in range(0, len(ids), 100):
+        chunk = ids[start : start + 100]
+        operations = [
+            {"id": f"delete-{idx}", "type": "delete_files", "file_ids": [fid]}
+            for idx, fid in enumerate(chunk)
+        ]
+        code, data, stderr = run_operations(operations, runner=runner)
+        batch_id = str(data.get("batch_id") or "").strip()
+        if not batch_id:
+            raise RuntimeError(f"delete_files run missing batch_id: {stderr or data}")
+        if code != 0 and not batch_id:
+            raise RuntimeError(f"delete_files run failed: {stderr or data}")
+        terminal = wait_batch_terminal(batch_id, timeout=wait_timeout, runner=runner)
+        batch_count += 1
+        for item in (terminal.get("data") or {}).get("items") or terminal.get("items") or []:
+            result = item.get("result") or {}
+            total_deleted += int(result.get("deleted_count") or 0)
+    return {"deleted": total_deleted, "batches": batch_count, "requested": len(ids)}
+
+
 def upload_local_file(
     local_path: Path | str,
     remote_parent_id: str,
