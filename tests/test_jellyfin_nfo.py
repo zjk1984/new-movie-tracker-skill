@@ -18,8 +18,10 @@ from jellyfin_nfo import (  # noqa: E402
     merge_scrape_metadata,
     metadata_sidecar_names,
     nfo_display_title,
+    parse_runtime_minutes,
     validate_nfo_xml,
 )
+
 
 class SidecarNamingTests(unittest.TestCase):
     def test_flat_root_sidecars_by_av_number(self):
@@ -44,90 +46,116 @@ class MetadataExtractTests(unittest.TestCase):
             "javdb_id": "abc123",
             "tags": ["TagA"],
             "score": 4.5,
+            "duration": 118,
         }
         detail = {
             "title": "中文标题",
             "description": "剧情简介",
             "cover_url": "https://img.example/cover.jpg",
             "actresses": [{"name": "山田花", "name_zh": "山田花"}],
+            "director_name": "監督A",
         }
         meta = merge_scrape_metadata(lookup, detail)
         self.assertEqual(meta["title"], "中文标题")
         self.assertEqual(meta["plot"], "剧情简介")
         self.assertEqual(meta["actresses"], ["山田花"])
+        self.assertEqual(meta["director"], "監督A")
+        self.assertEqual(meta["duration"], 118)
+        self.assertEqual(meta["genres"], meta["tags"])
         self.assertEqual(extract_cover_url(detail), "https://img.example/cover.jpg")
         self.assertEqual(extract_actress_names(detail), ["山田花"])
 
+    def test_parse_runtime_minutes(self):
+        self.assertEqual(parse_runtime_minutes(118), "118")
+        self.assertEqual(parse_runtime_minutes("118分"), "118")
+        self.assertEqual(parse_runtime_minutes("1:58:00"), "118")
+
 
 class LocalizeMetadataTests(unittest.TestCase):
-    @patch("title_translate.translate_ja_to_zh", side_effect=lambda t: f"ZH:{t}")
-    @patch("title_translate.has_japanese", return_value=True)
-    def test_localize_title_and_actress_only(self, _has_ja, _translate):
+    @patch("title_translate.translate_av_metadata_to_zh", side_effect=lambda t: f"ZH:{t}")
+    @patch("title_translate.translate_ja_to_zh", side_effect=lambda t: f"JA:{t}")
+    @patch(
+        "title_translate.has_japanese",
+        side_effect=lambda t: any("\u3040" <= c <= "\u30ff" for c in t),
+    )
+    def test_localize_clears_plot_and_translates_fields(self, _has_ja, _translate_ja, _translate_meta):
         meta = {
             "title": "日本語タイトル",
             "plot": "日本語あらすじ",
-            "tags": ["タグ"],
-            "actresses": ["山田花子"],
+            "tags": ["ドラマ", "人妻"],
+            "genres": ["ドラマ", "人妻"],
+            "maker_name": "アタッカーズ",
+            "director": "監督名",
+            "actresses": ["山田ハナコ"],
+            "originaltitle": "旧标题",
         }
         out = localize_scrape_metadata_zh(meta)
-        self.assertEqual(out["title"], "ZH:日本語タイトル")
-        self.assertEqual(out["plot"], "日本語あらすじ")
-        self.assertEqual(out["tags"], ["タグ"])
-        self.assertEqual(out["actresses"], ["ZH:山田花子"])
-        _translate.assert_any_call("日本語タイトル")
-        _translate.assert_any_call("山田花子")
+        self.assertEqual(out["title"], "JA:日本語タイトル")
+        self.assertEqual(out["plot"], "")
+        self.assertEqual(out["maker_name"], "ZH:アタッカーズ")
+        self.assertEqual(out["director"], "ZH:監督名")
+        self.assertEqual(out["genres"], ["ZH:ドラマ", "ZH:人妻"])
+        self.assertIn("ZH:アタッカーズ", out["tags"])
+        self.assertEqual(out["actresses"], ["JA:山田ハナコ"])
+        self.assertNotIn("originaltitle", out)
 
 
 class NfoTitleTests(unittest.TestCase):
-    def test_display_title_prefixes_number(self):
+    def test_display_title_includes_number_title_actress(self):
         self.assertEqual(
-            nfo_display_title({"number": "SSIS-001", "title": "测试标题"}),
-            "SSIS-001 测试标题",
+            nfo_display_title({
+                "number": "ADN-148",
+                "title": "不忠的等级关系",
+                "actresses": ["松下纱荣子"],
+            }),
+            "ADN-148 不忠的等级关系 松下纱荣子",
         )
 
-    def test_display_title_keeps_existing_number(self):
+    def test_display_title_strips_duplicate_number_prefix(self):
         self.assertEqual(
-            nfo_display_title({"number": "SSIS-001", "title": "SSIS-001 测试"}),
-            "SSIS-001 测试",
+            nfo_display_title({"number": "SSIS-001", "title": "SSIS-001 测试标题"}),
+            "SSIS-001 测试标题",
         )
 
 
 class NfoXmlTests(unittest.TestCase):
-    def test_build_movie_nfo_minimal_fields(self):
+    def test_build_movie_nfo_adn148_template_shape(self):
         meta = {
-            "number": "MIDV-671",
-            "title": "测试标题",
-            "plot": "一段中文简介。",
-            "release_date": "2023-05-06",
-            "actresses": ["演员甲", "演员乙"],
-            "tags": ["标签一"],
-            "maker_name": "Maker",
-            "score": 4.2,
-            "javdb_id": "xyz",
-            "originaltitle": "日文原标题",
+            "number": "ADN-148",
+            "title": "不忠的等级关系",
+            "release_date": "2017-12-16",
+            "duration": 118,
+            "director": "佐田正男",
+            "actresses": ["松下纱荣子"],
+            "genres": ["OL", "剧情", "高清", "中文字幕", "人妻", "单体作品", "巨乳", "独占配信"],
+            "tags": ["Attackers", "大人的剧情"],
+            "maker_name": "Attackers",
+            "dateadded": "2026-07-29 18:59:44",
         }
         xml = build_movie_nfo_xml(meta)
         validate_nfo_xml(xml)
         self.assertIn('<?xml version', xml)
-        self.assertIn("<title>MIDV-671 测试标题</title>", xml)
-        self.assertIn("<sorttitle>MIDV-671</sorttitle>", xml)
-        self.assertIn("<year>2023</year>", xml)
-        self.assertIn("<name>演员甲</name>", xml)
-        self.assertIn("<name>演员乙</name>", xml)
-        self.assertIn('<uniqueid type="jav"', xml)
-        self.assertIn("MIDV-671", xml)
-        for omitted in (
-            "<plot>",
-            "<outline>",
-            "<originaltitle>",
-            "<premiered>",
-            "<releasedate>",
-            "<studio>",
-            "<tag>",
-            "<rating>",
-            "<num>",
-            'type="javdb"',
-        ):
+        self.assertRegex(xml, r"<plot\s*/>")
+        self.assertIn("<lockdata>false</lockdata>", xml)
+        self.assertIn("<dateadded>2026-07-29 18:59:44</dateadded>", xml)
+        self.assertIn("<title>ADN-148 不忠的等级关系 松下纱荣子</title>", xml)
+        self.assertNotIn("<originaltitle>", xml)
+        self.assertIn("<director>佐田正男</director>", xml)
+        self.assertIn("<year>2017</year>", xml)
+        self.assertIn("<mpaa>JP-18+</mpaa>", xml)
+        self.assertIn("<premiered>2017-12-16</premiered>", xml)
+        self.assertIn("<releasedate>2017-12-16</releasedate>", xml)
+        self.assertIn("<runtime>118</runtime>", xml)
+        self.assertIn("<tagline>配信开始日 2017-12-16</tagline>", xml)
+        self.assertIn("<genre>OL</genre>", xml)
+        self.assertIn("<genre>剧情</genre>", xml)
+        self.assertRegex(xml, r"<studio\s*/>")
+        self.assertIn("<studio>Attackers</studio>", xml)
+        self.assertIn("<metatubeid>JavBus:ADN-148</metatubeid>", xml)
+        self.assertIn("<poster>ADN-148-poster.jpg</poster>", xml)
+        self.assertIn("<fanart>ADN-148-fanart.jpg</fanart>", xml)
+        self.assertIn("<name>松下纱荣子</name>", xml)
+        for omitted in ("<sorttitle>", "<uniqueid", "<rating>", "<num>", "fileinfo", "streamdetails"):
             self.assertNotIn(omitted, xml, msg=f"unexpected field {omitted}")
 
 
