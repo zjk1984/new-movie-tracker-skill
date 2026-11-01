@@ -33,13 +33,14 @@ from env_utils import load_env_local  # noqa: E402
 from guangya_cloud_cli import login_status  # noqa: E402
 from guangya_cloud_submit_lib import resolve_guangya_parent_id  # noqa: E402
 from guangya_downloads_jav_scrape_lib import (  # noqa: E402
+    build_root_file_index,
     fetch_cover_bytes,
     group_videos_by_av,
     guangya_folder_from_env,
-    guangya_root_sibling_names,
     iter_guangya_jav_video_files,
     lookup_scrape_metadata,
     plan_sidecars_for_av,
+    root_nfo_needs_retranslate,
     upload_sidecar_bytes,
 )
 from jellyfin_nfo import (  # noqa: E402
@@ -73,6 +74,7 @@ def run_scrape(
     recursive: bool,
     parent_id_override: str | None = None,
     translate: bool = True,
+    refresh_untranslated: bool = False,
 ) -> dict[str, Any]:
     from javdb_client import JavDBClient
 
@@ -104,7 +106,7 @@ def run_scrape(
     if numbers_filter:
         av_groups = {k: v for k, v in av_groups.items() if k in numbers_filter}
 
-    root_existing = guangya_root_sibling_names(downloads_parent)
+    root_existing, root_file_ids = build_root_file_index(downloads_parent)
 
     stats: dict[str, Any] = {
         "folder": folder,
@@ -120,6 +122,7 @@ def run_scrape(
         "planned_poster": 0,
         "planned_fanart": 0,
         "skipped_existing": 0,
+        "refreshed_untranslated_nfo": 0,
         "javdb_errors": 0,
         "uploaded_nfo": 0,
         "uploaded_poster": 0,
@@ -142,6 +145,11 @@ def run_scrape(
             plan["needs_poster"] = True
             if include_fanart:
                 plan["needs_fanart"] = True
+        elif refresh_untranslated and translate and not plan["needs_nfo"]:
+            nfo_name = plan["sidecars"]["nfo"]
+            if root_nfo_needs_retranslate(nfo_name, root_file_ids=root_file_ids):
+                plan["needs_nfo"] = True
+                stats["refreshed_untranslated_nfo"] += 1
         if skip_existing and not plan["needs_nfo"] and not plan["needs_poster"]:
             stats["skipped_existing"] += 1
             continue
@@ -246,6 +254,15 @@ def main() -> int:
         help="Upload even when {番号}.nfo / {番号}-poster.jpg already exist",
     )
     parser.add_argument(
+        "--refresh-untranslated",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "When sidecars exist, re-upload NFO if title still has Japanese kana "
+            "(default: on with --apply, off in dry-run)"
+        ),
+    )
+    parser.add_argument(
         "--fanart",
         action="store_true",
         help="Also upload {番号}-fanart.jpg (same image as poster)",
@@ -275,6 +292,10 @@ def main() -> int:
 
     folder = (args.folder or guangya_folder_from_env()).strip()
     numbers_filter = {n.upper() for n in args.numbers} if args.numbers else None
+    if args.refresh_untranslated is None:
+        refresh_untranslated = args.apply and not args.no_translate
+    else:
+        refresh_untranslated = args.refresh_untranslated
 
     try:
         stats = run_scrape(
@@ -288,6 +309,7 @@ def main() -> int:
             recursive=not args.no_recursive,
             parent_id_override=args.parent_id,
             translate=not args.no_translate,
+            refresh_untranslated=refresh_untranslated,
         )
     except Exception as exc:
         print(f"[err] {exc}", file=sys.stderr)
@@ -303,7 +325,9 @@ def main() -> int:
             f"[info] folder={stats['folder']!r} mode={stats['mode']} "
             f"av_groups={stats['av_groups']} jav_videos={stats['jav_videos']} "
             f"planned_nfo={stats['planned_nfo']} planned_poster={stats['planned_poster']} "
-            f"skipped_existing={stats['skipped_existing']} javdb_errors={stats['javdb_errors']}",
+            f"skipped_existing={stats['skipped_existing']} "
+            f"refreshed_untranslated_nfo={stats['refreshed_untranslated_nfo']} "
+            f"javdb_errors={stats['javdb_errors']}",
         )
         if stats["mode"] == "apply":
             print(

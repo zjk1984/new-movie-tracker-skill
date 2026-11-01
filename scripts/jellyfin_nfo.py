@@ -191,16 +191,18 @@ def _translate_list(labels: list[str], translate_fn: Any) -> list[str]:
 
 def localize_scrape_metadata_zh(meta: dict[str, Any]) -> dict[str, Any]:
     """Translate scraped JavDB strings to Simplified Chinese for Jellyfin NFO."""
-    from title_translate import has_japanese, translate_av_metadata_to_zh, translate_ja_to_zh
+    from title_translate import (
+        has_japanese,
+        translate_av_metadata_to_zh,
+        translate_ja_to_zh,
+        translate_title_to_zh,
+    )
 
     out = dict(meta)
 
     title = _any_str(meta.get("title")).strip()
     if title:
-        if has_japanese(title):
-            out["title"] = translate_ja_to_zh(title) or translate_av_metadata_to_zh(title)
-        else:
-            out["title"] = translate_av_metadata_to_zh(title)
+        out["title"] = translate_title_to_zh(title)
 
     out["plot"] = ""
 
