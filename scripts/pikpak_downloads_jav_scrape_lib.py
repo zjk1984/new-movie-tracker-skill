@@ -137,17 +137,47 @@ def sibling_name_set(
     return names
 
 
+JPEG_MAGIC = b"\xff\xd8\xff"
+
+
+def normalize_cover_url(url: str) -> str:
+    u = (url or "").strip()
+    if u.startswith("//"):
+        return f"https:{u}"
+    return u
+
+
+def is_jpeg_image(data: bytes) -> bool:
+    return len(data) >= 3 and data[:3] == JPEG_MAGIC
+
+
+def looks_like_html_body(data: bytes) -> bool:
+    head = data[:512].lstrip().lower()
+    return head.startswith(b"<!doctype") or head.startswith(b"<html") or head.startswith(b"<")
+
+
+def validate_jpeg_cover_bytes(data: bytes) -> None:
+    if not data:
+        raise RuntimeError("empty cover body")
+    if looks_like_html_body(data):
+        raise RuntimeError("cover response looks like HTML, not a JPEG")
+    if not is_jpeg_image(data):
+        magic = data[:8].hex() if data else ""
+        raise RuntimeError(f"cover is not a valid JPEG (expected ff d8 ff; got {magic})")
+
+
 def fetch_cover_bytes(url: str, *, timeout: float = 30.0) -> bytes:
+    url = normalize_cover_url(url)
     if not url:
         raise ValueError("empty cover url")
     if http is None:
         raise ImportError("cover download requires curl_cffi")
-    resp = http.get(url, impersonate="chrome120", timeout=timeout)
+    headers = {"Referer": "https://javdb.com/"}
+    resp = http.get(url, impersonate="chrome120", timeout=timeout, headers=headers)
     if resp.status_code >= 400:
         raise RuntimeError(f"cover HTTP {resp.status_code}")
     data = resp.content
-    if not data:
-        raise RuntimeError("empty cover body")
+    validate_jpeg_cover_bytes(data)
     return data
 
 

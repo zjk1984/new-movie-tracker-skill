@@ -30,7 +30,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from env_utils import load_env_local  # noqa: E402
-from jellyfin_nfo import build_movie_nfo_xml, localize_scrape_metadata_zh, validate_nfo_xml  # noqa: E402
+from jellyfin_nfo import (  # noqa: E402
+    build_movie_nfo_xml,
+    canonical_av_number,
+    localize_scrape_metadata_zh,
+    validate_nfo_xml,
+)
 from pikpak_downloads_jav_scrape_lib import (  # noqa: E402
     downloads_folder_from_env,
     fetch_cover_bytes,
@@ -158,6 +163,7 @@ def run_scrape(
 
         try:
             meta = lookup_scrape_metadata(client, av, sleep_fn=time.sleep)
+            meta["number"] = canonical_av_number(av)
             if translate:
                 meta = localize_scrape_metadata_zh(meta)
             item["title"] = meta.get("title")
