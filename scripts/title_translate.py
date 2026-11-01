@@ -83,12 +83,7 @@ def _translate_with_google(text: str) -> str:
     return GoogleTranslator(source="ja", target="zh-CN").translate(text[:500])
 
 
-def translate_ja_to_zh(text: str) -> str:
-    text = (text or "").strip()
-    if not text or not has_japanese(text):
-        return ""
-    if not TRANSLATE_ENABLED:
-        return ""
+def _translate_ja_to_zh_cached(text: str) -> str:
     _load_disk_cache()
     if text in _cache:
         return _cache[text]
@@ -105,6 +100,30 @@ def translate_ja_to_zh(text: str) -> str:
         _cache[text] = zh
         _save_disk_cache()
     return zh
+
+
+def translate_ja_to_zh(text: str) -> str:
+    text = (text or "").strip()
+    if not text or not has_japanese(text):
+        return ""
+    if not TRANSLATE_ENABLED:
+        return ""
+    return _translate_ja_to_zh_cached(text)
+
+
+_ASCII_LABEL_RE = re.compile(r"^[A-Za-z0-9 .&'+\-/]+$")
+
+
+def translate_av_metadata_to_zh(text: str) -> str:
+    """Translate JavDB tag/studio/title strings to Simplified Chinese (kanji labels included)."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    if _ASCII_LABEL_RE.fullmatch(text):
+        return text
+    if not TRANSLATE_ENABLED:
+        return text
+    return _translate_ja_to_zh_cached(text) or text
 
 
 def _magnet_dn_text(item: dict[str, Any]) -> str:

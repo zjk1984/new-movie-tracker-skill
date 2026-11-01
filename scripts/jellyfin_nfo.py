@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from typing import Any
 
 from javdb_client import _any_str, extract_tag_names
@@ -110,16 +111,79 @@ def extract_cover_url(detail: dict[str, Any]) -> str:
     return ""
 
 
+def parse_runtime_minutes(raw: Any) -> str:
+    """Return runtime minutes as a decimal string for Jellyfin ``<runtime>``."""
+    if raw is None:
+        return ""
+    if isinstance(raw, bool):
+        return ""
+    if isinstance(raw, (int, float)):
+        minutes = int(raw)
+        return str(minutes) if minutes > 0 else ""
+    text = _any_str(raw).strip()
+    if not text:
+        return ""
+    hm = re.match(r"^(\d+)\s*:\s*(\d{1,2})\s*(?::\s*(\d{1,2}))?$", text)
+    if hm:
+        hours = int(hm.group(1))
+        mins = int(hm.group(2))
+        secs = int(hm.group(3) or 0)
+        total = hours * 60 + mins + (1 if secs >= 30 else 0)
+        return str(total) if total > 0 else ""
+    m = re.search(r"(\d+)\s*分", text)
+    if m:
+        return m.group(1)
+    if text.isdigit():
+        return text
+    return ""
+
+
+def _translate_list(labels: list[str], translate_fn: Any) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for label in labels:
+        text = _any_str(label).strip()
+        if not text:
+            continue
+        zh = translate_fn(text)
+        if not zh or zh in seen:
+            continue
+        seen.add(zh)
+        out.append(zh)
+    return out
+
+
 def localize_scrape_metadata_zh(meta: dict[str, Any]) -> dict[str, Any]:
-    """Translate title and actress names to Simplified Chinese for minimal Jellyfin NFO."""
-    from title_translate import has_japanese, translate_ja_to_zh
+    """Translate scraped JavDB strings to Simplified Chinese for Jellyfin NFO."""
+    from title_translate import has_japanese, translate_av_metadata_to_zh, translate_ja_to_zh
 
     out = dict(meta)
-    title = _any_str(meta.get("title"))
-    if title and has_japanese(title):
-        zh = translate_ja_to_zh(title)
-        if zh:
-            out["title"] = zh
+
+    title = _any_str(meta.get("title")).strip()
+    if title:
+        if has_japanese(title):
+            out["title"] = translate_ja_to_zh(title) or translate_av_metadata_to_zh(title)
+        else:
+            out["title"] = translate_av_metadata_to_zh(title)
+
+    out["plot"] = ""
+
+    maker = _any_str(meta.get("maker_name")).strip()
+    if maker:
+        out["maker_name"] = translate_av_metadata_to_zh(maker)
+
+    director = _any_str(meta.get("director")).strip()
+    if director:
+        out["director"] = translate_av_metadata_to_zh(director)
+
+    genres = _translate_list(list(meta.get("genres") or []), translate_av_metadata_to_zh)
+    tags = _translate_list(list(meta.get("tags") or []), translate_av_metadata_to_zh)
+    if out.get("maker_name"):
+        maker_zh = _any_str(out["maker_name"])
+        if maker_zh and maker_zh not in tags:
+            tags.insert(0, maker_zh)
+    out["genres"] = genres
+    out["tags"] = tags
 
     actresses: list[str] = []
     for actress in meta.get("actresses") or []:
@@ -127,24 +191,36 @@ def localize_scrape_metadata_zh(meta: dict[str, Any]) -> dict[str, Any]:
         if not name:
             continue
         if has_japanese(name):
-            actresses.append(translate_ja_to_zh(name) or name)
+            actresses.append(translate_ja_to_zh(name) or translate_av_metadata_to_zh(name))
         else:
-            actresses.append(name)
+            actresses.append(translate_av_metadata_to_zh(name))
     out["actresses"] = actresses
+    out.pop("originaltitle", None)
     return out
 
 
 def nfo_display_title(meta: dict[str, Any]) -> str:
-    """Jellyfin-friendly title: always includes 番号 when known."""
+    """``{番号} {中文标题} {女优中文名}`` (primary actress appended when known)."""
     number = canonical_av_number(_any_str(meta.get("number")))
     title = _any_str(meta.get("title")).strip()
-    if not number:
-        return title
-    if not title:
-        return number
-    if number in title.upper():
-        return title
-    return f"{number} {title}"
+    if number and title.upper().startswith(number + " "):
+        title = title[len(number) :].strip()
+    elif number and title.upper() == number:
+        title = ""
+
+    actresses = meta.get("actresses") or []
+    lead = _any_str(actresses[0]).strip() if actresses else ""
+    if lead and lead in title:
+        lead = ""
+
+    parts: list[str] = []
+    if number:
+        parts.append(number)
+    if title:
+        parts.append(title)
+    if lead:
+        parts.append(lead)
+    return " ".join(parts)
 
 
 def merge_scrape_metadata(
@@ -157,17 +233,22 @@ def merge_scrape_metadata(
     plot = extract_plot(detail)
     cover_url = extract_cover_url(detail)
     title = _first_str(detail, "title") or _any_str(lookup.get("title"))
+    duration = detail.get("duration")
+    if duration is None:
+        duration = lookup.get("duration")
     return {
         "number": _any_str(lookup.get("number") or detail.get("number")).upper(),
         "title": title,
-        "originaltitle": title,
         "plot": plot,
         "release_date": _first_str(detail, "release_date") or _any_str(lookup.get("release_date")),
         "actresses": actresses,
         "tags": tags,
+        "genres": list(tags),
         "cover_url": cover_url,
         "maker_name": _first_str(detail, "maker_name") or _any_str(lookup.get("maker_name")),
         "series_name": _first_str(detail, "series_name") or _any_str(lookup.get("series_name")),
+        "director": _first_str(detail, "director_name", "director"),
+        "duration": duration,
         "score": lookup.get("score"),
         "javdb_id": lookup.get("javdb_id") or detail.get("id"),
         "content_type": lookup.get("content_type"),
@@ -175,33 +256,81 @@ def merge_scrape_metadata(
 
 
 def _xml_text(parent: ET.Element, tag: str, text: str) -> None:
-    if not text:
+    if text is None:
         return
     child = ET.SubElement(parent, tag)
     child.text = text
 
 
+def _xml_empty(parent: ET.Element, tag: str) -> None:
+    ET.SubElement(parent, tag)
+
+
 def build_movie_nfo_xml(meta: dict[str, Any]) -> str:
-    """Return UTF-8 Jellyfin ``<movie>`` NFO: 番号, 中文标题, 女优, minimal ids."""
+    """Return UTF-8 Jellyfin ``<movie>`` NFO matching ADN-148 template (Chinese-only)."""
     root = ET.Element("movie")
+
+    _xml_empty(root, "plot")
+    _xml_text(root, "lockdata", "false")
+
+    dateadded = _any_str(meta.get("dateadded")).strip()
+    if not dateadded:
+        dateadded = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _xml_text(root, "dateadded", dateadded)
 
     number = canonical_av_number(_any_str(meta.get("number")))
     title = nfo_display_title(meta)
     if title:
         _xml_text(root, "title", title)
-    if number:
-        _xml_text(root, "sorttitle", number)
-        _xml_text(root, "uniqueid", number)
-        uid = root.find("uniqueid")
-        if uid is not None:
-            uid.set("type", "jav")
-            uid.set("default", "true")
 
-    release = _any_str(meta.get("release_date"))
+    director = _any_str(meta.get("director")).strip()
+    if director:
+        _xml_text(root, "director", director)
+
+    release = _any_str(meta.get("release_date")).strip()
+    year = ""
     if release:
         year_match = re.match(r"(\d{4})", release)
         if year_match:
-            _xml_text(root, "year", year_match.group(1))
+            year = year_match.group(1)
+            _xml_text(root, "year", year)
+        _xml_text(root, "premiered", release)
+        _xml_text(root, "releasedate", release)
+        _xml_text(root, "tagline", f"配信开始日 {release}")
+
+    _xml_text(root, "mpaa", "JP-18+")
+
+    runtime = parse_runtime_minutes(meta.get("runtime") or meta.get("duration"))
+    if runtime:
+        _xml_text(root, "runtime", runtime)
+
+    for genre in meta.get("genres") or []:
+        name = _any_str(genre).strip()
+        if name:
+            _xml_text(root, "genre", name)
+
+    maker = _any_str(meta.get("maker_name")).strip()
+    _xml_empty(root, "studio")
+    if maker:
+        _xml_text(root, "studio", maker)
+
+    for tag in meta.get("tags") or []:
+        tag_name = _any_str(tag).strip()
+        if tag_name:
+            _xml_text(root, "tag", tag_name)
+
+    if number:
+        _xml_text(root, "metatubeid", f"JavBus:{number}")
+
+    sidecars = metadata_sidecar_names(number, include_fanart=True)
+    poster_path = _any_str(meta.get("poster_path")).strip() or sidecars["poster"]
+    fanart_path = _any_str(meta.get("fanart_path")).strip() or sidecars.get("fanart", "")
+    if poster_path or fanart_path:
+        art_el = ET.SubElement(root, "art")
+        if poster_path:
+            _xml_text(art_el, "poster", poster_path)
+        if fanart_path:
+            _xml_text(art_el, "fanart", fanart_path)
 
     for actress in meta.get("actresses") or []:
         name = _any_str(actress).strip()
