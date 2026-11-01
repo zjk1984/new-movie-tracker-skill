@@ -111,7 +111,8 @@ grep -Fq 'CNBETA_RSS_CRON' "$ENSURE_SCRIPT"
 GUANGYA_DEDUPE="$ROOT/scripts/guangya_downloads_dedupe.sh"
 GUANGYA_DRY="$(GUANGYA_DEDUPE_CRON=1 "$SCRIPT" --dry-run 2>/dev/null)"
 echo "$GUANGYA_DRY" | grep -q 'new-movie-tracker-guangya-dedupe'
-echo "$GUANGYA_DRY" | grep -q 'GUANGYA_JAV_SCRAPE_CRON=1'
+echo "$GUANGYA_DRY" | grep -q 'GUANGYA_JAV_SCRAPE_CRON=0'
+echo "$(GUANGYA_DEDUPE_CRON=1 GUANGYA_JAV_SCRAPE_CRON=1 "$SCRIPT" --dry-run 2>/dev/null)" | grep -q 'GUANGYA_JAV_SCRAPE_CRON=1'
 echo "$GUANGYA_DRY" | grep -q 'guangya_downloads_dedupe.sh'
 grep -Fq 'GUANGYA_JAV_SCRAPE_CRON' "$GUANGYA_DEDUPE"
 grep -Fq 'guangya_downloads_jav_scrape.py --apply' "$GUANGYA_DEDUPE"

@@ -53,7 +53,7 @@ Install cron job(s) for scripts/daily_run.sh (and optionally scripts/cnbeta_rss.
 
 Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
 CNBeta RSS cron is off by default; set CNBETA_RSS_CRON=1 to install news aggregation slots.
-Optional GuangYa dedupe (06:45 BJ): set GUANGYA_DEDUPE_CRON=1 (dry-run unless GUANGYA_DEDUPE_APPLY=1). Dedupes GuangYa ``downloads`` + ``JAV`` (within-folder then cross-folder; keeper ``downloads``). Chains ``guangya_downloads_jav_scrape.py --apply`` when GUANGYA_JAV_SCRAPE_CRON=1 (default). Legacy PikPak dedupe: PIKPAK_DEDUPE_CRON=1 (mutually prefer GUANGYA when both set).
+Optional GuangYa dedupe (06:45 BJ): set GUANGYA_DEDUPE_CRON=1 (dry-run unless GUANGYA_DEDUPE_APPLY=1). Dedupes GuangYa ``downloads`` + ``JAV`` (within-folder then cross-folder; keeper ``downloads``). Chains ``guangya_downloads_jav_scrape.py --apply`` only when GUANGYA_JAV_SCRAPE_CRON=1 (default off). Legacy PikPak dedupe: PIKPAK_DEDUPE_CRON=1 (mutually prefer GUANGYA when both set).
 CNBeta RSS loads Feishu credentials from .env.local (see docs/feishu-setup.md).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).
@@ -78,7 +78,7 @@ Environment overrides:
   GUANGYA_DEDUPE_TIME=06:45  schedule when GUANGYA_DEDUPE_CRON=1
   GUANGYA_DEDUPE_APPLY=1     pass --apply to guangya_downloads_dedupe.py on cron
   GUANGYA_DEDUPE_FOLDERS=downloads,JAV
-  GUANGYA_JAV_SCRAPE_CRON=1  after dedupe, run guangya_downloads_jav_scrape.py --apply (skip_existing default)
+  GUANGYA_JAV_SCRAPE_CRON=1  after dedupe, run guangya_downloads_jav_scrape.py --apply (default off; skip_existing when enabled)
   GUANGYA_AUDIT_REPORT_JSON=reports/pikpak_guangya_audit_2026-11-01.json  incremental new downloads log after chain
   PIKPAK_DEDUPE_CRON=1       legacy PikPak dedupe (only if GUANGYA_DEDUPE_CRON=0)
 
@@ -209,7 +209,11 @@ cron_line_for_guangya_dedupe() {
   esac
   local audit_json="${GUANGYA_AUDIT_REPORT_JSON:-reports/pikpak_guangya_audit_2026-11-01.json}"
   local audit_env="GUANGYA_AUDIT_REPORT_JSON=${audit_json} "
-  echo "$minute $hour * * * TZ=$TZ_NAME ${apply_env}${audit_env}GUANGYA_JAV_SCRAPE_CRON=1 GUANGYA_DEDUPE_FOLDERS=downloads,JAV $GUANGYA_DEDUPE_WRAPPER $GUANGYA_DEDUPE_MARK"
+  local scrape_cron="0"
+  case "${GUANGYA_JAV_SCRAPE_CRON:-0}" in
+    1|true|yes|on) scrape_cron="1" ;;
+  esac
+  echo "$minute $hour * * * TZ=$TZ_NAME ${apply_env}${audit_env}GUANGYA_JAV_SCRAPE_CRON=${scrape_cron} GUANGYA_DEDUPE_FOLDERS=downloads,JAV $GUANGYA_DEDUPE_WRAPPER $GUANGYA_DEDUPE_MARK"
 }
 
 cron_line_for_pikpak_dedupe() {
