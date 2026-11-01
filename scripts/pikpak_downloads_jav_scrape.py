@@ -30,7 +30,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from env_utils import load_env_local  # noqa: E402
-from jellyfin_nfo import build_movie_nfo_xml, validate_nfo_xml  # noqa: E402
+from jellyfin_nfo import build_movie_nfo_xml, localize_scrape_metadata_zh, validate_nfo_xml  # noqa: E402
 from pikpak_downloads_jav_scrape_lib import (  # noqa: E402
     downloads_folder_from_env,
     fetch_cover_bytes,
@@ -78,6 +78,7 @@ def run_scrape(
     lang: str,
     recursive: bool,
     parent_id_override: str | None = None,
+    translate: bool = True,
 ) -> dict[str, Any]:
     from javdb_client import JavDBClient
     from pikpak_download import upload_file_bytes, upload_file_from_url
@@ -119,6 +120,7 @@ def run_scrape(
         "mode": "apply" if apply else "dry-run",
         "pseudo_as_jav": pseudo_jav,
         "recursive": recursive,
+        "translate_zh": translate,
         "videos_seen": len(scanned),
         "jav_videos": sum(len(v) for v in av_groups.values()),
         "av_groups": len(av_groups),
@@ -156,6 +158,8 @@ def run_scrape(
 
         try:
             meta = lookup_scrape_metadata(client, av, sleep_fn=time.sleep)
+            if translate:
+                meta = localize_scrape_metadata_zh(meta)
             item["title"] = meta.get("title")
             item["release_date"] = meta.get("release_date")
         except Exception as exc:
@@ -300,6 +304,11 @@ def main() -> int:
         default=os.environ.get("JAVDB_LANG", "cn"),
         help="JavDB accept-language (default: cn)",
     )
+    parser.add_argument(
+        "--no-translate",
+        action="store_true",
+        help="Skip Japanese→Chinese localization in NFO fields",
+    )
     parser.add_argument("--json", action="store_true", help="Print stats JSON")
     parser.add_argument("--parent-id", default=None, help="PikPak folder id (skip name lookup)")
     args = parser.parse_args()
@@ -318,6 +327,7 @@ def main() -> int:
             lang=args.lang,
             recursive=not args.no_recursive,
             parent_id_override=args.parent_id,
+            translate=not args.no_translate,
         )
     except Exception as exc:
         print(f"[err] {exc}", file=sys.stderr)

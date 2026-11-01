@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections import defaultdict, deque
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,7 +15,8 @@ from env_utils import load_env_local
 
 load_env_local()
 
-from guangya_cloud_cli import find_directory_id, login_status, run_operations
+from guangya_cloud_cli import find_directory_id, login_status
+from guangya_downloads_jav_scrape_lib import list_guangya_dir_paged, walk_guangya_tree
 from guangya_cloud_submit import _resolve_pikpak_session
 from guangya_cloud_submit_lib import (
     enumerate_av_entries_from_files,
@@ -33,51 +34,8 @@ def _av_from_name(name: str, *, pseudo: bool | None) -> str:
     return av or ""
 
 
-def list_guangya_dir_paged(parent_id: str) -> list[dict[str, Any]]:
-    all_items: list[dict[str, Any]] = []
-    page = 0
-    while True:
-        code, data, _stderr = run_operations(
-            [
-                {
-                    "id": f"list-{parent_id}-{page}",
-                    "type": "list",
-                    "remote_parent_id": parent_id,
-                    "page": page,
-                    "page_size": 100,
-                },
-            ],
-        )
-        if code != 0:
-            break
-        result = ((data.get("data") or {}).get("items") or [{}])[0].get("result") or {}
-        items = list(result.get("items") or [])
-        all_items.extend(items)
-        if len(items) < 100:
-            break
-        page += 1
-        if page > 200:
-            break
-    return all_items
-
-
 def walk_guangya_files(root_id: str) -> list[dict[str, Any]]:
-    files: list[dict[str, Any]] = []
-    queue: deque[str] = deque([root_id])
-    seen: set[str] = set()
-    while queue:
-        pid = queue.popleft()
-        if pid in seen:
-            continue
-        seen.add(pid)
-        for row in list_guangya_dir_paged(pid):
-            if row.get("type") == "directory":
-                cid = str(row.get("id") or "").strip()
-                if cid:
-                    queue.append(cid)
-            else:
-                files.append(row)
-    return files
+    return walk_guangya_tree(root_id)
 
 
 def pikpak_link_for_file(

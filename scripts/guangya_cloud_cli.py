@@ -7,10 +7,13 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
+
+TERMINAL_BATCH_STATES = frozenset({"SUCCEEDED", "PARTIAL", "FAILED", "STOPPED"})
 
 DEFAULT_SKILL_ROOT = Path("/cursor/stores/user/skills/guangyapan-drive")
 DEFAULT_PROFILE_DIR = Path("/cursor/stores/user/guangyapan-cursor-profile")
@@ -161,3 +164,81 @@ def find_directory_id(
             rid = str(row.get("id") or "").strip()
             return rid or None
     return None
+
+
+def batch_status(
+    batch_id: str,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    timeout: float = 120.0,
+) -> tuple[int, dict[str, Any], str]:
+    run = runner or subprocess.run
+    cmd = _base_cmd("status", "--batch-id", batch_id)
+    proc = run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=str(skill_root()),
+        env=cli_env(),
+        timeout=timeout,
+        check=False,
+    )
+    try:
+        payload = parse_cli_json(proc.stdout)
+    except json.JSONDecodeError:
+        payload = {"raw_stdout": proc.stdout, "parse_error": True}
+    return proc.returncode, payload, proc.stderr or ""
+
+
+def wait_batch_terminal(
+    batch_id: str,
+    *,
+    timeout: float = 600.0,
+    poll_interval: float = 1.0,
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> dict[str, Any]:
+    """Poll Skill ``status`` until batch reaches a terminal state."""
+    deadline = time.monotonic() + max(1.0, timeout)
+    last: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        code, data, stderr = batch_status(batch_id, runner=runner)
+        last = data
+        state = str(data.get("batch_state") or "").strip().upper()
+        if state in TERMINAL_BATCH_STATES:
+            if state != "SUCCEEDED" or code != 0:
+                msg = stderr or data.get("code") or state
+                raise RuntimeError(f"GuangYa batch {batch_id!r} ended {state}: {msg}")
+            return data
+        time.sleep(max(0.2, poll_interval))
+    raise TimeoutError(f"GuangYa batch {batch_id!r} did not finish within {timeout}s; last={last!r}")
+
+
+def upload_local_file(
+    local_path: Path | str,
+    remote_parent_id: str,
+    *,
+    operation_id: str = "upload-1",
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    wait_timeout: float = 600.0,
+) -> dict[str, Any]:
+    """Upload one local file into ``remote_parent_id`` and wait for batch completion."""
+    path = Path(local_path).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"upload source not found: {path}")
+    code, data, stderr = run_operations(
+        [
+            {
+                "id": operation_id,
+                "type": "upload",
+                "local_path": str(path),
+                "remote_parent_id": remote_parent_id,
+            },
+        ],
+        runner=runner,
+    )
+    batch_id = str(data.get("batch_id") or "").strip()
+    if not batch_id:
+        raise RuntimeError(f"upload run missing batch_id: {stderr or data}")
+    if code != 0 and not batch_id:
+        raise RuntimeError(f"upload run failed: {stderr or data}")
+    return wait_batch_terminal(batch_id, timeout=wait_timeout, runner=runner)
