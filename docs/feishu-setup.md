@@ -218,6 +218,15 @@ Each slot runs `scripts/cnbeta_rss.sh`, which invokes this aggregator and logs t
 
 Each run writes a timestamped markdown file under `update/` grouped by category. The previous `update/*.md` is moved to `update/backup/` and linked from the new file. Dedup merges article URLs from state and the latest markdown snapshot.
 
+### GuangYa 06:45 dedupe cron
+
+After a **successful** `scripts/guangya_downloads_dedupe.sh` pipeline (dedupe → optional JAV scrape → optional audit incremental), the shell calls `scripts/guangya_dedupe_feishu.py`, which uses `feishu_notify.send_guangya_dedupe_done` with the same `.env.local` credentials as `daily_run.py`.
+
+- Summary snapshot: `data/guangya_dedupe_last_run.json`
+- Log: `data/guangya_dedupe.log`
+- Skips send with `[info] feishu skip` when app credentials or `FEISHU_RECEIVE_ID` are missing
+- Manual test: `python3 scripts/guangya_dedupe_feishu.py --dry-run` (no API call)
+
 ## Troubleshooting
 
 | Error | Fix |

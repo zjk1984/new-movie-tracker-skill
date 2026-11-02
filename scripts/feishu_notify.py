@@ -808,6 +808,48 @@ def send_pikpak_done(
     return send_interactive_card(build_pikpak_done_card(report, run_label=run_label))
 
 
+def send_guangya_dedupe_done(
+    *,
+    dedupe_stats: dict[str, Any] | None = None,
+    audit_added: int | None = None,
+    audit_report_path: str | None = None,
+    jav_scrape_ran: bool = False,
+    jav_scrape_skipped: bool = True,
+    log_path: str = "data/guangya_dedupe.log",
+) -> dict[str, Any] | None:
+    """Concise Feishu text after successful GuangYa 06:45 dedupe cron pipeline."""
+    if not is_configured():
+        print("[info] feishu skip: credentials or FEISHU_RECEIVE_ID not set")
+        return None
+
+    stamp = format_beijing_time(beijing_now(), with_label=False)
+    title = f"【GuangYa 06:45 dedupe】{stamp} 北京"
+    lines = [title, ""]
+
+    stats = dedupe_stats or {}
+    mode = stats.get("mode") or "—"
+    lines.append(
+        f"▸ 去重 ({mode})：回收站 **{stats.get('trashed_ok', 0)}** / "
+        f"候选 **{stats.get('trash_candidates', 0)}** "
+        f"（扫描 {stats.get('files_seen', '—')} 文件；"
+        f"within {stats.get('within_groups', 0)} / cross {stats.get('cross_groups', 0)} 组）",
+    )
+
+    if audit_report_path:
+        added = 0 if audit_added is None else audit_added
+        lines.append(f"▸ Audit 增量：**+{added}** 条 → `{audit_report_path}`")
+    else:
+        lines.append("▸ Audit 增量：未运行（无 GUANGYA_AUDIT_REPORT_JSON）")
+
+    if jav_scrape_ran:
+        lines.append("▸ 新番 scrape：**已执行**（GUANGYA_JAV_SCRAPE_CRON=1）")
+    elif jav_scrape_skipped:
+        lines.append("▸ 新番 scrape：**跳过**（GUANGYA_JAV_SCRAPE_CRON=0）")
+
+    lines.append(f"▸ 日志：`{log_path}`")
+    return send_text("\n".join(lines))
+
+
 def send_scan_progress(
     matched_count: int,
     *,

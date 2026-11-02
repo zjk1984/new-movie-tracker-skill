@@ -8,6 +8,8 @@ mkdir -p data
 export TZ="${TZ:-Asia/Shanghai}"
 
 export GUANGYA_DEDUPE_FOLDERS="${GUANGYA_DEDUPE_FOLDERS:-downloads,JAV}"
+SUMMARY="$ROOT/scripts/guangya_dedupe_summary.py"
+FEISHU="$ROOT/scripts/guangya_dedupe_feishu.py"
 
 ARGS=(--folders "$GUANGYA_DEDUPE_FOLDERS")
 case "${GUANGYA_DEDUPE_APPLY:-0}" in
@@ -21,13 +23,25 @@ jav_scrape_cron_enabled() {
   esac
 }
 
+maybe_feishu_dedupe_done() {
+  if [[ "${1:-1}" -ne 0 ]]; then
+    return 0
+  fi
+  if [[ -x "$FEISHU" ]]; then
+    python3 "$FEISHU" || true
+  fi
+}
+
 {
+  python3 "$SUMMARY" reset
   echo "===== $(date -Iseconds) guangya_downloads_dedupe.sh start (TZ=$TZ folders=$GUANGYA_DEDUPE_FOLDERS) ====="
   export PYTHONUNBUFFERED=1
   python3 scripts/guangya_downloads_dedupe.py "${ARGS[@]}"
   ec=$?
   echo "===== $(date -Iseconds) guangya_downloads_dedupe.sh exit $ec ====="
+  jav_scrape_ran=0
   if [[ "$ec" -eq 0 ]] && jav_scrape_cron_enabled; then
+    jav_scrape_ran=1
     {
       echo "===== $(date -Iseconds) guangya_downloads_jav_scrape.py cron start ====="
       export PYTHONUNBUFFERED=1
@@ -43,6 +57,21 @@ jav_scrape_cron_enabled() {
     echo "===== $(date -Iseconds) guangya_audit_incremental.py start ====="
     python3 scripts/guangya_audit_incremental.py --report "$GUANGYA_AUDIT_REPORT_JSON" --json-stdout || ec=$?
     echo "===== $(date -Iseconds) guangya_audit_incremental.py exit $ec ====="
+  fi
+  if [[ "$ec" -eq 0 ]]; then
+    jav_scrape_skipped=1
+    if [[ "$jav_scrape_ran" -eq 1 ]]; then
+      jav_scrape_skipped=0
+    fi
+    python3 "$SUMMARY" merge --json "$(python3 - <<PY
+import json
+print(json.dumps({
+    "jav_scrape_ran": bool(${jav_scrape_ran}),
+    "jav_scrape_skipped": bool(${jav_scrape_skipped}),
+}))
+PY
+)"
+    maybe_feishu_dedupe_done "$ec"
   fi
   exit "$ec"
 } >> data/guangya_dedupe.log 2>&1

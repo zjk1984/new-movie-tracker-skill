@@ -194,6 +194,9 @@ def main() -> int:
             f"within_groups={stats['within_groups']} cross_groups={stats['cross_groups']} "
             f"trash_candidates={stats['trash_candidates']} trashed_ok={stats['trashed_ok']}",
         )
+    from guangya_dedupe_summary import merge_summary
+
+    merge_summary({"dedupe": stats})
     return 0
 
 

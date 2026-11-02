@@ -306,6 +306,15 @@ def main() -> int:
             f"[info] added_this_run={result['added_this_run']} "
             f"snapshot_files={result['snapshot_file_count']}",
         )
+    from guangya_dedupe_summary import merge_summary
+
+    merge_summary(
+        {
+            "audit": result,
+            "audit_report": str(args.report),
+            "audit_added": result.get("added_this_run"),
+        },
+    )
     return 0
 
 
