@@ -392,14 +392,15 @@ def run_batch(
         "sample_planned": pending[0] if pending else None,
     }
 
-    for row in pending[:5]:
-        uri = row.get("uri") or ""
-        av = row.get("av_number") or "?"
-        print(
-            f"[plan] {av} {uri[:80]}{'…' if len(uri) > 80 else ''}",
-        )
-    if len(pending) > 5:
-        print(f"[plan] … and {len(pending) - 5} more")
+    if not quiet:
+        for row in pending[:5]:
+            uri = row.get("uri") or ""
+            av = row.get("av_number") or "?"
+            print(
+                f"[plan] {av} {uri[:80]}{'…' if len(uri) > 80 else ''}",
+            )
+        if len(pending) > 5:
+            print(f"[plan] … and {len(pending) - 5} more")
 
     if apply and pending:
         ensure_logged_in(sync_auth=sync_auth)
@@ -521,6 +522,7 @@ def main() -> int:
             preflight=args.preflight,
             sync_auth=not args.no_auth_sync,
             ignore_state=args.ignore_state,
+            quiet=args.json,
         )
     except Exception as exc:
         print(f"[err] {exc}", file=sys.stderr)
