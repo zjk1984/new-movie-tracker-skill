@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Hourly non-slot timer wake: ensure cron is healthy without restarting supervisor.
-# Invoked on cron VM bc-d4fb1f8c when hourly-wake-non-slot-bj timer fires.
+# Invoked on cron VM bc-d4fb1f8c when hourly-wake-non-slot-bj timer fires,
+# or from /etc/cron.d/new-movie-tracker-hourly-wake (setup_cron.sh Layer F).
 # See docs/daily-run-external-schedule.md (铁律 — hourly :55 checkpoint wake).
 set -euo pipefail
 

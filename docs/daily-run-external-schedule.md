@@ -11,6 +11,7 @@
 | C | `environment.json` `"start"` hook | No |
 | A | Cursor `subscribe_timer` wake at **:55 every hour** (Beijing) | No |
 | E | User crontab **pre-wake** (`cron_pre_wake.sh`, 5 min before each tracker job) | No |
+| F | Root `/etc/cron.d` **hourly :55** (`hourly_wake_heartbeat.sh`) | No |
 
 Cron + `ensure_cron_running.sh` remain **best-effort backup** once cron is up.
 
@@ -26,6 +27,16 @@ When `setup_cron.sh` installs tracker jobs, it also installs **pre-wake** lines 
 | 20:00 daily | 19:55 | `restart_daily_supervisor.sh` |
 
 Aligns with external Cursor slot timers (`daily-wake-*-bj`) so the VM stays unfrozen even when Project timers do not fire.
+
+### Layer F — VM `/etc/cron.d` hourly :55 heartbeat
+
+Installed by `./scripts/setup_cron.sh` as `/etc/cron.d/new-movie-tracker-hourly-wake` (runs as install user, `TZ=Asia/Shanghai`):
+
+```cron
+55 * * * * ubuntu TZ=Asia/Shanghai /workspace/scripts/hourly_wake_heartbeat.sh
+```
+
+Backup when Cursor `subscribe_timer` subscriptions expire: keeps `data/hourly_wake.log` and `data/cron_health.log` updating **while the VM process is running**. Does **not** unfreeze a checkpointed VM — use Option D + Option A for that.
 
 ---
 
@@ -85,10 +96,12 @@ Before any `unsubscribe`, always run `list_subscriptions` (cursor-subscriptions 
 
 ---
 
-## Option D — Keep cloud VM awake (disable auto-sleep)
+## Option D — Keep cloud VM awake (disable auto-sleep / checkpoint)
+
+**Required for reliable 06:45 / 07:00 / 13:00 / 20:00 when the agent is idle.** Evidence (Nov 2): supervisor heartbeats and user crontab froze for multi-hour gaps; missed dedupe + daily slots; `list_subscriptions` empty (timers expired).
 
 1. Open [cron VM environment settings](https://cursor.com/dashboard/cloud-agents/environments/e/d908b079-af28-11f1-bf4b-42ffb4d10ea7)
-2. Disable **自动休眠** / **空闲后休眠** if available
+2. Disable **自动休眠** / **空闲后休眠** / checkpoint-on-idle if the dashboard exposes it (platform control; not configurable from repo)
 3. Save start hook:
 
 ```json
@@ -163,4 +176,5 @@ Forum-37 is **cron-only** (not driven by `daily_run_supervisor.sh`). The 17:55 t
 - [ ] On cron VM `bc-d4fb1f8c`: `tmux ls` shows `daily-supervisor`
 - [ ] On cron VM: `crontab -l` unchanged (daily + forum37 lines intact)
 - [ ] After non-slot hourly wake: new line in `data/hourly_wake.log` and `data/cron_health.log`
+- [ ] `/etc/cron.d/new-movie-tracker-hourly-wake` present (Layer F; `setup_cron.sh`)
 - [ ] After each slot, `data/daily_run.log` has a new start entry in the correct hour window
