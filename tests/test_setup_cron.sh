@@ -26,6 +26,8 @@ fi
 DRY="$("$SCRIPT" --dry-run 2>/dev/null)"
 echo "$DRY" | grep -q 'would install cron line(s):'
 echo "$DRY" | grep -q 'new-movie-tracker-daily'
+echo "$DRY" | grep -q 'new-movie-tracker-pre-wake-daily-7'
+echo "$DRY" | grep -q 'cron_pre_wake.sh daily 7'
 if echo "$DRY" | grep -q 'new-movie-tracker-cnbeta'; then
   echo "[err] cnbeta cron should be off by default" >&2
   exit 1

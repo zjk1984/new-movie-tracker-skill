@@ -15,6 +15,8 @@ PIKPAK_DEDUPE_WRAPPER="$ROOT/scripts/pikpak_downloads_dedupe.sh"
 PIKPAK_DEDUPE_MARK="# new-movie-tracker-pikpak-dedupe"
 GUANGYA_DEDUPE_WRAPPER="$ROOT/scripts/guangya_downloads_dedupe.sh"
 GUANGYA_DEDUPE_MARK="# new-movie-tracker-guangya-dedupe"
+PRE_WAKE_WRAPPER="$ROOT/scripts/cron_pre_wake.sh"
+PRE_WAKE_MARK="# new-movie-tracker-pre-wake"
 CNBETA_RSS_CRON="${CNBETA_RSS_CRON:-0}"
 PIKPAK_DEDUPE_CRON="${PIKPAK_DEDUPE_CRON:-0}"
 GUANGYA_DEDUPE_CRON="${GUANGYA_DEDUPE_CRON:-0}"
@@ -54,6 +56,7 @@ Install cron job(s) for scripts/daily_run.sh (and optionally scripts/cnbeta_rss.
 Default schedule: 07:00, 13:00, and 20:00 Asia/Shanghai (Beijing time).
 CNBeta RSS cron is off by default; set CNBETA_RSS_CRON=1 to install news aggregation slots.
 Optional GuangYa dedupe (06:45 BJ): set GUANGYA_DEDUPE_CRON=1 (dry-run unless GUANGYA_DEDUPE_APPLY=1). Dedupes GuangYa ``downloads`` + ``JAV`` (within-folder then cross-folder; keeper ``downloads``). Chains ``guangya_downloads_jav_scrape.py --apply`` only when GUANGYA_JAV_SCRAPE_CRON=1 (default off). Legacy PikPak dedupe: PIKPAK_DEDUPE_CRON=1 (mutually prefer GUANGYA when both set).
+Installs **5-minute pre-wake** crontab lines before each tracker job (``cron_pre_wake.sh`` → ``data/cron_pre_wake.log``): dedupe at 06:40, daily at 06:55 / 12:55 / 19:55 BJ when those jobs are installed.
 CNBeta RSS loads Feishu credentials from .env.local (see docs/feishu-setup.md).
 Requires system timezone Asia/Shanghai (Vixie cron uses system local time).
 After install, attempts to restart the cron daemon automatically (required on some VMs).
@@ -166,6 +169,42 @@ cron_line_for_time() {
   cron_line_for_job "$1" "$WRAPPER" "$MARK"
 }
 
+# Return "minute hour" (cron fields) for five minutes before HH:MM on today's Beijing calendar.
+pre_wake_minute_hour() {
+  local hhmm="$1"
+  if ! [[ "$hhmm" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+    echo "[err] pre_wake_minute_hour: invalid time '$hhmm'" >&2
+    return 1
+  fi
+  local ts minute hour
+  ts="$(TZ="$TZ_NAME" date -d "today ${hhmm}" +%s)"
+  ts=$((ts - 300))
+  minute="$(TZ="$TZ_NAME" date -d "@$ts" +%-M)"
+  hour="$(TZ="$TZ_NAME" date -d "@$ts" +%-H)"
+  echo "$minute $hour"
+}
+
+cron_line_for_pre_wake_dedupe() {
+  local time="$1"
+  local minute hour mh
+  mh="$(pre_wake_minute_hour "$time")"
+  minute="${mh%% *}"
+  hour="${mh#* }"
+  echo "$minute $hour * * * TZ=$TZ_NAME $PRE_WAKE_WRAPPER dedupe $PRE_WAKE_MARK-dedupe"
+}
+
+cron_line_for_pre_wake_daily() {
+  local time="$1"
+  local slot minute hour mh
+  slot="${time%%:*}"
+  slot="${slot#0}"
+  slot="${slot:-0}"
+  mh="$(pre_wake_minute_hour "$time")"
+  minute="${mh%% *}"
+  hour="${mh#* }"
+  echo "$minute $hour * * * TZ=$TZ_NAME $PRE_WAKE_WRAPPER daily $slot $PRE_WAKE_MARK-daily-${slot}"
+}
+
 cron_line_for_cnbeta() {
   cron_line_for_job "$1" "$CNBETA_WRAPPER" "$CNBETA_MARK"
 }
@@ -238,6 +277,7 @@ is_tracker_cron_line() {
     ||   [[ "$line" == *"$CNBETA_WRAPPER"* ]] || [[ "$line" == *"$CNBETA_MARK"* ]] \
     || [[ "$line" == *"$PIKPAK_DEDUPE_WRAPPER"* ]] || [[ "$line" == *"$PIKPAK_DEDUPE_MARK"* ]] \
     || [[ "$line" == *"$GUANGYA_DEDUPE_WRAPPER"* ]] || [[ "$line" == *"$GUANGYA_DEDUPE_MARK"* ]] \
+    || [[ "$line" == *"$PRE_WAKE_WRAPPER"* ]] || [[ "$line" == *"$PRE_WAKE_MARK"* ]] \
     || [[ "$line" == *"$REBOOT_MARK"* ]] || [[ "$line" == *"@reboot"* && "$line" == *"new-movie-tracker"* ]]
 }
 
@@ -500,15 +540,19 @@ fi
 if guangya_dedupe_cron_enabled; then
   chmod +x "$GUANGYA_DEDUPE_WRAPPER"
 fi
+chmod +x "$PRE_WAKE_WRAPPER"
 mkdir -p "$ROOT/data"
 
 lines=()
 if guangya_dedupe_cron_enabled; then
+  lines+=("$(cron_line_for_pre_wake_dedupe "$GUANGYA_DEDUPE_TIME")")
   lines+=("$(cron_line_for_guangya_dedupe)")
 elif pikpak_dedupe_cron_enabled; then
+  lines+=("$(cron_line_for_pre_wake_dedupe "$PIKPAK_DEDUPE_TIME")")
   lines+=("$(cron_line_for_pikpak_dedupe)")
 fi
 for time in "${TIMES[@]}"; do
+  lines+=("$(cron_line_for_pre_wake_daily "$time")")
   lines+=("$(cron_line_for_time "$time")")
   if cnbeta_cron_enabled; then
     lines+=("$(cron_line_for_cnbeta "$time")")
@@ -548,6 +592,7 @@ if [[ "${DRY_RUN:-0}" == 1 ]]; then
     echo "  log: $ROOT/data/pikpak_dedupe.log"
     echo "  log: $ROOT/data/pikpak_jav_scrape_cron.log"
   fi
+  echo "  log: $ROOT/data/cron_pre_wake.log"
   install_reboot_cron_d
   install_health_cron_d
   ensure_cron_boot_enabled || true
@@ -576,7 +621,8 @@ elif pikpak_dedupe_cron_enabled; then
   echo "     log: $ROOT/data/pikpak_dedupe.log"
   echo "     log: $ROOT/data/pikpak_jav_scrape_cron.log"
 fi
-crontab -l | grep -E 'new-movie-tracker-(daily|cnbeta|pikpak-dedupe|guangya-dedupe)' || true
+echo "     log: $ROOT/data/cron_pre_wake.log"
+crontab -l | grep -E 'new-movie-tracker-(daily|cnbeta|pikpak-dedupe|guangya-dedupe|pre-wake)' || true
 
 install_reboot_cron_d || true
 install_health_cron_d || true

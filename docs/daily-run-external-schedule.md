@@ -10,8 +10,22 @@
 | B | `daily_run_supervisor.sh` in tmux (repo) | No |
 | C | `environment.json` `"start"` hook | No |
 | A | Cursor `subscribe_timer` wake at **:55 every hour** (Beijing) | No |
+| E | User crontab **pre-wake** (`cron_pre_wake.sh`, 5 min before each tracker job) | No |
 
 Cron + `ensure_cron_running.sh` remain **best-effort backup** once cron is up.
+
+### Layer E — VM crontab pre-wake (5 minutes before jobs)
+
+When `setup_cron.sh` installs tracker jobs, it also installs **pre-wake** lines (`scripts/cron_pre_wake.sh`, log `data/cron_pre_wake.log`):
+
+| Job (BJ) | Pre-wake (BJ) | Action |
+|----------|---------------|--------|
+| 06:45 GuangYa dedupe | 06:40 | `ensure_cron_running.sh` |
+| 07:00 daily | 06:55 | `restart_daily_supervisor.sh` |
+| 13:00 daily | 12:55 | `restart_daily_supervisor.sh` |
+| 20:00 daily | 19:55 | `restart_daily_supervisor.sh` |
+
+Aligns with external Cursor slot timers (`daily-wake-*-bj`) so the VM stays unfrozen even when Project timers do not fire.
 
 ---
 
