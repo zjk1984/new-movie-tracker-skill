@@ -1,0 +1,503 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Submit GuangYa Save NFO report magnets to folder **Save** (batched cloud add).
+
+Reads ``reports/guangya_save_nfo_links_*.json`` (``entries`` or ``records``), dedupes by
+magnet URI / btih, skips URLs already in ``data/guangya_save_links_download_state.json``,
+and submits up to ``--limit`` (default 500) per run via guangyapan-drive Skill CLI.
+
+Target folder defaults to report ``guangya_folder_id`` (Save ``1963910467505319951``).
+
+Examples::
+
+  python3 scripts/guangya_save_links_download.py --limit 10
+  python3 scripts/guangya_save_links_download.py --apply --limit 500 --day 1
+  python3 scripts/guangya_save_links_download.py --apply --limit 500 --day 2 \\
+    --report reports/guangya_save_nfo_links_2026-11-01.json
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from download_state import extract_btih, item_download_key  # noqa: E402
+from env_utils import SKILL_DIR, beijing_now_iso, load_env_local  # noqa: E402
+from guangya_auth import sync_credentials_from_skill_store  # noqa: E402
+from guangya_cloud_cli import login_status  # noqa: E402
+
+_SUPPORTED_URI_PREFIXES = (
+    "magnet:",
+    "ed2k:",
+    "ed2k://",
+    "http://",
+    "https://",
+    "ftp://",
+    "thunder://",
+)
+
+
+def uri_supported_by_guangya(uri: str) -> bool:
+    u = (uri or "").strip().lower()
+    return any(u.startswith(p) for p in _SUPPORTED_URI_PREFIXES)
+
+
+def _cloud_submit_batch_size() -> int:
+    from guangya_cloud_submit_lib import cloud_submit_batch_size
+
+    return cloud_submit_batch_size()
+
+
+def _submit_rows_to_guangya(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from guangya_cloud_submit_lib import submit_rows_to_guangya
+
+    return submit_rows_to_guangya(*args, **kwargs)
+
+DEFAULT_REPORT_PATH = SKILL_DIR / "reports" / "guangya_save_nfo_links_2026-11-01.json"
+DEFAULT_STATE_PATH = SKILL_DIR / "data" / "guangya_save_links_download_state.json"
+DEFAULT_SAVE_FOLDER_ID = "1963910467505319951"
+DEFAULT_BATCH_DELAY_SEC = 1.5
+
+
+def empty_state() -> dict[str, Any]:
+    return {
+        "report_path": None,
+        "report_generated_at_utc": None,
+        "remote_parent_id": DEFAULT_SAVE_FOLDER_ID,
+        "queue_unique_count": 0,
+        "next_queue_index": 0,
+        "uris": {},
+        "days": {},
+        "last_run_utc": None,
+    }
+
+
+def load_state(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return empty_state()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty_state()
+    if not isinstance(data, dict):
+        return empty_state()
+    data.setdefault("uris", {})
+    data.setdefault("days", {})
+    data.setdefault("remote_parent_id", DEFAULT_SAVE_FOLDER_ID)
+    data.setdefault("next_queue_index", 0)
+    return data
+
+
+def save_state(path: Path, state: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def state_has_uri(state: dict[str, Any], uri: str) -> bool:
+    key = item_download_key({"uri": uri, "url": uri, "magnet": uri})
+    uris = state.get("uris") or {}
+    if key and key in uris:
+        return True
+    btih = extract_btih(uri)
+    if btih and f"btih:{btih}" in uris:
+        return True
+    return False
+
+
+def mark_uri_submitted(
+    state: dict[str, Any],
+    uri: str,
+    *,
+    av_number: str = "",
+    task_id: str | None = None,
+    entry: dict[str, Any] | None = None,
+) -> None:
+    av = (av_number or "").strip().upper()
+    key = item_download_key({"uri": uri, "url": uri, "magnet": uri}) or f"uri:{uri}"
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    rec: dict[str, Any] = {"uri": uri, "av_number": av, "at": stamp}
+    if task_id:
+        rec["task_id"] = task_id
+    if entry:
+        rec["source_nfo_id"] = entry.get("source_nfo_id")
+        rec["source_nfo_name"] = entry.get("source_nfo_name")
+        rec["name"] = entry.get("name")
+    state.setdefault("uris", {})[key] = rec
+    state["last_run_utc"] = stamp
+
+
+def load_report(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise FileNotFoundError(f"report not found: {path}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"invalid report JSON: {path}")
+    return data
+
+
+def iter_report_entries(report: dict[str, Any]) -> list[dict[str, Any]]:
+    entries = report.get("entries")
+    if isinstance(entries, list) and entries:
+        return [e for e in entries if isinstance(e, dict)]
+    out: list[dict[str, Any]] = []
+    for rec in report.get("records") or []:
+        if not isinstance(rec, dict):
+            continue
+        for url in rec.get("links") or []:
+            url = str(url or "").strip()
+            if not url:
+                continue
+            out.append({
+                "name": rec.get("name"),
+                "av_number": rec.get("av_number"),
+                "url": url,
+                "link_source": rec.get("link_source"),
+                "source_nfo_name": rec.get("source_nfo_name"),
+                "source_nfo_id": rec.get("source_nfo_id"),
+            })
+    return out
+
+
+def build_unique_magnet_queue(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Stable order; first occurrence of each URI / btih wins."""
+    seen_uri: set[str] = set()
+    seen_btih: set[str] = set()
+    queue: list[dict[str, Any]] = []
+    for raw in iter_report_entries(report):
+        uri = str(raw.get("url") or raw.get("uri") or "").strip()
+        if not uri or not uri_supported_by_guangya(uri):
+            continue
+        norm = uri.lower()
+        btih = extract_btih(uri)
+        if norm in seen_uri:
+            continue
+        if btih and btih in seen_btih:
+            continue
+        seen_uri.add(norm)
+        if btih:
+            seen_btih.add(btih)
+        queue.append({
+            "name": raw.get("name") or raw.get("av_number") or "save-link",
+            "av_number": (raw.get("av_number") or "").strip().upper(),
+            "uri": uri,
+            "url": uri,
+            "link_source": raw.get("link_source"),
+            "source_nfo_name": raw.get("source_nfo_name"),
+            "source_nfo_id": raw.get("source_nfo_id"),
+        })
+    return queue
+
+
+def batch_delay_seconds() -> float:
+    raw = (os.environ.get("GUANGYA_CLOUD_SUBMIT_BATCH_DELAY") or "").strip()
+    if not raw:
+        return DEFAULT_BATCH_DELAY_SEC
+    try:
+        val = float(raw)
+    except ValueError:
+        return DEFAULT_BATCH_DELAY_SEC
+    return max(0.0, val)
+
+
+def ensure_logged_in(*, sync_auth: bool = True) -> None:
+    if sync_auth:
+        sync_credentials_from_skill_store()
+    code, payload, stderr = login_status()
+    logged_in = (payload.get("data") or {}).get("logged_in")
+    if code != 0 or logged_in is not True:
+        raise RuntimeError(
+            "GuangYa not logged in: run guangyapan-drive login on this profile "
+            f"(GUANGYAPAN_PROFILE_DIR); login-status={logged_in!r} {stderr or payload}",
+        )
+
+
+def submit_rows_with_batch_delay(
+    rows: list[dict[str, Any]],
+    *,
+    remote_parent_id: str,
+    preflight: bool = False,
+    batch_size: int | None = None,
+) -> dict[str, Any]:
+    if not rows:
+        return {"submitted": 0, "results": [], "batches": 0, "exit_code": 0}
+
+    size = batch_size if batch_size and batch_size > 0 else _cloud_submit_batch_size()
+    delay = batch_delay_seconds()
+    all_results: list[dict[str, Any]] = []
+    exit_code = 0
+    stderr_parts: list[str] = []
+    batch_count = 0
+
+    for offset in range(0, len(rows), size):
+        chunk = rows[offset : offset + size]
+        batch_count += 1
+        part = _submit_rows_to_guangya(
+            chunk,
+            remote_parent_id=remote_parent_id,
+            preflight=preflight,
+            batch_size=size,
+        )
+        all_results.extend(part.get("results") or [])
+        if part.get("exit_code"):
+            exit_code = int(part["exit_code"])
+        if part.get("stderr"):
+            stderr_parts.append(str(part["stderr"]).strip())
+        if delay > 0 and offset + size < len(rows):
+            time.sleep(delay)
+
+    return {
+        "exit_code": exit_code,
+        "stderr": "\n".join(stderr_parts),
+        "submitted": len(rows),
+        "results": all_results,
+        "batches": batch_count,
+        "batch_size": size,
+        "batch_delay_sec": delay,
+    }
+
+
+def resolve_remote_parent_id(report: dict[str, Any], override: str | None) -> str:
+    if override and override.strip():
+        return override.strip()
+    fid = str(report.get("guangya_folder_id") or "").strip()
+    return fid or DEFAULT_SAVE_FOLDER_ID
+
+
+def select_pending_rows(
+    queue: list[dict[str, Any]],
+    state: dict[str, Any],
+    *,
+    start_index: int,
+    limit: int,
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    """Return (rows to submit, next_index after scan, skip counts while scanning)."""
+    stats = {"skipped_state": 0, "skipped_unsupported": 0}
+    pending: list[dict[str, Any]] = []
+    idx = max(0, start_index)
+    while idx < len(queue) and (limit <= 0 or len(pending) < limit):
+        row = queue[idx]
+        idx += 1
+        uri = row.get("uri") or ""
+        if not uri_supported_by_guangya(uri):
+            stats["skipped_unsupported"] += 1
+            continue
+        if state_has_uri(state, uri):
+            stats["skipped_state"] += 1
+            continue
+        pending.append(row)
+    return pending, idx, stats
+
+
+def run_batch(
+    *,
+    apply: bool,
+    limit: int,
+    day: int | None,
+    report_path: Path,
+    state_path: Path,
+    parent_id_override: str | None,
+    preflight: bool,
+    sync_auth: bool,
+    ignore_state: bool,
+) -> dict[str, Any]:
+    report = load_report(report_path)
+    queue = build_unique_magnet_queue(report)
+    remote_parent_id = resolve_remote_parent_id(report, parent_id_override)
+
+    state = empty_state() if ignore_state else load_state(state_path)
+    if not ignore_state:
+        state["report_path"] = str(report_path)
+        state["report_generated_at_utc"] = report.get("generated_at_utc")
+        state["remote_parent_id"] = remote_parent_id
+        state["queue_unique_count"] = len(queue)
+
+    start_index = 0 if ignore_state else int(state.get("next_queue_index") or 0)
+    if start_index > len(queue):
+        start_index = len(queue)
+
+    pending, next_index, scan_stats = select_pending_rows(
+        queue,
+        state if not ignore_state else {"uris": {}},
+        start_index=start_index,
+        limit=limit if limit > 0 else 0,
+    )
+
+    stats: dict[str, Any] = {
+        "mode": "apply" if apply else "dry-run",
+        "day": day,
+        "beijing_now": beijing_now_iso(),
+        "report_path": str(report_path),
+        "remote_parent_id": remote_parent_id,
+        "queue_unique_total": len(queue),
+        "queue_start_index": start_index,
+        "queue_next_index": next_index,
+        "planned": len(pending),
+        "skipped_state": scan_stats["skipped_state"],
+        "skipped_unsupported": scan_stats["skipped_unsupported"],
+        "submitted": 0,
+        "failed": 0,
+        "sample_planned": pending[0] if pending else None,
+    }
+
+    for row in pending[:5]:
+        uri = row.get("uri") or ""
+        av = row.get("av_number") or "?"
+        print(
+            f"[plan] {av} {uri[:80]}{'…' if len(uri) > 80 else ''}",
+        )
+    if len(pending) > 5:
+        print(f"[plan] … and {len(pending) - 5} more")
+
+    if apply and pending:
+        ensure_logged_in(sync_auth=sync_auth)
+        submit_result = submit_rows_with_batch_delay(
+            pending,
+            remote_parent_id=remote_parent_id,
+            preflight=preflight,
+        )
+        stats["guangya"] = submit_result
+        stats["submitted"] = submit_result.get("submitted", 0)
+        failed = 0
+        for res in submit_result.get("results") or []:
+            uri = str(res.get("uri") or "")
+            av = str(res.get("av_number") or "")
+            task_id = str(res.get("task_id") or "")
+            if not uri:
+                failed += 1
+                continue
+            print(f"[ok] {av} task={task_id or '?'}")
+            if not ignore_state:
+                mark_uri_submitted(
+                    state,
+                    uri,
+                    av_number=av,
+                    task_id=task_id or None,
+                )
+        stats["failed"] = failed
+        if not ignore_state:
+            state["next_queue_index"] = next_index
+            if day is not None:
+                day_key = str(day)
+                prev = state.setdefault("days", {}).get(day_key) or {}
+                state["days"][day_key] = {
+                    "at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "at_beijing": beijing_now_iso(),
+                    "submitted": int(prev.get("submitted") or 0) + stats["submitted"],
+                    "failed": int(prev.get("failed") or 0) + failed,
+                    "skipped_state": int(prev.get("skipped_state") or 0)
+                    + scan_stats["skipped_state"],
+                    "planned": len(pending),
+                    "queue_next_index": next_index,
+                }
+            save_state(state_path, state)
+    elif not ignore_state and not apply:
+        # Dry-run: do not advance cursor (only apply moves the queue).
+        state["next_queue_index"] = start_index
+        save_state(state_path, state)
+
+    if submit_exit := (stats.get("guangya") or {}).get("exit_code"):
+        if submit_exit != 0:
+            stats["submit_exit_code"] = submit_exit
+
+    return stats
+
+
+def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
+    load_env_local()
+    parser = argparse.ArgumentParser(
+        description="GuangYa Save NFO report magnets → Save folder (500/day batches)",
+    )
+    parser.add_argument(
+        "--report",
+        default=str(DEFAULT_REPORT_PATH),
+        help="Path to guangya_save_nfo_links_*.json",
+    )
+    parser.add_argument(
+        "--state-file",
+        default=str(DEFAULT_STATE_PATH),
+        help="Progress / dedupe state JSON",
+    )
+    parser.add_argument(
+        "--parent-id",
+        default=os.environ.get("GUANGYA_SAVE_FOLDER_ID", "").strip() or None,
+        help=f"Save folder id (default: report or {DEFAULT_SAVE_FOLDER_ID})",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Submit cloud_collection_add (default: dry-run plan only)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=500,
+        help="Max new magnets to submit this run (default: 500)",
+    )
+    parser.add_argument(
+        "--day",
+        type=int,
+        default=None,
+        choices=(1, 2, 3),
+        help="Label this run as day 1/2/3 in state (optional)",
+    )
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="resolve_cloud_collection before each add",
+    )
+    parser.add_argument(
+        "--no-auth-sync",
+        action="store_true",
+        help="Skip sync_credentials_from_skill_store before login-status",
+    )
+    parser.add_argument(
+        "--ignore-state",
+        action="store_true",
+        help="Do not read/write state file",
+    )
+    parser.add_argument("--json", action="store_true", help="Print stats JSON on stdout")
+    args = parser.parse_args()
+
+    try:
+        stats = run_batch(
+            apply=args.apply,
+            limit=args.limit,
+            day=args.day,
+            report_path=Path(args.report),
+            state_path=Path(args.state_file),
+            parent_id_override=args.parent_id,
+            preflight=args.preflight,
+            sync_auth=not args.no_auth_sync,
+            ignore_state=args.ignore_state,
+        )
+    except Exception as exc:
+        print(f"[err] {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
+    else:
+        print(
+            f"[info] mode={stats['mode']} day={stats.get('day')} "
+            f"queue={stats['queue_unique_total']} idx={stats['queue_start_index']}→"
+            f"{stats['queue_next_index']} planned={stats['planned']} "
+            f"skipped_state={stats['skipped_state']} submitted={stats['submitted']} "
+            f"failed={stats.get('failed', 0)} parent={stats['remote_parent_id']}",
+        )
+    exit_code = int(stats.get("submit_exit_code") or 0)
+    return exit_code if exit_code else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
