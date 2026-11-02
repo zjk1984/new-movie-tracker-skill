@@ -25,6 +25,8 @@ PIKPAK_DEDUPE_TIME="${PIKPAK_DEDUPE_TIME:-06:45}"
 REBOOT_MARK="# new-movie-tracker-daily-reboot"
 REBOOT_CRON_D="/etc/cron.d/new-movie-tracker-reboot"
 HEALTH_CRON_D="/etc/cron.d/new-movie-tracker-health"
+HOURLY_WAKE_SCRIPT="$ROOT/scripts/hourly_wake_heartbeat.sh"
+HOURLY_WAKE_CRON_D="/etc/cron.d/new-movie-tracker-hourly-wake"
 CRON_ENSURE_UNIT="new-movie-tracker-cron-ensure"
 CRON_ENSURE_SERVICE="/etc/systemd/system/${CRON_ENSURE_UNIT}.service"
 CRON_USER_FILE="$ROOT/data/cron_install_user"
@@ -63,6 +65,7 @@ After install, attempts to restart the cron daemon automatically (required on so
 Also installs root /etc/cron.d hooks:
   - @reboot reload (when cron starts)
   - health watchdog (ensure daemon + install-user crontab; every 15 min 06:00–21:59 Beijing)
+  - hourly :55 checkpoint heartbeat (``hourly_wake_heartbeat.sh``; runs while VM is awake even if Cursor timers expired)
 Ensures cron starts at boot via systemctl/service and optional systemd oneshot unit.
 Use --ensure-only for idempotent health checks (auto-fixes missing crontab / stopped cron).
 Use --repair-crontab to reinstall daily slots for the install user only (internal / watchdog).
@@ -363,6 +366,24 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 EOF
 }
 
+hourly_wake_cron_d_content() {
+  local user
+  user="$(resolve_cron_install_user)"
+  cat <<EOF
+# Installed by scripts/setup_cron.sh — Beijing :55 heartbeat while VM is running.
+# Backup when Cursor subscribe_timer wakes are expired; does NOT unfreeze a checkpointed VM.
+# Log: data/hourly_wake.log (also appends via ensure_cron_running to data/cron_health.log)
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+55 * * * * $user TZ=Asia/Shanghai $HOURLY_WAKE_SCRIPT
+EOF
+}
+
+install_hourly_wake_cron_d() {
+  chmod +x "$HOURLY_WAKE_SCRIPT"
+  install_cron_d_file "$HOURLY_WAKE_CRON_D" "$(hourly_wake_cron_d_content)" "hourly :55 heartbeat"
+}
+
 install_cron_d_file() {
   local dest="$1"
   local content="$2"
@@ -522,6 +543,7 @@ if [[ "${ENSURE_ONLY:-0}" == 1 ]]; then
   if [[ "${DRY_RUN:-0}" == 1 ]]; then
     echo "[dry-run] would run: $ENSURE_SCRIPT"
     install_health_cron_d
+    install_hourly_wake_cron_d
     ensure_cron_boot_enabled || true
     install_cron_ensure_systemd || true
     exit 0
@@ -595,6 +617,7 @@ if [[ "${DRY_RUN:-0}" == 1 ]]; then
   echo "  log: $ROOT/data/cron_pre_wake.log"
   install_reboot_cron_d
   install_health_cron_d
+  install_hourly_wake_cron_d
   ensure_cron_boot_enabled || true
   install_cron_ensure_systemd || true
   exit 0
@@ -626,6 +649,7 @@ crontab -l | grep -E 'new-movie-tracker-(daily|cnbeta|pikpak-dedupe|guangya-dedu
 
 install_reboot_cron_d || true
 install_health_cron_d || true
+install_hourly_wake_cron_d || true
 ensure_cron_boot_enabled || true
 install_cron_ensure_systemd || true
 run_ensure_only
