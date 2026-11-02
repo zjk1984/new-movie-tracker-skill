@@ -73,6 +73,58 @@ def _resolve_link_for_av(
     return "", "none"
 
 
+def _titles_at_report_start(report: dict[str, Any]) -> set[str]:
+    """番号 already cataloged in the audit JSON before this incremental run."""
+    return {str(k or "").upper() for k in (report.get("guangya_titles_by_av") or {}) if k}
+
+
+def _logged_av_numbers(new_entries: list[dict[str, Any]]) -> set[str]:
+    return {str(e.get("av_number") or "").upper() for e in new_entries if e.get("av_number")}
+
+
+def _append_new_entry(
+    *,
+    fid: str,
+    row: dict[str, Any],
+    stamp: str,
+    report_links: dict[str, str],
+    session: Any,
+    token: str | None,
+    device_id: str | None,
+    user_id: str | None,
+    pikpak_by_av: dict[str, str],
+    javdb: JavDBClient,
+    new_entries: list[dict[str, Any]],
+    added_this_run: list[dict[str, Any]],
+    titles_by_av: dict[str, Any],
+) -> None:
+    av = str(row.get("av_number") or "").upper()
+    pikpak_fid = pikpak_by_av.get(av) if av else None
+    url, link_source = _resolve_link_for_av(
+        av,
+        report_links=report_links,
+        session=session,
+        token=token or "",
+        device_id=device_id or "",
+        user_id=user_id or "",
+        pikpak_file_id=pikpak_fid,
+        javdb_client=javdb,
+    )
+    entry = {
+        "added_at_utc": stamp,
+        "guangya_file_id": fid,
+        "name": row["name"],
+        "av_number": av,
+        "url": url,
+        "link_source": link_source,
+        "size": row.get("size"),
+    }
+    new_entries.append(entry)
+    added_this_run.append(entry)
+    if av and av not in titles_by_av:
+        titles_by_av[av] = row["name"]
+
+
 def _current_downloads_videos(
     folder_id: str,
     *,
@@ -107,6 +159,7 @@ def increment_report(
     *,
     guangya_folder: str = "downloads",
     md_path: Path | None = None,
+    backfill_missing_av: bool = False,
 ) -> dict[str, Any]:
     _, login_payload, _ = login_status()
     if not (login_payload.get("data") or {}).get("logged_in"):
@@ -124,6 +177,8 @@ def increment_report(
             "guangya_new_entries": [],
             "guangya_downloads_snapshot": {"file_ids": [], "updated_at_utc": None},
         }
+
+    titles_at_start = _titles_at_report_start(report)
 
     folder_id = report.get("guangya_downloads_folder_id") or find_directory_id(guangya_folder)
     if not folder_id:
@@ -164,45 +219,88 @@ def increment_report(
             pass
 
     added_this_run: list[dict[str, Any]] = []
+    titles_by_av = dict(report.get("guangya_titles_by_av") or {})
+    logged_av = _logged_av_numbers(new_entries)
+    stamp = _utc_now()
+
+    if backfill_missing_av and known:
+        for fid in sorted(current.keys()):
+            row = current[fid]
+            av = str(row.get("av_number") or "").upper()
+            if not av or av in logged_av:
+                continue
+            if av in titles_at_start:
+                continue
+            _append_new_entry(
+                fid=fid,
+                row=row,
+                stamp=stamp,
+                report_links=report_links,
+                session=session,
+                token=token,
+                device_id=device_id,
+                user_id=user_id,
+                pikpak_by_av=pikpak_by_av,
+                javdb=javdb,
+                new_entries=new_entries,
+                added_this_run=added_this_run,
+                titles_by_av=titles_by_av,
+            )
+            logged_av.add(av)
+            known.add(fid)
+
     if not known:
-        snapshot["file_ids"] = sorted(current.keys())
-        snapshot["updated_at_utc"] = _utc_now()
+        for fid in sorted(current.keys()):
+            row = current[fid]
+            known.add(fid)
+            av = str(row.get("av_number") or "").upper()
+            if av and av not in titles_at_start and av not in logged_av:
+                _append_new_entry(
+                    fid=fid,
+                    row=row,
+                    stamp=stamp,
+                    report_links=report_links,
+                    session=session,
+                    token=token,
+                    device_id=device_id,
+                    user_id=user_id,
+                    pikpak_by_av=pikpak_by_av,
+                    javdb=javdb,
+                    new_entries=new_entries,
+                    added_this_run=added_this_run,
+                    titles_by_av=titles_by_av,
+                )
+                logged_av.add(av)
+        snapshot["file_ids"] = sorted(known)
+        snapshot["updated_at_utc"] = stamp
         snapshot["initialized_baseline"] = True
     else:
         new_ids = sorted(set(current.keys()) - known)
-        stamp = _utc_now()
-        titles_by_av = dict(report.get("guangya_titles_by_av") or {})
         for fid in new_ids:
             row = current[fid]
-            av = str(row.get("av_number") or "").upper()
-            pikpak_fid = pikpak_by_av.get(av) if av else None
-            url, link_source = _resolve_link_for_av(
-                av,
+            _append_new_entry(
+                fid=fid,
+                row=row,
+                stamp=stamp,
                 report_links=report_links,
                 session=session,
-                token=token or "",
-                device_id=device_id or "",
-                user_id=user_id or "",
-                pikpak_file_id=pikpak_fid,
-                javdb_client=javdb,
+                token=token,
+                device_id=device_id,
+                user_id=user_id,
+                pikpak_by_av=pikpak_by_av,
+                javdb=javdb,
+                new_entries=new_entries,
+                added_this_run=added_this_run,
+                titles_by_av=titles_by_av,
             )
-            entry = {
-                "added_at_utc": stamp,
-                "guangya_file_id": fid,
-                "name": row["name"],
-                "av_number": av,
-                "url": url,
-                "link_source": link_source,
-                "size": row.get("size"),
-            }
-            new_entries.append(entry)
-            added_this_run.append(entry)
             known.add(fid)
-            if av and av not in titles_by_av:
-                titles_by_av[av] = row["name"]
-        report["guangya_titles_by_av"] = titles_by_av
+            av = str(row.get("av_number") or "").upper()
+            if av:
+                logged_av.add(av)
         snapshot["file_ids"] = sorted(known)
         snapshot["updated_at_utc"] = stamp
+
+    report["guangya_titles_by_av"] = titles_by_av
 
     report["guangya_new_entries"] = new_entries
     report["last_incremental_at_utc"] = _utc_now()
@@ -292,10 +390,19 @@ def main() -> int:
     )
     parser.add_argument("--md", type=Path, default=None, help="Markdown path (default: same stem .md)")
     parser.add_argument("--json-stdout", action="store_true")
+    parser.add_argument(
+        "--backfill-missing-av",
+        action="store_true",
+        help="Log downloads 番号 present on GuangYa but missing from audit guangya_titles_by_av / guangya_new_entries",
+    )
     args = parser.parse_args()
 
     try:
-        result = increment_report(args.report, md_path=args.md)
+        result = increment_report(
+            args.report,
+            md_path=args.md,
+            backfill_missing_av=args.backfill_missing_av,
+        )
     except Exception as exc:
         print(f"[err] {exc}", file=sys.stderr)
         return 1

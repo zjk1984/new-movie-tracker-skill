@@ -32,6 +32,30 @@ class GuangyaAuditIncrementalTests(unittest.TestCase):
             self.assertEqual(data["guangya_downloads_snapshot"]["file_ids"], ["f1"])
             self.assertEqual(data.get("guangya_new_entries"), [])
 
+    def test_baseline_backfills_av_not_in_report(self) -> None:
+        report = {
+            "guangya_downloads_folder_id": "gy1",
+            "guangya_titles_by_av": {"ABF-001": "abf-001.mp4"},
+            "counts": {},
+            "pikpak_file_links": [],
+        }
+        current = {
+            "f1": {"guangya_file_id": "f1", "name": "abf-001.mp4", "av_number": "ABF-001", "size": 1},
+            "f2": {"guangya_file_id": "f2", "name": "abf-002.mp4", "av_number": "ABF-002", "size": 2},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "audit.json"
+            path.write_text(json.dumps(report), encoding="utf-8")
+            with mock.patch("guangya_audit_incremental.login_status", return_value=(0, {"data": {"logged_in": True}}, "")):
+                with mock.patch("guangya_audit_incremental._current_downloads_videos", return_value=current):
+                    with mock.patch("guangya_audit_incremental.walk_guangya_files", return_value=[{"type": "file"}]):
+                        with mock.patch("guangya_audit_incremental._resolve_pikpak_session", side_effect=RuntimeError("no pikpak")):
+                            with mock.patch("guangya_audit_incremental.JavDBClient"):
+                                result = increment_report(path)
+            self.assertEqual(result["added_this_run"], 1)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["guangya_new_entries"][0]["av_number"], "ABF-002")
+
     def test_detects_new_file(self) -> None:
         report = {
             "guangya_downloads_folder_id": "gy1",
