@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """Submit GuangYa Save NFO report magnets to folder **Save** (batched cloud add).
 
-Reads ``reports/guangya_save_nfo_links_*.json`` (``entries`` or ``records``), dedupes by
-magnet URI / btih, skips URLs already in ``data/guangya_save_links_download_state.json``,
-and submits up to ``--limit`` (default 500) per run via guangyapan-drive Skill CLI.
+Reads ``reports/guangya_save_nfo_links_*.json`` (``entries`` or ``records``), builds a queue
+with **at most one magnet per 番号** (first link in report order for that av), skips 番号
+already in ``data/guangya_save_links_download_state.json``, and submits up to ``--limit``
+(default 500 **番号** per run) via guangyapan-drive Skill CLI.
 
 Target folder defaults to report ``guangya_folder_id`` (Save ``1963910467505319951``).
 
@@ -65,19 +66,42 @@ DEFAULT_REPORT_PATH = SKILL_DIR / "reports" / "guangya_save_nfo_links_2026-11-01
 DEFAULT_STATE_PATH = SKILL_DIR / "data" / "guangya_save_links_download_state.json"
 DEFAULT_SAVE_FOLDER_ID = "1963910467505319951"
 DEFAULT_BATCH_DELAY_SEC = 1.5
+STATE_SCHEMA_VERSION = 2
 
 
 def empty_state() -> dict[str, Any]:
     return {
+        "schema_version": STATE_SCHEMA_VERSION,
+        "queue_mode": "one_magnet_per_av",
         "report_path": None,
         "report_generated_at_utc": None,
         "remote_parent_id": DEFAULT_SAVE_FOLDER_ID,
-        "queue_unique_count": 0,
+        "queue_av_count": 0,
         "next_queue_index": 0,
+        "av_numbers": {},
         "uris": {},
         "days": {},
         "last_run_utc": None,
     }
+
+
+def migrate_state(data: dict[str, Any]) -> dict[str, Any]:
+    """v1 (per-magnet queue) → v2 (one magnet per 番号). Safe reset when nothing submitted."""
+    version = int(data.get("schema_version") or 1)
+    if version >= STATE_SCHEMA_VERSION:
+        return data
+    uris = data.get("uris") or {}
+    av_done = data.get("av_numbers") or {}
+    if not uris and not av_done:
+        data["next_queue_index"] = 0
+        data["migration_note"] = (
+            "reset next_queue_index: schema v1 magnet-index cursor incompatible with v2 av queue"
+        )
+    data["schema_version"] = STATE_SCHEMA_VERSION
+    data["queue_mode"] = "one_magnet_per_av"
+    if "queue_unique_count" in data and "queue_av_count" not in data:
+        data.pop("queue_unique_count", None)
+    return data
 
 
 def load_state(path: Path) -> dict[str, Any]:
@@ -90,15 +114,21 @@ def load_state(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         return empty_state()
     data.setdefault("uris", {})
+    data.setdefault("av_numbers", {})
     data.setdefault("days", {})
     data.setdefault("remote_parent_id", DEFAULT_SAVE_FOLDER_ID)
     data.setdefault("next_queue_index", 0)
-    return data
+    return migrate_state(data)
 
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def state_has_av(state: dict[str, Any], av_number: str) -> bool:
+    av = (av_number or "").strip().upper()
+    return bool(av and av in (state.get("av_numbers") or {}))
 
 
 def state_has_uri(state: dict[str, Any], uri: str) -> bool:
@@ -112,25 +142,37 @@ def state_has_uri(state: dict[str, Any], uri: str) -> bool:
     return False
 
 
-def mark_uri_submitted(
+def state_has_row(state: dict[str, Any], row: dict[str, Any]) -> bool:
+    av = (row.get("av_number") or "").strip().upper()
+    if state_has_av(state, av):
+        return True
+    uri = row.get("uri") or row.get("url") or ""
+    return state_has_uri(state, uri)
+
+
+def mark_row_submitted(
     state: dict[str, Any],
-    uri: str,
+    row: dict[str, Any],
     *,
-    av_number: str = "",
     task_id: str | None = None,
-    entry: dict[str, Any] | None = None,
 ) -> None:
-    av = (av_number or "").strip().upper()
+    uri = str(row.get("uri") or row.get("url") or "").strip()
+    av = (row.get("av_number") or "").strip().upper()
     key = item_download_key({"uri": uri, "url": uri, "magnet": uri}) or f"uri:{uri}"
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     rec: dict[str, Any] = {"uri": uri, "av_number": av, "at": stamp}
     if task_id:
         rec["task_id"] = task_id
-    if entry:
-        rec["source_nfo_id"] = entry.get("source_nfo_id")
-        rec["source_nfo_name"] = entry.get("source_nfo_name")
-        rec["name"] = entry.get("name")
+    rec["source_nfo_id"] = row.get("source_nfo_id")
+    rec["source_nfo_name"] = row.get("source_nfo_name")
+    rec["name"] = row.get("name")
     state.setdefault("uris", {})[key] = rec
+    if av:
+        state.setdefault("av_numbers", {})[av] = {
+            "uri": uri,
+            "at": stamp,
+            "task_id": task_id,
+        }
     state["last_run_utc"] = stamp
 
 
@@ -166,27 +208,21 @@ def iter_report_entries(report: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def build_unique_magnet_queue(report: dict[str, Any]) -> list[dict[str, Any]]:
-    """Stable order; first occurrence of each URI / btih wins."""
-    seen_uri: set[str] = set()
-    seen_btih: set[str] = set()
+def build_av_magnet_queue(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Report order; first supported magnet per 番号 (av_number)."""
+    seen_av: set[str] = set()
     queue: list[dict[str, Any]] = []
     for raw in iter_report_entries(report):
+        av = (raw.get("av_number") or "").strip().upper()
+        if not av or av in seen_av:
+            continue
         uri = str(raw.get("url") or raw.get("uri") or "").strip()
         if not uri or not uri_supported_by_guangya(uri):
             continue
-        norm = uri.lower()
-        btih = extract_btih(uri)
-        if norm in seen_uri:
-            continue
-        if btih and btih in seen_btih:
-            continue
-        seen_uri.add(norm)
-        if btih:
-            seen_btih.add(btih)
+        seen_av.add(av)
         queue.append({
-            "name": raw.get("name") or raw.get("av_number") or "save-link",
-            "av_number": (raw.get("av_number") or "").strip().upper(),
+            "name": raw.get("name") or av or "save-link",
+            "av_number": av,
             "uri": uri,
             "url": uri,
             "link_source": raw.get("link_source"),
@@ -194,6 +230,11 @@ def build_unique_magnet_queue(report: dict[str, Any]) -> list[dict[str, Any]]:
             "source_nfo_id": raw.get("source_nfo_id"),
         })
     return queue
+
+
+def build_unique_magnet_queue(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Alias for tests and callers — queue is one row per 番号."""
+    return build_av_magnet_queue(report)
 
 
 def batch_delay_seconds() -> float:
@@ -289,7 +330,7 @@ def select_pending_rows(
         if not uri_supported_by_guangya(uri):
             stats["skipped_unsupported"] += 1
             continue
-        if state_has_uri(state, uri):
+        if state_has_row(state, row):
             stats["skipped_state"] += 1
             continue
         pending.append(row)
@@ -307,17 +348,20 @@ def run_batch(
     preflight: bool,
     sync_auth: bool,
     ignore_state: bool,
+    quiet: bool = False,
 ) -> dict[str, Any]:
     report = load_report(report_path)
-    queue = build_unique_magnet_queue(report)
+    queue = build_av_magnet_queue(report)
     remote_parent_id = resolve_remote_parent_id(report, parent_id_override)
 
     state = empty_state() if ignore_state else load_state(state_path)
     if not ignore_state:
+        state["schema_version"] = STATE_SCHEMA_VERSION
+        state["queue_mode"] = "one_magnet_per_av"
         state["report_path"] = str(report_path)
         state["report_generated_at_utc"] = report.get("generated_at_utc")
         state["remote_parent_id"] = remote_parent_id
-        state["queue_unique_count"] = len(queue)
+        state["queue_av_count"] = len(queue)
 
     start_index = 0 if ignore_state else int(state.get("next_queue_index") or 0)
     if start_index > len(queue):
@@ -336,6 +380,7 @@ def run_batch(
         "beijing_now": beijing_now_iso(),
         "report_path": str(report_path),
         "remote_parent_id": remote_parent_id,
+        "queue_av_total": len(queue),
         "queue_unique_total": len(queue),
         "queue_start_index": start_index,
         "queue_next_index": next_index,
@@ -375,12 +420,8 @@ def run_batch(
                 continue
             print(f"[ok] {av} task={task_id or '?'}")
             if not ignore_state:
-                mark_uri_submitted(
-                    state,
-                    uri,
-                    av_number=av,
-                    task_id=task_id or None,
-                )
+                match = next((r for r in pending if r.get("uri") == uri), {"uri": uri, "av_number": av})
+                mark_row_submitted(state, match, task_id=task_id or None)
         stats["failed"] = failed
         if not ignore_state:
             state["next_queue_index"] = next_index
@@ -442,7 +483,7 @@ def main() -> int:
         "--limit",
         type=int,
         default=500,
-        help="Max new magnets to submit this run (default: 500)",
+        help="Max 番号 (one magnet each) to submit this run (default: 500)",
     )
     parser.add_argument(
         "--day",
@@ -490,7 +531,7 @@ def main() -> int:
     else:
         print(
             f"[info] mode={stats['mode']} day={stats.get('day')} "
-            f"queue={stats['queue_unique_total']} idx={stats['queue_start_index']}→"
+            f"queue_av={stats['queue_av_total']} idx={stats['queue_start_index']}→"
             f"{stats['queue_next_index']} planned={stats['planned']} "
             f"skipped_state={stats['skipped_state']} submitted={stats['submitted']} "
             f"failed={stats.get('failed', 0)} parent={stats['remote_parent_id']}",
