@@ -32,13 +32,14 @@ class AvQueueTests(unittest.TestCase):
         self.assertEqual(queue[0]["uri"], "magnet:?xt=urn:btih:aaa")
         self.assertEqual(queue[1]["av_number"], "ABC-002")
 
-    def test_builds_from_records_first_link_only(self) -> None:
+    def test_builds_from_records_uses_selected_magnet(self) -> None:
         report = {
             "records": [
                 {
                     "name": "n1",
                     "av_number": "SSIS-1",
                     "links": ["magnet:?xt=urn:btih:111", "magnet:?xt=urn:btih:222"],
+                    "selected_magnet": "magnet:?xt=urn:btih:111",
                 },
             ],
         }
@@ -87,6 +88,7 @@ class SelectPendingTests(unittest.TestCase):
             state,
             start_index=0,
             limit=1,
+            already_on_save=set(),
         )
         self.assertEqual(len(pending), 1)
         self.assertEqual(pending[0]["av_number"], "B-1")

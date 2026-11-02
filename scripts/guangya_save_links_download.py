@@ -34,6 +34,8 @@ from download_state import extract_btih, item_download_key  # noqa: E402
 from env_utils import SKILL_DIR, beijing_now_iso, load_env_local  # noqa: E402
 from guangya_auth import sync_credentials_from_skill_store  # noqa: E402
 from guangya_cloud_cli import login_status  # noqa: E402
+from guangya_save_magnet_pick import pick_best_magnet_uri  # noqa: E402
+from jellyfin_nfo import canonical_av_number  # noqa: E402
 
 _SUPPORTED_URI_PREFIXES = (
     "magnet:",
@@ -64,6 +66,7 @@ def _submit_rows_to_guangya(*args: Any, **kwargs: Any) -> dict[str, Any]:
 
 DEFAULT_REPORT_PATH = SKILL_DIR / "reports" / "guangya_save_nfo_links_2026-11-01.json"
 DEFAULT_STATE_PATH = SKILL_DIR / "data" / "guangya_save_links_download_state.json"
+DEFAULT_ALREADY_ON_DRIVE_PATH = SKILL_DIR / "data" / "guangya_save_already_on_drive.json"
 DEFAULT_SAVE_FOLDER_ID = "1963910467505319951"
 DEFAULT_BATCH_DELAY_SEC = 1.5
 STATE_SCHEMA_VERSION = 2
@@ -79,6 +82,7 @@ def empty_state() -> dict[str, Any]:
         "queue_av_count": 0,
         "next_queue_index": 0,
         "av_numbers": {},
+        "already_in_save_av": [],
         "uris": {},
         "days": {},
         "last_run_utc": None,
@@ -118,7 +122,37 @@ def load_state(path: Path) -> dict[str, Any]:
     data.setdefault("days", {})
     data.setdefault("remote_parent_id", DEFAULT_SAVE_FOLDER_ID)
     data.setdefault("next_queue_index", 0)
+    data.setdefault("already_in_save_av", [])
     return migrate_state(data)
+
+
+def load_already_on_save_avs(
+    *,
+    state: dict[str, Any] | None = None,
+    merge_path: Path | None = None,
+) -> set[str]:
+    """番号 already on Save (inventory file + state + submitted av_numbers)."""
+    found: set[str] = set()
+    path = merge_path or DEFAULT_ALREADY_ON_DRIVE_PATH
+    if path.is_file():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            for av in payload.get("av_numbers") or []:
+                key = canonical_av_number(str(av))
+                if key:
+                    found.add(key)
+        except (OSError, json.JSONDecodeError):
+            pass
+    if state:
+        for av in state.get("already_in_save_av") or []:
+            key = canonical_av_number(str(av))
+            if key:
+                found.add(key)
+        for av in (state.get("av_numbers") or {}).keys():
+            key = canonical_av_number(str(av))
+            if key:
+                found.add(key)
+    return found
 
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
@@ -209,11 +243,37 @@ def iter_report_entries(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def build_av_magnet_queue(report: dict[str, Any]) -> list[dict[str, Any]]:
-    """Report order; first supported magnet per 番号 (av_number)."""
-    seen_av: set[str] = set()
+    """One row per 番号; prefers ``selected_magnet`` on each record."""
     queue: list[dict[str, Any]] = []
+    seen_av: set[str] = set()
+    for rec in report.get("records") or []:
+        if not isinstance(rec, dict):
+            continue
+        av = canonical_av_number(str(rec.get("av_number") or ""))
+        if not av or av in seen_av:
+            continue
+        links = [str(u).strip() for u in (rec.get("links") or []) if str(u).strip()]
+        uri = str(rec.get("selected_magnet") or "").strip()
+        if not uri and links:
+            hint = str(rec.get("name") or rec.get("source_nfo_name") or av)
+            uri, _meta = pick_best_magnet_uri(links, name_hint=hint)
+        if not uri or not uri_supported_by_guangya(uri):
+            continue
+        seen_av.add(av)
+        queue.append({
+            "name": rec.get("name") or av,
+            "av_number": av,
+            "uri": uri,
+            "url": uri,
+            "link_source": rec.get("link_source"),
+            "source_nfo_name": rec.get("source_nfo_name"),
+            "source_nfo_id": rec.get("source_nfo_id"),
+        })
+    if queue:
+        return queue
+    seen_av.clear()
     for raw in iter_report_entries(report):
-        av = (raw.get("av_number") or "").strip().upper()
+        av = canonical_av_number(str(raw.get("av_number") or ""))
         if not av or av in seen_av:
             continue
         uri = str(raw.get("url") or raw.get("uri") or "").strip()
@@ -318,14 +378,28 @@ def select_pending_rows(
     *,
     start_index: int,
     limit: int,
+    already_on_save: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
     """Return (rows to submit, next_index after scan, skip counts while scanning)."""
-    stats = {"skipped_state": 0, "skipped_unsupported": 0}
+    stats = {
+        "skipped_state": 0,
+        "skipped_unsupported": 0,
+        "skipped_already_on_save": 0,
+    }
+    on_save = (
+        already_on_save
+        if already_on_save is not None
+        else load_already_on_save_avs(state=state)
+    )
     pending: list[dict[str, Any]] = []
     idx = max(0, start_index)
     while idx < len(queue) and (limit <= 0 or len(pending) < limit):
         row = queue[idx]
         idx += 1
+        av = canonical_av_number(str(row.get("av_number") or ""))
+        if av and av in on_save:
+            stats["skipped_already_on_save"] += 1
+            continue
         uri = row.get("uri") or ""
         if not uri_supported_by_guangya(uri):
             stats["skipped_unsupported"] += 1
@@ -355,6 +429,7 @@ def run_batch(
     remote_parent_id = resolve_remote_parent_id(report, parent_id_override)
 
     state = empty_state() if ignore_state else load_state(state_path)
+    already_on_save = load_already_on_save_avs(state=None if ignore_state else state)
     if not ignore_state:
         state["schema_version"] = STATE_SCHEMA_VERSION
         state["queue_mode"] = "one_magnet_per_av"
@@ -362,6 +437,7 @@ def run_batch(
         state["report_generated_at_utc"] = report.get("generated_at_utc")
         state["remote_parent_id"] = remote_parent_id
         state["queue_av_count"] = len(queue)
+        state["already_in_save_av"] = sorted(already_on_save)
 
     start_index = 0 if ignore_state else int(state.get("next_queue_index") or 0)
     if start_index > len(queue):
@@ -369,9 +445,10 @@ def run_batch(
 
     pending, next_index, scan_stats = select_pending_rows(
         queue,
-        state if not ignore_state else {"uris": {}},
+        state if not ignore_state else {"uris": {}, "av_numbers": {}},
         start_index=start_index,
         limit=limit if limit > 0 else 0,
+        already_on_save=already_on_save,
     )
 
     stats: dict[str, Any] = {
@@ -382,11 +459,13 @@ def run_batch(
         "remote_parent_id": remote_parent_id,
         "queue_av_total": len(queue),
         "queue_unique_total": len(queue),
+        "already_on_save_count": len(already_on_save),
         "queue_start_index": start_index,
         "queue_next_index": next_index,
         "planned": len(pending),
         "skipped_state": scan_stats["skipped_state"],
         "skipped_unsupported": scan_stats["skipped_unsupported"],
+        "skipped_already_on_save": scan_stats["skipped_already_on_save"],
         "submitted": 0,
         "failed": 0,
         "sample_planned": pending[0] if pending else None,
@@ -436,6 +515,8 @@ def run_batch(
                     "failed": int(prev.get("failed") or 0) + failed,
                     "skipped_state": int(prev.get("skipped_state") or 0)
                     + scan_stats["skipped_state"],
+                    "skipped_already_on_save": int(prev.get("skipped_already_on_save") or 0)
+                    + scan_stats["skipped_already_on_save"],
                     "planned": len(pending),
                     "queue_next_index": next_index,
                 }
@@ -533,8 +614,9 @@ def main() -> int:
     else:
         print(
             f"[info] mode={stats['mode']} day={stats.get('day')} "
-            f"queue_av={stats['queue_av_total']} idx={stats['queue_start_index']}→"
-            f"{stats['queue_next_index']} planned={stats['planned']} "
+            f"queue_av={stats['queue_av_total']} on_save={stats.get('already_on_save_count', 0)} "
+            f"idx={stats['queue_start_index']}→{stats['queue_next_index']} "
+            f"planned={stats['planned']} skipped_on_save={stats.get('skipped_already_on_save', 0)} "
             f"skipped_state={stats['skipped_state']} submitted={stats['submitted']} "
             f"failed={stats.get('failed', 0)} parent={stats['remote_parent_id']}",
         )
