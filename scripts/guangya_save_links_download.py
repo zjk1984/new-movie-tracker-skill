@@ -126,29 +126,65 @@ def load_state(path: Path) -> dict[str, Any]:
     return migrate_state(data)
 
 
+def _inventory_avs_for_skip(payload: dict[str, Any]) -> list[str]:
+    """All 番号 on Save that should block cloud-add (NFO/sidecar/video)."""
+    if payload.get("av_any_on_save"):
+        return list(payload.get("av_any_on_save") or [])
+    out: list[str] = []
+    out.extend(payload.get("av_numbers") or [])
+    out.extend(payload.get("sidecar_only_av") or [])
+    return out
+
+
+def submitted_av_keys(state: dict[str, Any]) -> set[str]:
+    """Canonical 番号 already submitted (persisted in state)."""
+    found: set[str] = set()
+    for av in (state.get("av_numbers") or {}).keys():
+        key = canonical_av_number(str(av))
+        if key:
+            found.add(key)
+    return found
+
+
 def load_already_on_save_avs(
     *,
     state: dict[str, Any] | None = None,
     merge_path: Path | None = None,
 ) -> set[str]:
-    """番号 already on Save (inventory file + state + submitted av_numbers)."""
+    """番号 already on Save (full inventory + state submitted av_numbers)."""
     found: set[str] = set()
     path = merge_path or DEFAULT_ALREADY_ON_DRIVE_PATH
     if path.is_file():
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-            for av in payload.get("av_numbers") or []:
+            for av in _inventory_avs_for_skip(payload):
                 key = canonical_av_number(str(av))
                 if key:
                     found.add(key)
         except (OSError, json.JSONDecodeError):
             pass
     if state:
-        for av in (state.get("av_numbers") or {}).keys():
-            key = canonical_av_number(str(av))
-            if key:
-                found.add(key)
+        found |= submitted_av_keys(state)
     return found
+
+
+def refresh_save_inventory(
+    *,
+    parent_id: str,
+    output_path: Path | None = None,
+    sync_auth: bool = True,
+) -> dict[str, Any]:
+    """Walk Save folder and rewrite ``guangya_save_already_on_drive.json``."""
+    from guangya_save_drive_inventory import collect_save_inventory
+
+    if sync_auth:
+        sync_credentials_from_skill_store(force=True)
+    ensure_logged_in(sync_auth=False)
+    inv = collect_save_inventory(parent_id)
+    out = output_path or DEFAULT_ALREADY_ON_DRIVE_PATH
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(inv, ensure_ascii=False, indent=2), encoding="utf-8")
+    return inv
 
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
@@ -157,8 +193,11 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 
 
 def state_has_av(state: dict[str, Any], av_number: str) -> bool:
-    av = (av_number or "").strip().upper()
-    return bool(av and av in (state.get("av_numbers") or {}))
+    av = canonical_av_number(str(av_number or ""))
+    if not av:
+        return False
+    keys = submitted_av_keys(state)
+    return av in keys
 
 
 def state_has_uri(state: dict[str, Any], uri: str) -> bool:
@@ -173,8 +212,7 @@ def state_has_uri(state: dict[str, Any], uri: str) -> bool:
 
 
 def state_has_row(state: dict[str, Any], row: dict[str, Any]) -> bool:
-    av = (row.get("av_number") or "").strip().upper()
-    if state_has_av(state, av):
+    if state_has_av(state, str(row.get("av_number") or "")):
         return True
     uri = row.get("uri") or row.get("url") or ""
     return state_has_uri(state, uri)
@@ -187,7 +225,7 @@ def mark_row_submitted(
     task_id: str | None = None,
 ) -> None:
     uri = str(row.get("uri") or row.get("url") or "").strip()
-    av = (row.get("av_number") or "").strip().upper()
+    av = canonical_av_number(str(row.get("av_number") or "")) or ""
     key = item_download_key({"uri": uri, "url": uri, "magnet": uri}) or f"uri:{uri}"
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     rec: dict[str, Any] = {"uri": uri, "av_number": av, "at": stamp}
@@ -400,6 +438,9 @@ def select_pending_rows(
         if not uri_supported_by_guangya(uri):
             stats["skipped_unsupported"] += 1
             continue
+        if av and av in submitted_av_keys(state):
+            stats["skipped_state"] += 1
+            continue
         if state_has_row(state, row):
             stats["skipped_state"] += 1
             continue
@@ -418,6 +459,7 @@ def run_batch(
     preflight: bool,
     sync_auth: bool,
     ignore_state: bool,
+    refresh_inventory: bool = False,
     quiet: bool = False,
 ) -> dict[str, Any]:
     report = load_report(report_path)
@@ -425,6 +467,16 @@ def run_batch(
     remote_parent_id = resolve_remote_parent_id(report, parent_id_override)
 
     state = empty_state() if ignore_state else load_state(state_path)
+    if refresh_inventory and not ignore_state:
+        inv = refresh_save_inventory(
+            parent_id=remote_parent_id,
+            sync_auth=sync_auth,
+        )
+        if not quiet:
+            print(
+                f"[info] refreshed Save inventory av_any={inv.get('total_av_any_on_save')} "
+                f"video_av={inv.get('total_av_with_video')}",
+            )
     already_on_save = load_already_on_save_avs(state=None if ignore_state else state)
     if not ignore_state:
         state["schema_version"] = STATE_SCHEMA_VERSION
@@ -585,8 +637,21 @@ def main() -> int:
         action="store_true",
         help="Do not read/write state file",
     )
+    parser.add_argument(
+        "--refresh-save-inventory",
+        action="store_true",
+        help="Walk Save folder and refresh already-on-drive JSON before planning (slow)",
+    )
+    parser.add_argument(
+        "--no-refresh-save-inventory",
+        action="store_true",
+        help="Skip automatic inventory refresh on --apply",
+    )
     parser.add_argument("--json", action="store_true", help="Print stats JSON on stdout")
     args = parser.parse_args()
+    refresh_inventory = bool(args.refresh_save_inventory)
+    if args.apply and not args.no_refresh_save_inventory and not args.ignore_state:
+        refresh_inventory = True
 
     try:
         stats = run_batch(
@@ -599,6 +664,7 @@ def main() -> int:
             preflight=args.preflight,
             sync_auth=not args.no_auth_sync,
             ignore_state=args.ignore_state,
+            refresh_inventory=refresh_inventory,
             quiet=args.json,
         )
     except Exception as exc:

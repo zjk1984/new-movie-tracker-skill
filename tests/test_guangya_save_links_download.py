@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from guangya_save_links_download import (  # noqa: E402
+    _inventory_avs_for_skip,
     build_av_magnet_queue,
+    load_already_on_save_avs,
     migrate_state,
     select_pending_rows,
     state_has_av,
@@ -73,6 +75,23 @@ class StateMigrationTests(unittest.TestCase):
         self.assertEqual(new["queue_mode"], "one_magnet_per_av")
 
 
+class SkipInventoryTests(unittest.TestCase):
+    def test_inventory_skip_includes_sidecar_and_any(self) -> None:
+        payload = {
+            "av_numbers": ["V-1"],
+            "sidecar_only_av": ["N-1", "N-2"],
+            "av_any_on_save": ["A-1", "A-2"],
+        }
+        self.assertEqual(_inventory_avs_for_skip(payload), ["A-1", "A-2"])
+        payload2 = {"av_numbers": ["V-1"], "sidecar_only_av": ["N-1"]}
+        self.assertEqual(set(_inventory_avs_for_skip(payload2)), {"V-1", "N-1"})
+
+    def test_load_already_on_save_merges_state(self) -> None:
+        state = {"av_numbers": {"S-1": {"uri": "magnet:x"}}}
+        found = load_already_on_save_avs(state=state, merge_path=Path("/nonexistent"))
+        self.assertIn("S-1", found)
+
+
 class SelectPendingTests(unittest.TestCase):
     def test_skips_by_av_and_respects_limit(self) -> None:
         queue = [
@@ -94,6 +113,22 @@ class SelectPendingTests(unittest.TestCase):
         self.assertEqual(pending[0]["av_number"], "B-1")
         self.assertEqual(next_idx, 2)
         self.assertEqual(stats["skipped_state"], 1)
+
+    def test_skips_sidecar_only_on_save(self) -> None:
+        queue = [
+            {"uri": "magnet:?xt=urn:btih:a", "av_number": "A-1"},
+            {"uri": "magnet:?xt=urn:btih:b", "av_number": "B-1"},
+        ]
+        pending, next_idx, stats = select_pending_rows(
+            queue,
+            {"av_numbers": {}, "uris": {}},
+            start_index=0,
+            limit=10,
+            already_on_save={"A-1"},
+        )
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["av_number"], "B-1")
+        self.assertEqual(stats["skipped_already_on_save"], 1)
 
 
 if __name__ == "__main__":
