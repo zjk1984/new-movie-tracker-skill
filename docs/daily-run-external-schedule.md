@@ -143,7 +143,9 @@ See **铁律** above. Wakes the **Project conversation** at Beijing **:55 every 
 4. `forum37-wake-1755-bj`
 5. `hourly-wake-non-slot-bj`
 
-List subscriptions: `list_subscriptions` (cursor-subscriptions MCP). Re-subscribe before `expiresAt` (~7 days).
+List subscriptions: `list_subscriptions` (cursor-subscriptions MCP). Server assigns `expiresAt` (~7 days).
+
+**Auto-renew (four timers; skip forum37 while paused):** `./scripts/cursor_timer_renew.sh --json-spec` is the single source of truth. **`daily-wake-0655-bj`** prompt (daily Beijing) runs `restart_daily_supervisor.sh` then MCP renew if any of the four is missing or expires within **72h** (unsubscribe all four IDs, re-subscribe, `--record` → `data/cursor_timer_subscriptions.json`). **`hourly_wake_heartbeat.sh`** logs stale/expiring cache to `data/cursor_timer_renewal.log` via `--warn-if-stale` (no MCP from cron).
 
 ---
 

@@ -130,6 +130,7 @@ def collect_save_inventory(
                 av_sidecar_only.add(av)
 
     sidecar_only_av = sorted(av for av in av_sidecar_only if av not in av_has_video)
+    av_any_on_save = sorted(av_any)
     video_samples = [
         str(r.get("name") or "")
         for r in sorted(video_rows, key=lambda x: str(x.get("name") or ""))[:5]
@@ -148,11 +149,16 @@ def collect_save_inventory(
         "extension_breakdown": dict(ext_counter.most_common()),
         "total_av_with_video": len(av_has_video),
         "sidecar_only_av_count": len(sidecar_only_av),
+        "total_av_any_on_save": len(av_any_on_save),
         "av_numbers": sorted(av_has_video.keys()),
+        "av_any_on_save": av_any_on_save,
         "av_sample_video_names": {k: av_has_video[k] for k in sorted(av_has_video)[:20]},
-        "sidecar_only_av": sidecar_only_av[:100],
+        "sidecar_only_av": sidecar_only_av,
         "video_path_samples": video_samples,
-        "legacy_note": "av_numbers lists 番号 with at least one video file (not NFO/poster-only)",
+        "legacy_note": (
+            "av_numbers = 番号 with video; av_any_on_save = any file on Save (NFO/sidecar/video) "
+            "— use av_any_on_save for cloud-add skip"
+        ),
     }
 
 
