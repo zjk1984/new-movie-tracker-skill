@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENSURE="$ROOT/scripts/ensure_cron_running.sh"
+RENEW_WARN="$ROOT/scripts/cursor_timer_renew.sh"
 LOG="$ROOT/data/hourly_wake.log"
 
 mkdir -p "$ROOT/data"
@@ -27,6 +28,9 @@ main() {
     else
       log_line "[err] missing executable $ENSURE"
       exit 1
+    fi
+    if [[ -x "$RENEW_WARN" ]]; then
+      "$RENEW_WARN" --warn-if-stale || true
     fi
     log_line "=== hourly_wake_heartbeat done ==="
   } >>"$LOG" 2>&1
