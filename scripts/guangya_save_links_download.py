@@ -144,10 +144,6 @@ def load_already_on_save_avs(
         except (OSError, json.JSONDecodeError):
             pass
     if state:
-        for av in state.get("already_in_save_av") or []:
-            key = canonical_av_number(str(av))
-            if key:
-                found.add(key)
         for av in (state.get("av_numbers") or {}).keys():
             key = canonical_av_number(str(av))
             if key:
