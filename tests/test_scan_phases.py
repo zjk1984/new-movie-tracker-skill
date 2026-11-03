@@ -9,8 +9,30 @@ from unittest.mock import MagicMock, patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from scan import dedupe_candidates  # noqa: E402
+from scan import ForumListResult, dedupe_candidates, needs_forum_list_retry  # noqa: E402
 from scan_phases import scrape_two_phase, staging_dir  # noqa: E402
+
+
+class NeedsForumListRetryTests(unittest.TestCase):
+    def test_retries_when_pages_scanned_but_zero_rows(self) -> None:
+        result = ForumListResult(
+            forum_url="https://example/forum-1.html",
+            candidates=[],
+            total_posts=0,
+            pages_scanned=10,
+            stopped="ok",
+        )
+        self.assertTrue(needs_forum_list_retry(result))
+
+    def test_no_retry_when_rows_seen_but_no_date_match(self) -> None:
+        result = ForumListResult(
+            forum_url="https://example/forum-1.html",
+            candidates=[],
+            total_posts=30,
+            pages_scanned=3,
+            stopped="ok",
+        )
+        self.assertFalse(needs_forum_list_retry(result))
 
 
 class DedupeCandidatesTests(unittest.TestCase):
