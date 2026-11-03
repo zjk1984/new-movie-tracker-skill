@@ -222,6 +222,8 @@ Each run writes a timestamped markdown file under `update/` grouped by category.
 
 After a **successful** `scripts/guangya_downloads_dedupe.sh` pipeline (dedupe → optional JAV scrape → optional audit incremental), the shell calls `scripts/guangya_dedupe_feishu.py`, which uses `feishu_notify.send_guangya_dedupe_done` with the same `.env.local` credentials as `daily_run.py`.
 
+Default folders: `downloads`, `JAV`, and root **`Save`** (within-folder UC > C > size; cross-folder keeps the best copy in **`downloads`** when the same 番号 appears in Save and/or JAV).
+
 - Summary snapshot: `data/guangya_dedupe_last_run.json`
 - Log: `data/guangya_dedupe.log`
 - Skips send with `[info] feishu skip` when app credentials or `FEISHU_RECEIVE_ID` are missing

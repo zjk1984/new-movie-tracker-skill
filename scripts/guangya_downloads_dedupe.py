@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Deduplicate GuangYa ``downloads`` and ``JAV`` JAV videos (UC > C > size).
+"""Deduplicate GuangYa ``downloads``, ``JAV``, and ``Save`` JAV videos (UC > C > size).
 
 Phase 1: within each folder, trash duplicate 番号 copies.
-Phase 2: cross-folder (``downloads`` + ``JAV``): keep best in ``downloads``, trash dupes in ``JAV`` (and extras in downloads).
+Phase 2: cross-folder (any pair/triple among configured folders): keep best in ``downloads``,
+trash dupes in other folders (e.g. ``JAV``, ``Save``) and extras in ``downloads``.
 
 Default: dry-run. Pass ``--apply`` to delete via guangyapan-drive Skill ``delete_files``.
 """
@@ -152,8 +153,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="GuangYa downloads/JAV JAV dedupe")
     parser.add_argument(
         "--folders",
-        default="downloads,JAV",
-        help="GuangYa root folders (default: downloads,JAV)",
+        default="downloads,JAV,Save",
+        help="GuangYa root folders (default: downloads,JAV,Save)",
     )
     parser.add_argument("--apply", action="store_true", help="Delete duplicate files (default: dry-run)")
     parser.add_argument("--skip-within-folder", action="store_true")
