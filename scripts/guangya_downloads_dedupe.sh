@@ -7,7 +7,7 @@ cd "$ROOT"
 mkdir -p data
 export TZ="${TZ:-Asia/Shanghai}"
 
-export GUANGYA_DEDUPE_FOLDERS="${GUANGYA_DEDUPE_FOLDERS:-downloads,JAV}"
+export GUANGYA_DEDUPE_FOLDERS="${GUANGYA_DEDUPE_FOLDERS:-downloads,JAV,Save}"
 SUMMARY="$ROOT/scripts/guangya_dedupe_summary.py"
 FEISHU="$ROOT/scripts/guangya_dedupe_feishu.py"
 

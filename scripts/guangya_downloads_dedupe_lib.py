@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""GuangYa ``downloads`` / ``JAV`` listing helpers for dedupe."""
+"""GuangYa ``downloads`` / ``JAV`` / ``Save`` listing helpers for dedupe."""
 from __future__ import annotations
 
 from typing import Any, Callable
