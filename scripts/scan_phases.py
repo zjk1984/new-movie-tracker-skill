@@ -350,6 +350,17 @@ def scrape_two_phase(args) -> None:
         f"[info] phase 1 done: {len(candidates)} candidates, "
         f"{total_pages_scanned} pages, saved {candidates_path}",
     )
+    if (
+        total_pages_scanned > 0
+        and total_posts == 0
+        and not candidates
+        and not getattr(args, "batch_mode", False)
+    ):
+        scan_log(
+            "[err] phase 1: 0 list rows on all forums after retry "
+            "(Cloudflare/anti-bot or parse failure — not a real empty day)",
+        )
+        raise SystemExit(1)
 
     feishu_progress_sent = 0
     feishu_progress_sent = maybe_send_feishu_progress(

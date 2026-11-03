@@ -1084,9 +1084,18 @@ def list_forum_pages(
 
 def needs_forum_list_retry(result: ForumListResult) -> bool:
     """True when phase-1 list scan should be retried serially (CF or empty list)."""
-    return result.stopped == "break_forum" or (
-        result.pages_scanned == 0 and not result.candidates
-    )
+    if result.stopped == "break_forum":
+        return True
+    if result.pages_scanned == 0 and not result.candidates:
+        return True
+    # CF sometimes clears but DOM has no thread rows; do not treat as "forum empty".
+    if (
+        result.pages_scanned > 0
+        and result.total_posts == 0
+        and not result.candidates
+    ):
+        return True
+    return False
 
 
 def _thread_defers_javdb_gate(item: dict) -> bool:
