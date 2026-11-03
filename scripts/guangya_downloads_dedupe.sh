@@ -8,7 +8,6 @@ mkdir -p data
 export TZ="${TZ:-Asia/Shanghai}"
 
 export GUANGYA_DEDUPE_FOLDERS="${GUANGYA_DEDUPE_FOLDERS:-downloads,JAV,Save}"
-export GUANGYA_DEDUPE_CROSS_PRIORITY="${GUANGYA_DEDUPE_CROSS_PRIORITY:-downloads,Save,JAV}"
 SUMMARY="$ROOT/scripts/guangya_dedupe_summary.py"
 FEISHU="$ROOT/scripts/guangya_dedupe_feishu.py"
 
