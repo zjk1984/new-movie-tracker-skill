@@ -3,8 +3,9 @@
 """Deduplicate GuangYa ``downloads``, ``JAV``, and ``Save`` JAV videos (UC > C > size).
 
 Phase 1: within each folder, trash duplicate 番号 copies.
-Phase 2: cross-folder (any pair/triple among configured folders): keep best in ``downloads``,
-trash dupes in other folders (e.g. ``JAV``, ``Save``) and extras in ``downloads``.
+Phase 2: cross-folder among configured folders — keeper folder = highest priority present
+(default priority ``downloads`` > ``Save`` > ``JAV``; override ``GUANGYA_DEDUPE_CROSS_PRIORITY``).
+Keep best file in keeper folder; trash lower-priority folders (+ extras in keeper).
 
 Default: dry-run. Pass ``--apply`` to delete via guangyapan-drive Skill ``delete_files``.
 """
@@ -22,17 +23,17 @@ load_env_local()
 
 from guangya_cloud_cli import delete_remote_files, login_status  # noqa: E402
 from guangya_downloads_dedupe_lib import (  # noqa: E402
+    cross_folder_dup_groups_tiered,
+    cross_folder_priority_from_env,
     list_jav_video_rows_in_folder,
+    pick_tiered_cross_folder_keeper_and_trash,
     resolve_guangya_folder_id,
 )
 from pikpak_downloads_dedupe_lib import (  # noqa: E402
     DEDUPE_FOLDER_TAG,
-    DOWNLOADS_KEEPER_FOLDER,
-    cross_folder_dup_groups,
     cross_folder_enabled_from_env,
     group_tagged_files_by_av_number,
     parse_folder_list,
-    pick_cross_folder_keeper_and_trash,
     pick_keeper_and_trash,
     pseudo_as_jav_from_env,
     within_folder_enabled_from_env,
@@ -78,7 +79,7 @@ def run_dedupe(
     apply: bool,
     within_folder: bool,
     cross_folder: bool,
-    keeper_folder: str,
+    cross_folder_priority: list[str],
 ) -> dict[str, Any]:
     _, login_payload, _ = login_status()
     logged_in = (login_payload.get("data") or {}).get("logged_in")
@@ -106,6 +107,8 @@ def run_dedupe(
         "skipped_non_av": skipped,
         "within_groups": 0,
         "cross_groups": 0,
+        "cross_folder_priority": list(cross_folder_priority),
+        "cross_groups_by_keeper": {},
         "trash_candidates": 0,
         "trashed_ok": 0,
         "groups": [],
@@ -133,17 +136,32 @@ def run_dedupe(
                 )
 
     if cross_folder and len(folders) > 1:
-        cross = cross_folder_dup_groups(av_groups, keeper_folder=keeper_folder)
+        cross = cross_folder_dup_groups_tiered(av_groups)
+        by_keeper: dict[str, int] = {}
         for av, rows in sorted(cross.items()):
             stats["cross_groups"] += 1
-            keeper, trash_rows = pick_cross_folder_keeper_and_trash(rows, keeper_folder=keeper_folder)
-            kf = str(keeper.get(DEDUPE_FOLDER_TAG) or keeper_folder)
+            kf, keeper, trash_rows = pick_tiered_cross_folder_keeper_and_trash(
+                rows,
+                folder_priority=cross_folder_priority,
+            )
+            by_keeper[kf] = by_keeper.get(kf, 0) + 1
             print(f"[cross] {av} keep in {kf!r} {keeper.get('name')!r}")
             stats["trash_candidates"] += len(trash_rows)
-            details = _trash_rows(trash_rows, apply=apply, trash_ids=trash_ids, trashed_ok=trashed_ok)
-            stats["groups"].append(
-                {"phase": "cross", "av_number": av, "keeper_folder": kf, "trash": details},
+            details = _trash_rows(
+                trash_rows,
+                apply=apply,
+                trash_ids=trash_ids,
+                trashed_ok=trashed_ok,
             )
+            stats["groups"].append(
+                {
+                    "phase": "cross",
+                    "av_number": av,
+                    "keeper_folder": kf,
+                    "trash": details,
+                },
+            )
+        stats["cross_groups_by_keeper"] = by_keeper
 
     stats["trashed_ok"] = trashed_ok[0]
     return stats
@@ -160,9 +178,9 @@ def main() -> int:
     parser.add_argument("--skip-within-folder", action="store_true")
     parser.add_argument("--skip-cross-folder", action="store_true")
     parser.add_argument(
-        "--keeper-folder",
-        default=DOWNLOADS_KEEPER_FOLDER,
-        help="Cross-folder keeper folder name (default: downloads)",
+        "--cross-priority",
+        default="",
+        help="Cross-folder keeper priority (default: env GUANGYA_DEDUPE_CROSS_PRIORITY or downloads,Save,JAV)",
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -174,6 +192,11 @@ def main() -> int:
 
     within = within_folder_enabled_from_env() and not args.skip_within_folder
     cross = cross_folder_enabled_from_env() and not args.skip_cross_folder
+    cross_priority = (
+        parse_folder_list(args.cross_priority)
+        if args.cross_priority.strip()
+        else cross_folder_priority_from_env()
+    )
 
     try:
         stats = run_dedupe(
@@ -181,7 +204,7 @@ def main() -> int:
             apply=args.apply,
             within_folder=within,
             cross_folder=cross,
-            keeper_folder=args.keeper_folder.strip() or DOWNLOADS_KEEPER_FOLDER,
+            cross_folder_priority=cross_priority,
         )
     except Exception as exc:
         print(f"[err] {exc}", file=sys.stderr)
@@ -193,6 +216,7 @@ def main() -> int:
         print(
             f"[info] mode={stats['mode']} files={stats['files_seen']} "
             f"within_groups={stats['within_groups']} cross_groups={stats['cross_groups']} "
+            f"cross_by_keeper={stats.get('cross_groups_by_keeper') or {}} "
             f"trash_candidates={stats['trash_candidates']} trashed_ok={stats['trashed_ok']}",
         )
     from guangya_dedupe_summary import merge_summary
