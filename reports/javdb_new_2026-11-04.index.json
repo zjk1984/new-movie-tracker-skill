@@ -1,0 +1,229 @@
+{
+ "report_type": "javdb_new_index",
+ "date": "2026-11-04",
+ "window": {
+  "days_back": 30,
+  "days_forward": 7,
+  "from": "2026-10-05",
+  "to": "2026-11-11"
+ },
+ "kept_count": 27,
+ "kept": [
+  {
+   "av_number": "IPZZ-998",
+   "release_date": "2026-11-04",
+   "actors": [
+    "佐々木さき"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "WAAA-699",
+   "release_date": "2026-11-04",
+   "actors": [
+    "鈴の家りん"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "YMDD-512",
+   "release_date": "2026-11-04",
+   "actors": [
+    "三木環奈"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "CAWB-060",
+   "release_date": "2026-11-03",
+   "actors": [
+    "伊藤舞雪"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "FJIN-169",
+   "release_date": "2026-11-03",
+   "actors": [
+    "茉城まみ"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "MIDA-845",
+   "release_date": "2026-11-03",
+   "actors": [
+    "葵いぶき"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "CJOD-541",
+   "release_date": "2026-10-27",
+   "actors": [
+    "宍戸里帆"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "DSOD-111",
+   "release_date": "2026-10-27",
+   "actors": [
+    "三木環奈"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "LOCK-019",
+   "release_date": "2026-10-27",
+   "actors": [
+    "三木環奈"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "SNOS-420",
+   "release_date": "2026-10-27",
+   "actors": [
+    "白上咲花"
+   ],
+   "tier": "UC"
+  },
+  {
+   "av_number": "SNOS-449",
+   "release_date": "2026-10-27",
+   "actors": [
+    "河北彩花"
+   ],
+   "tier": "UC"
+  },
+  {
+   "av_number": "FNS-256",
+   "release_date": "2026-10-22",
+   "actors": [
+    "つばさ舞"
+   ],
+   "tier": "C"
+  },
+  {
+   "av_number": "MIDA-823",
+   "release_date": "2026-10-21",
+   "actors": [
+    "宮下玲奈"
+   ],
+   "tier": "UC"
+  },
+  {
+   "av_number": "MIDA-826",
+   "release_date": "2026-10-21",
+   "actors": [
+    "九野ひなの"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "GVH-889",
+   "release_date": "2026-10-20",
+   "actors": [
+    "三木環奈"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "HMN-919",
+   "release_date": "2026-10-20",
+   "actors": [
+    "鈴の家りん"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "REBD-1075",
+   "release_date": "2026-10-15",
+   "actors": [
+    "青空ひかり"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "REBDB-1060",
+   "release_date": "2026-10-15",
+   "actors": [
+    "青空ひかり"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "FWAY-104",
+   "release_date": "2026-10-14",
+   "actors": [
+    "瀬戸環奈"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "DSOD-083",
+   "release_date": "2026-10-13",
+   "actors": [
+    "栗山莉緒"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "SNOS-366",
+   "release_date": "2026-10-13",
+   "actors": [
+    "清原みゆう"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "MIDA-794",
+   "release_date": "2026-10-07",
+   "actors": [
+    "うんぱい"
+   ],
+   "tier": "UC"
+  },
+  {
+   "av_number": "START-602",
+   "release_date": "2026-10-07",
+   "actors": [
+    "MINAMO"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "CAWB-019",
+   "release_date": "2026-10-06",
+   "actors": [
+    "伊藤舞雪"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "MIDA-806",
+   "release_date": "2026-10-06",
+   "actors": [
+    "葵いぶき"
+   ],
+   "tier": "cnsub"
+  },
+  {
+   "av_number": "MIDA-807",
+   "release_date": "2026-10-06",
+   "actors": [
+    "八木奈々"
+   ],
+   "tier": "plain"
+  },
+  {
+   "av_number": "MNGS-068",
+   "release_date": "2026-10-06",
+   "actors": [
+    "七瀬アリス"
+   ],
+   "tier": "plain"
+  }
+ ]
+}
